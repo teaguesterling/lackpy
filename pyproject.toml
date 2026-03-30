@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lackpy"
+version = "0.1.0"
+description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+ollama = ["ollama>=0.4"]
+sandbox = ["nsjail-python"]
+anthropic = ["anthropic>=0.40"]
+mcp = ["mcp[cli]"]
+fledgling = ["fledgling"]
+blq = ["blq-cli"]
+full = ["lackpy[ollama,sandbox,anthropic,mcp,fledgling,blq]"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+lackpy = "lackpy.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lackpy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "ollama: requires a running Ollama instance",
+]
