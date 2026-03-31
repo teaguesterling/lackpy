@@ -220,7 +220,7 @@ class LackpyService:
         finally:
             os.chdir(prev_cwd)
         total_ms = (time.perf_counter() - start) * 1000
-        return {
+        result = {
             "success": exec_result.success,
             "program": gen_result.program,
             "grade": {"w": resolved.grade.w, "d": resolved.grade.d},
@@ -236,6 +236,24 @@ class LackpyService:
             "output": exec_result.output,
             "error": exec_result.error,
         }
+        self._log_trace(result, intent)
+        return result
+
+    def _log_trace(self, result: dict[str, Any], intent: str) -> None:
+        """Append delegation result to .lackpy/traces.jsonl for agent-riggs."""
+        import json
+        from datetime import UTC, datetime
+
+        log_dir = self._workspace / ".lackpy"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "traces.jsonl"
+        entry = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "intent": intent,
+            **result,
+        }
+        with log_path.open("a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
 
     async def create(self, program: str, kit: str | list[str] | dict | None = None,
                      name: str = "", pattern: str | None = None) -> dict[str, Any]:

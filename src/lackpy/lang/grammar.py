@@ -4,7 +4,7 @@ import ast
 
 ALLOWED_NODES: set[type] = {
     # Structural
-    ast.Module, ast.Expr, ast.Assign, ast.AugAssign,
+    ast.Module, ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign,
     ast.For, ast.If, ast.With, ast.withitem,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
