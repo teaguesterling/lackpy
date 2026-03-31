@@ -18,7 +18,7 @@ def test_no_open_hint_when_read_not_available():
 def test_functiondef_hint():
     errors = ["Forbidden AST node: FunctionDef at line 1"]
     result = enrich_errors(errors, "")
-    assert any("Do not write function definitions" in h for h in result)
+    assert any("Use the tools to find" in h for h in result)
 
 
 def test_lambda_hint():
@@ -30,7 +30,7 @@ def test_lambda_hint():
 def test_import_hint():
     errors = ["Forbidden AST node: Import at line 1"]
     result = enrich_errors(errors, "")
-    assert any("import" in h.lower() for h in result)
+    assert any("already available" in h for h in result)
 
 
 def test_no_hints_for_unknown_errors():
@@ -45,5 +45,5 @@ def test_multiple_hints():
         "Forbidden AST node: FunctionDef at line 3",
     ]
     result = enrich_errors(errors, "  read(path) -> str: Read file")
-    hints = [h for h in result if h != "--- Hints ---" and h not in errors]
+    hints = [h for h in result if h != "--- Suggestions ---" and h not in errors]
     assert len(hints) >= 2

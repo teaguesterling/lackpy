@@ -1,23 +1,22 @@
 """Pattern-specific error hints for inference retry feedback.
 
-When validation fails, these hints provide actionable guidance to the model
-instead of raw validation errors. The model self-corrects better with
-specific instructions like "Use read(path), not open()" than with
-"Forbidden name: 'open' at line 3".
+All hints use positive language ("use X instead") rather than negative
+("don't use Y"). Stress tests show 1.5B models respond better to
+positive redirection than negative restriction.
 """
 
 from __future__ import annotations
 
 
 def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
-    """Augment validation errors with actionable hints.
+    """Augment validation errors with actionable positive hints.
 
     Args:
         errors: Raw validation error strings.
         namespace_desc: The namespace description (to check available tools).
 
     Returns:
-        Enriched error list with hints appended where patterns match.
+        Enriched error list with positive hints appended where patterns match.
     """
     enriched = list(errors)
     hints: list[str] = []
@@ -26,40 +25,37 @@ def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
 
     # open() instead of read()
     if "open" in error_text and "read(" in namespace_desc:
-        hints.append("Use read(path) to read files, not open(). open() is not available.")
+        hints.append("Use read(path) to get file contents.")
 
     # Model wrote a function definition instead of calling a tool
     if "functiondef" in error_text:
         hints.append(
-            "Do not write function definitions. Call the tools already available "
-            "in the namespace instead."
+            "Use the tools to find and modify existing code. "
+            "Call find_definitions() to locate functions, edit() to modify them."
         )
 
-    # Lambda usage (sorting)
+    # Lambda usage outside key= (if still rejected)
     if "lambda" in error_text:
-        hints.append("Use sort_by(items, key) for sorting instead of lambda expressions.")
+        hints.append("Use sort_by(items, key_name) for sorting, or key=lambda for sorted().")
 
     # Import attempts
     if "import" in error_text:
-        hints.append(
-            "Do not use import statements. All needed functions are already "
-            "available in the namespace."
-        )
+        hints.append("All needed functions are already available in the namespace.")
 
     # While loop
     if "while" in error_text:
-        hints.append("Use for-loops with range() or iterate over a variable instead of while loops.")
+        hints.append("Use for-loops with range() or iterate over a list variable.")
 
     # Class definition
     if "classdef" in error_text:
-        hints.append("Do not define classes. Use the available tools and builtins directly.")
+        hints.append("Use the available tools and builtins directly.")
 
     # Try/except
     if "try" in error_text or "excepthandler" in error_text:
-        hints.append("Do not use try/except. Let errors propagate to the caller.")
+        hints.append("Let errors propagate to the caller.")
 
     if hints:
-        enriched.append("--- Hints ---")
+        enriched.append("--- Suggestions ---")
         enriched.extend(hints)
 
     return enriched

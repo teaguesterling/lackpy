@@ -26,6 +26,14 @@ def test_excludes_params_section_when_empty():
     assert "Pre-set variables" not in prompt
 
 
-def test_includes_restrictions():
+def test_includes_orchestration_guidance():
     prompt = build_system_prompt(namespace_desc="")
-    assert "Not available" in prompt
+    assert "orchestrate tools" in prompt
+
+def test_includes_read_guidance():
+    prompt = build_system_prompt(namespace_desc="")
+    assert "read(path)" in prompt
+
+def test_no_forbidden_list():
+    prompt = build_system_prompt(namespace_desc="")
+    assert "Not available" not in prompt

@@ -13,14 +13,14 @@ Output ONLY the cell contents — no markdown, no explanation, no code fences.
 Assign tool results to variables and reuse them. Never call the same function twice \
 when you can reuse a variable.
 
+You orchestrate tools to find and modify existing code. \
+Use read(path) to get file contents.
+
 Kernel namespace:
 {namespace_desc}
 
 Builtins: {builtins_list}
-{params_section}\
-Not available: import, def, class, while, try/except, lambda, open
-
-The cell's last expression is displayed as output."""
+{params_section}"""
 
 
 def build_system_prompt(namespace_desc: str, params_desc: str | None = None) -> str:
