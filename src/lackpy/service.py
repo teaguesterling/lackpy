@@ -23,6 +23,17 @@ from .run.runner import RestrictedRunner
 
 
 class LackpyService:
+    """Unified service layer orchestrating the lackpy pipeline.
+
+    Both the MCP server and CLI are thin adapters over this class.
+    Initialize with a workspace path to set the working directory
+    for tool execution.
+
+    Args:
+        workspace: Root directory for tool execution. Defaults to cwd.
+        config: Override configuration. Loaded from .lackpy/config.toml if not provided.
+    """
+
     def __init__(self, workspace: Path | None = None, config: LackpyConfig | None = None) -> None:
         self._workspace = workspace or Path.cwd()
         self._config = config or load_config(self._workspace)
@@ -77,6 +88,17 @@ class LackpyService:
 
     def validate(self, program: str, kit: str | list[str] | dict | None = None,
                  rules: list | None = None, param_names: set[str] | None = None) -> ValidationResult:
+        """Validate a lackpy program against a kit's allowed names.
+
+        Args:
+            program: The lackpy program source to validate.
+            kit: Kit name, list of tool names, or dict mapping. Defaults to config default.
+            rules: Additional validation rules to apply beyond core checks.
+            param_names: Extra names (e.g. parameter names) to allow in the program.
+
+        Returns:
+            A ValidationResult indicating whether the program is valid.
+        """
         resolved = self._resolve_kit(kit)
         allowed = set(resolved.tools.keys())
         if param_names:
@@ -85,6 +107,20 @@ class LackpyService:
 
     async def generate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None) -> GenerationResult:
+        """Generate a lackpy program from a natural language intent.
+
+        Args:
+            intent: Natural language description of the desired program.
+            kit: Kit name, list of tool names, or dict mapping.
+            params: Named input values available to the generated program.
+            rules: Additional validation rules the generated program must satisfy.
+
+        Returns:
+            A GenerationResult with the generated program and provider metadata.
+
+        Raises:
+            RuntimeError: If all inference providers fail to produce a valid program.
+        """
         resolved = self._resolve_kit(kit)
         _, params_desc, param_names = self._resolve_params(params, resolved)
         dispatcher = InferenceDispatcher(providers=self._inference_providers)
@@ -97,6 +133,21 @@ class LackpyService:
     async def run_program(self, program: str, kit: str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None) -> ExecutionResult:
+        """Validate and execute a lackpy program.
+
+        Validates the program before running it; returns a failed ExecutionResult
+        immediately if validation fails rather than raising.
+
+        Args:
+            program: The lackpy program source to execute.
+            kit: Kit name, list of tool names, or dict mapping.
+            params: Named input values injected into the execution namespace.
+            sandbox: Reserved for future sandbox configuration (unused).
+            rules: Additional validation rules to apply before execution.
+
+        Returns:
+            An ExecutionResult with output, trace, and success status.
+        """
         resolved = self._resolve_kit(kit)
         param_values, _, param_names = self._resolve_params(params, resolved)
         allowed = set(resolved.tools.keys()) | param_names
@@ -113,6 +164,26 @@ class LackpyService:
     async def delegate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
                        rules: list | None = None) -> dict[str, Any]:
+        """Generate and execute a program from a natural language intent in one step.
+
+        Combines generate and run_program: generates a program from intent, then
+        executes it, returning a combined result dict with timing and trace details.
+
+        Args:
+            intent: Natural language description of the desired program.
+            kit: Kit name, list of tool names, or dict mapping.
+            params: Named input values available to the program.
+            sandbox: Reserved for future sandbox configuration (unused).
+            rules: Additional validation rules for generation and execution.
+
+        Returns:
+            A dict with keys: success, program, grade, generation_tier,
+            generation_time_ms, execution_time_ms, total_time_ms, trace,
+            files_read, files_modified, output, error.
+
+        Raises:
+            RuntimeError: If all inference providers fail to produce a valid program.
+        """
         start = time.perf_counter()
         resolved = self._resolve_kit(kit)
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
@@ -143,6 +214,18 @@ class LackpyService:
 
     async def create(self, program: str, kit: str | list[str] | dict | None = None,
                      name: str = "", pattern: str | None = None) -> dict[str, Any]:
+        """Validate a program and save it as a named template.
+
+        Args:
+            program: The lackpy program source to save.
+            kit: Kit name, list of tool names, or dict mapping used for validation.
+            name: Template name (used as the filename stem).
+            pattern: Optional intent pattern string for template matching.
+
+        Returns:
+            A dict with keys: success (bool), path (str) on success,
+            or errors (list) on validation failure.
+        """
         resolved = self._resolve_kit(kit)
         validation = validate(program, allowed_names=set(resolved.tools.keys()))
         if not validation.valid:
@@ -158,6 +241,19 @@ class LackpyService:
         return {"success": True, "path": str(template_file)}
 
     def kit_info(self, kit: str | list[str] | dict) -> dict[str, Any]:
+        """Return metadata for a resolved kit.
+
+        Args:
+            kit: Kit name, list of tool names, or dict mapping.
+
+        Returns:
+            A dict with keys: tools (mapping of tool name to spec dict),
+            grade (w and d values), and description (formatted namespace string).
+
+        Raises:
+            KeyError: If the kit references an unknown tool.
+            FileNotFoundError: If a named kit file does not exist.
+        """
         resolved = self._resolve_kit(kit)
         return {
             "tools": {name: {"description": spec.description, "grade_w": spec.grade_w,
@@ -168,12 +264,28 @@ class LackpyService:
         }
 
     def kit_list(self) -> list[dict[str, str]]:
+        """List all kit files in the workspace configuration directory.
+
+        Returns:
+            A list of dicts with keys: name (stem) and path (absolute path string).
+            Returns an empty list if the kits directory does not exist.
+        """
         kits_dir = self._config.config_dir / "kits"
         if not kits_dir.exists():
             return []
         return [{"name": p.stem, "path": str(p)} for p in sorted(kits_dir.glob("*.kit"))]
 
     def kit_create(self, name: str, tools: list[str], description: str | None = None) -> dict[str, Any]:
+        """Create a new kit file in the workspace configuration directory.
+
+        Args:
+            name: Kit name used as the filename stem.
+            tools: List of tool names to include in the kit.
+            description: Optional human-readable description written to the kit frontmatter.
+
+        Returns:
+            A dict with keys: name, path (absolute path string), and tools.
+        """
         kits_dir = self._config.config_dir / "kits"
         kits_dir.mkdir(parents=True, exist_ok=True)
         kit_file = kits_dir / f"{name}.kit"
@@ -185,6 +297,12 @@ class LackpyService:
         return {"name": name, "path": str(kit_file), "tools": tools}
 
     def toolbox_list(self) -> list[dict[str, Any]]:
+        """List all registered tools across all providers.
+
+        Returns:
+            A list of dicts with keys: name, provider, description,
+            grade_w, and effects_ceiling for each registered tool.
+        """
         return [{"name": s.name, "provider": s.provider, "description": s.description,
                  "grade_w": s.grade_w, "effects_ceiling": s.effects_ceiling}
                 for s in self.toolbox.list_tools()]

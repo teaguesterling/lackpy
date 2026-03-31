@@ -16,8 +16,30 @@ def _sort_by(items, key, reverse=False):
 
 
 class RestrictedRunner:
+    """Execute validated lackpy programs via AST compilation.
+
+    Programs are compiled from validated ASTs and run with empty
+    ``__builtins__`` and a controlled namespace. Each tool call is
+    wrapped to record timing and results in the trace.
+    """
+
     def run(self, program: str, namespace: dict[str, Callable],
             params: dict[str, Any] | None = None) -> ExecutionResult:
+        """Compile and execute a lackpy program in a restricted namespace.
+
+        The program's last expression (if any) is captured as the output.
+        All other top-level assignments are returned in ``variables``.
+
+        Args:
+            program: The lackpy program source to execute.
+            namespace: Mapping of tool names to callables, injected into the
+                execution globals alongside allowed builtins.
+            params: Named parameter values to inject into the namespace.
+
+        Returns:
+            An ExecutionResult with success, output, trace, and variables.
+            Returns a failed result on parse errors or runtime exceptions.
+        """
         trace = Trace()
         param_names = set(params.keys()) if params else set()
 

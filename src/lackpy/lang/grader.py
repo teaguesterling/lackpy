@@ -7,6 +7,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Grade:
+    """Security grade for a tool kit.
+
+    Attributes:
+        w: World coupling (0=pure, 1=pinhole read, 2=scoped exec, 3=scoped write).
+        d: Effects ceiling.
+    """
+
     w: int  # world coupling (0=pure, 1=pinhole read, 2=scoped exec, 3=scoped write)
     d: int  # effects ceiling
 
@@ -19,6 +26,19 @@ DEFAULT_EFFECTS_CEILING = 3
 
 
 def compute_grade(tools: dict[str, dict]) -> Grade:
+    """Compute the aggregate security grade for a set of tools.
+
+    Takes the maximum ``grade_w`` and ``effects_ceiling`` across all tools,
+    defaulting to 3 for tools that omit either field.
+
+    Args:
+        tools: Mapping of tool name to a dict containing optional keys
+            ``grade_w`` and ``effects_ceiling``.
+
+    Returns:
+        A Grade with the maximum w and d values across all tools.
+        Returns Grade(w=0, d=0) for an empty tool set.
+    """
     if not tools:
         return Grade(w=0, d=0)
     max_w = 0

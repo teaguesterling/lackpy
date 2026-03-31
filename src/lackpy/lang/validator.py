@@ -10,6 +10,15 @@ from .grammar import ALLOWED_NODES, FORBIDDEN_NAMES, ALLOWED_BUILTINS
 
 @dataclass
 class ValidationResult:
+    """Result of validating a lackpy program.
+
+    Attributes:
+        valid: Whether the program passed all checks.
+        errors: List of validation error messages.
+        calls: Function names called in the program.
+        variables: Variable names assigned in the program.
+    """
+
     valid: bool
     errors: list[str] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
@@ -21,6 +30,22 @@ def validate(
     allowed_names: set[str] | None = None,
     extra_rules: list | None = None,
 ) -> ValidationResult:
+    """Validate a lackpy program string against the language grammar and namespace.
+
+    Parses the program and runs a multi-step pipeline: AST node allowlist,
+    forbidden name check, namespace check, for-loop iter check, dunder string
+    check, and any extra custom rules.
+
+    Args:
+        program: The lackpy program source code to validate.
+        allowed_names: Set of callable names permitted beyond the core builtins.
+            Typically the tool names from a resolved kit.
+        extra_rules: Additional rule callables ``(ast.Module) -> list[str]``
+            applied after the built-in checks.
+
+    Returns:
+        A ValidationResult with valid=True if no errors were found.
+    """
     if allowed_names is None:
         allowed_names = set()
 

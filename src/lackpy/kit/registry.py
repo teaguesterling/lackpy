@@ -12,6 +12,15 @@ from .toolbox import Toolbox, ToolSpec
 
 @dataclass
 class ResolvedKit:
+    """A fully resolved kit with callables ready for execution.
+
+    Attributes:
+        tools: Mapping of tool name (or alias) to spec.
+        callables: Mapping of tool name (or alias) to callable implementation.
+        grade: Aggregate security grade (join of tool grades).
+        description: Formatted namespace description for inference prompts.
+    """
+
     tools: dict[str, ToolSpec]
     callables: dict[str, Callable[..., Any]]
     grade: Grade
@@ -23,6 +32,31 @@ def resolve_kit(
     toolbox: Toolbox,
     kits_dir: Path | None = None,
 ) -> ResolvedKit:
+    """Resolve a kit specification into a ResolvedKit ready for execution.
+
+    Accepts four forms for ``kit``:
+
+    - ``str``: name of a ``.kit`` file in ``kits_dir``
+    - ``list[str]``: explicit list of tool names
+    - ``dict``: alias-to-tool mapping; values may be a tool name string or a
+      dict with a ``"tool"`` key
+    - ``None``: not yet supported (raises NotImplementedError)
+
+    Args:
+        kit: Kit specification — name, list of names, dict mapping, or None.
+        toolbox: The Toolbox instance from which to resolve tools.
+        kits_dir: Directory containing ``.kit`` files. Defaults to
+            ``.lackpy/kits`` relative to cwd.
+
+    Returns:
+        A ResolvedKit with tools, callables, grade, and description populated.
+
+    Raises:
+        NotImplementedError: If ``kit`` is None (Quartermaster not implemented).
+        FileNotFoundError: If a named kit file is not found in ``kits_dir``.
+        KeyError: If a tool name is not registered in the toolbox.
+        TypeError: If ``kit`` is an unsupported type or contains an unsupported entry type.
+    """
     if kit is None:
         raise NotImplementedError(
             "Quartermaster (automatic kit selection) is not yet implemented. "

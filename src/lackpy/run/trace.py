@@ -10,6 +10,18 @@ from typing import Any, Callable
 
 @dataclass
 class TraceEntry:
+    """A single tool call record in an execution trace.
+
+    Attributes:
+        step: Zero-based index of this call within the program execution.
+        tool: Name of the tool that was called.
+        args: Keyword argument mapping captured at call time.
+        result: Summarized return value, or None if the call failed.
+        duration_ms: Wall-clock time for the call in milliseconds.
+        success: Whether the call completed without raising.
+        error: Error message string if the call raised, otherwise None.
+    """
+
     step: int
     tool: str
     args: dict[str, Any]
@@ -21,12 +33,34 @@ class TraceEntry:
 
 @dataclass
 class Trace:
+    """Execution trace accumulating tool call records and file side-effects.
+
+    Attributes:
+        entries: Ordered list of TraceEntry records, one per tool call.
+        files_read: Paths of files read during execution (populated by tools).
+        files_modified: Paths of files written or modified during execution.
+    """
+
     entries: list[TraceEntry] = field(default_factory=list)
     files_read: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
 
 
 def make_traced(name: str, fn: Callable, trace: Trace) -> Callable:
+    """Wrap a callable to record each invocation in a Trace.
+
+    The wrapper captures positional and keyword arguments, measures wall-clock
+    duration, appends a TraceEntry to ``trace``, and re-raises any exception
+    after recording it.
+
+    Args:
+        name: Tool name to record in each TraceEntry.
+        fn: The callable to wrap.
+        trace: The Trace instance to append entries to.
+
+    Returns:
+        A wrapper callable with the same signature as ``fn``.
+    """
     sig = inspect.signature(fn)
     param_names = list(sig.parameters.keys())
 

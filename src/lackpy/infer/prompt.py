@@ -24,6 +24,19 @@ The cell's last expression is displayed as output."""
 
 
 def build_system_prompt(namespace_desc: str, params_desc: str | None = None) -> str:
+    """Build the system prompt for inference providers.
+
+    Constructs the full instruction prompt from the tool namespace description,
+    allowed builtins, and optional parameter variable descriptions.
+
+    Args:
+        namespace_desc: Formatted string of available tools and their signatures.
+        params_desc: Optional description of pre-set parameter variables; inserted
+            into the prompt when provided.
+
+    Returns:
+        The complete system prompt string ready to send to an inference provider.
+    """
     builtins_list = ", ".join(sorted(ALLOWED_BUILTINS))
     params_section = ""
     if params_desc:
@@ -39,6 +52,19 @@ def build_system_prompt(namespace_desc: str, params_desc: str | None = None) -> 
 
 
 def format_params_description(params: dict) -> str:
+    """Format a parameters dict into a human-readable description string.
+
+    Each parameter is rendered as ``name: type`` optionally followed by a
+    description when the value is a metadata dict.
+
+    Args:
+        params: Mapping of parameter name to either a raw value or a metadata
+            dict with ``"value"``, optional ``"type"``, and optional
+            ``"description"`` keys.
+
+    Returns:
+        A newline-joined string of parameter descriptions.
+    """
     lines = []
     for name, value in params.items():
         if isinstance(value, dict) and "value" in value:

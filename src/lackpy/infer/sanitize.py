@@ -6,6 +6,18 @@ _PREAMBLE_MARKERS = ["here's", "here is", "the following", "the solution"]
 
 
 def sanitize_output(raw: str) -> str:
+    """Strip model artifacts from a raw generated code string.
+
+    Removes leading preamble lines containing common model hedge phrases,
+    and unwraps markdown code fences (``` blocks) if present.
+
+    Args:
+        raw: Raw string output from an inference provider.
+
+    Returns:
+        Cleaned program source with preamble and code fences removed.
+        Returns an empty string if the input is blank.
+    """
     text = raw.strip()
     if not text:
         return ""

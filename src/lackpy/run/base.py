@@ -10,6 +10,16 @@ from .trace import Trace
 
 @dataclass
 class ExecutionResult:
+    """Result of executing a lackpy program.
+
+    Attributes:
+        success: Whether execution completed without error.
+        output: The last expression's value, or None.
+        error: Error message if execution failed.
+        trace: Execution trace with tool call records.
+        variables: Variables assigned during execution (excluding params and internals).
+    """
+
     success: bool
     output: Any = None
     error: str | None = None
