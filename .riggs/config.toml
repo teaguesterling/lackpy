@@ -1,0 +1,35 @@
+[trust]
+score_success = 1.0
+score_suboptimal = 0.7
+score_mode_switch_agent = 0.8
+score_mode_switch_controller = 0.3
+score_failure = 0.2
+score_path_denial = 0.1
+score_repeated_failure = 0.0
+
+alpha_short = 0.4
+alpha_session = 0.08
+alpha_baseline = 0.02
+
+tighten_threshold = 0.3
+auto_tighten_threshold = 0.5
+loosen_threshold = 0.9
+loosen_sustained_turns = 20
+
+[ratchet]
+min_frequency = 5
+min_sessions = 3
+min_success_rate = 0.8
+lookback_days = 30
+
+[sandbox]
+memory_headroom = 2.0
+timeout_headroom = 3.0
+cpu_headroom = 2.0
+min_runs_for_tightening = 5
+
+[metrics]
+default_period_days = 30
+
+[store]
+path = ".riggs/store.duckdb"
