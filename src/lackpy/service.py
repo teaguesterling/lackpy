@@ -45,6 +45,34 @@ from .run.base import ExecutionResult
 from .run.runner import RestrictedRunner
 
 
+def _strip_top_level_return(program: str) -> str:
+    """Rewrite top-level ``return X`` statements to bare expression ``X``.
+
+    Lackey run() bodies are extracted verbatim and may contain ``return``
+    statements.  The lackpy runner executes programs as flat scripts (not
+    inside a function), so bare ``return`` is a syntax error.  This helper
+    converts each top-level ``return X`` to an expression statement ``X``
+    so the runner can capture the value via its last-expression mechanism.
+    """
+    import ast
+    tree = ast.parse(program)
+    new_body = []
+    for node in tree.body:
+        if isinstance(node, ast.Return):
+            if node.value is not None:
+                new_body.append(ast.Expr(
+                    value=node.value,
+                    lineno=node.lineno,
+                    col_offset=node.col_offset,
+                ))
+            # bare ``return`` (None) is simply dropped
+        else:
+            new_body.append(node)
+    tree.body = new_body
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
 class LackpyService:
     """Unified service layer orchestrating the lackpy pipeline.
 
@@ -188,7 +216,8 @@ class LackpyService:
 
     async def delegate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
-                       rules: list | None = None) -> dict[str, Any]:
+                       rules: list | None = None,
+                       _program_override: str | None = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
 
         Combines generate and run_program: generates a program from intent, then
@@ -212,7 +241,15 @@ class LackpyService:
         start = time.perf_counter()
         resolved = self._resolve_kit(kit)
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
-        gen_result = await self.generate(intent, kit, params, rules)
+        if _program_override:
+            from .infer.dispatch import GenerationResult
+            gen_result = GenerationResult(
+                program=_program_override,
+                provider_name="lackey_file",
+                generation_time_ms=0.0,
+            )
+        else:
+            gen_result = await self.generate(intent, kit, params, rules)
         prev_cwd = os.getcwd()
         try:
             os.chdir(self._workspace)
@@ -236,6 +273,65 @@ class LackpyService:
             "output": exec_result.output,
             "error": exec_result.error,
         }
+
+    def parse_lackey(self, path: Path) -> Any:
+        """Parse a Lackey file and extract metadata."""
+        from .lackey.parser import parse_lackey as _parse
+        return _parse(path)
+
+    async def run_lackey(
+        self, path: Path,
+        params: dict[str, Any] | None = None,
+        sandbox: Any = None,
+    ) -> dict[str, Any]:
+        """Load and run a Lackey file."""
+        from .lackey.parser import parse_lackey as _parse
+        import ast as _ast
+
+        info = _parse(path)
+
+        merged_params: dict[str, Any] = {}
+        for name, spec in info.params.items():
+            if params and name in params:
+                merged_params[name] = params[name]
+            elif "default" in spec:
+                merged_params[name] = spec["default"]
+
+        kit = info.tools
+
+        # Convert top-level `return X` to bare expression `X` so the runner can
+        # execute the body as a flat program (return is only valid inside a function).
+        run_body = _strip_top_level_return(info.run_body)
+
+        return await self.delegate(
+            intent="",
+            kit=kit,
+            params=merged_params if merged_params else None,
+            _program_override=run_body,
+        )
+
+    async def create_lackey(
+        self,
+        program: str,
+        name: str,
+        tools: list[str],
+        params: dict[str, dict] | None = None,
+        returns: str | None = None,
+        creation_log: list[dict] | None = None,
+        output_dir: Path | None = None,
+    ) -> Path:
+        """Wrap a generated program in a Lackey class and save."""
+        from .lackey.creator import save_lackey
+
+        if output_dir is None:
+            output_dir = self._config.config_dir / "templates"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        return save_lackey(
+            program=program, name=name, tools=tools,
+            output_dir=output_dir, params=params,
+            returns=returns, creation_log=creation_log,
+        )
 
     async def create(self, program: str, kit: str | list[str] | dict | None = None,
                      name: str = "", pattern: str | None = None) -> dict[str, Any]:
