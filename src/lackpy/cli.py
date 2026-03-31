@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace", type=Path, default=None,
         help="Workspace directory (default: cwd)",
     )
+    parser.add_argument("-c", dest="intent", default=None, help="One-shot intent")
+    parser.add_argument("--create", action="store_true", default=False, help="Save as Lackey file")
+    parser.add_argument("--generate", action="store_true", default=False, help="Generate without running")
+    parser.add_argument("--name", default=None, help="Class name for --create")
+    parser.add_argument("--kit", default=None, help="Kit name, comma-separated list, or @file")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -139,11 +144,49 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    workspace = args.workspace or Path.cwd()
+
+    # Runner-style interface (-c flag)
+    if args.intent:
+        from .service import LackpyService
+        svc = LackpyService(workspace=workspace)
+        kit = _parse_kit(args.kit) if args.kit else None
+
+        if args.create:
+            gen = asyncio.run(svc.generate(args.intent, kit=kit))
+            tools = kit if isinstance(kit, list) else []
+            path = asyncio.run(svc.create_lackey(
+                program=gen.program, name=args.name or "Generated",
+                tools=tools,
+                creation_log=[
+                    {"role": "user", "content": args.intent},
+                    {"role": "assistant", "content": gen.program, "accepted": True},
+                ],
+            ))
+            print(f"Created {path}")
+            return 0
+
+        if args.generate:
+            try:
+                gen = asyncio.run(svc.generate(args.intent, kit=kit))
+            except RuntimeError as e:
+                print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
+                return 1
+            print(gen.program)
+            return 0
+
+        # Default: delegate (generate + run)
+        try:
+            result = asyncio.run(svc.delegate(args.intent, kit=kit))
+        except RuntimeError as e:
+            print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
+            return 1
+        print(json.dumps(result, indent=2, default=str))
+        return 0 if result["success"] else 1
+
     if args.command is None:
         parser.print_help()
         return 0
-
-    workspace = args.workspace or Path.cwd()
 
     if args.command == "init":
         _init_config(workspace, args.ollama_model, args.ollama_url)

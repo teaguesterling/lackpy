@@ -42,3 +42,18 @@ def test_parser_status():
     parser = build_parser()
     args = parser.parse_args(["status"])
     assert args.command == "status"
+
+
+def test_parser_create_flag():
+    parser = build_parser()
+    args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--kit", "read,glob"])
+    assert args.intent == "find python files"
+    assert args.create is True
+    assert args.name == "FindPy"
+
+
+def test_parser_generate_flag():
+    parser = build_parser()
+    args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read"])
+    assert args.intent == "read file main.py"
+    assert args.generate is True
