@@ -433,7 +433,7 @@ result = await svc.delegate(
 | `max_calls(n)` | Limits total number of function calls |
 | `no_nested_calls` | Forbids using a call result directly as an argument |
 
-See [Custom Rules](../extending/custom-rules.md) for writing your own.
+See [Custom Rules](extending/custom-rules.md) for writing your own.
 
 ---
 
