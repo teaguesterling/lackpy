@@ -5,7 +5,7 @@ import ast
 ALLOWED_NODES: set[type] = {
     # Structural
     ast.Module, ast.Expr, ast.Assign, ast.AugAssign,
-    ast.For, ast.If, ast.With,
+    ast.For, ast.If, ast.With, ast.withitem,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
     ast.List, ast.Dict, ast.Tuple, ast.Set,

@@ -15,8 +15,31 @@ from .infer.providers.templates import TemplatesProvider
 from .kit.providers.builtin import BuiltinProvider
 from .kit.providers.python import PythonProvider
 from .kit.registry import ResolvedKit, resolve_kit
-from .kit.toolbox import Toolbox, ToolSpec
+from .kit.toolbox import ArgSpec, Toolbox, ToolSpec
 from .lang.grammar import ALLOWED_BUILTINS
+
+_BUILTIN_TOOLS = [
+    ToolSpec(
+        name="read", provider="builtin", description="Read file contents",
+        args=[ArgSpec(name="path", type="str", description="File path")],
+        returns="str", grade_w=1, effects_ceiling=1,
+    ),
+    ToolSpec(
+        name="glob", provider="builtin", description="Find files matching a glob pattern",
+        args=[ArgSpec(name="pattern", type="str", description="Glob pattern")],
+        returns="list[str]", grade_w=1, effects_ceiling=1,
+    ),
+    ToolSpec(
+        name="write", provider="builtin", description="Write content to a file",
+        args=[ArgSpec(name="path", type="str"), ArgSpec(name="content", type="str")],
+        returns="bool", grade_w=3, effects_ceiling=3,
+    ),
+    ToolSpec(
+        name="edit", provider="builtin", description="Replace text in a file",
+        args=[ArgSpec(name="path", type="str"), ArgSpec(name="old_str", type="str"), ArgSpec(name="new_str", type="str")],
+        returns="bool", grade_w=3, effects_ceiling=3,
+    ),
+]
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.runner import RestrictedRunner
@@ -41,6 +64,8 @@ class LackpyService:
         self.toolbox = Toolbox()
         self.toolbox.register_provider(BuiltinProvider())
         self.toolbox.register_provider(PythonProvider())
+        for spec in _BUILTIN_TOOLS:
+            self.toolbox.register_tool(spec)
         self._inference_providers: list = []
         self._init_inference_providers()
 

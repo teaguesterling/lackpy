@@ -10,10 +10,13 @@ from pathlib import Path
 from typing import Any
 
 
-def _parse_kit(kit_str: str) -> str | list[str]:
-    if "," in kit_str:
-        return [k.strip() for k in kit_str.split(",")]
-    return kit_str
+def _parse_kit(kit_str: str) -> list[str]:
+    """Parse --kit argument as a list of tool names.
+
+    Always returns a list. Use 'lackpy kit info <name>' to query
+    predefined kits by name instead.
+    """
+    return [k.strip() for k in kit_str.split(",")]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,11 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
     # init
     init_p = subparsers.add_parser("init", help="Initialize .lackpy workspace")
     init_p.add_argument("--ollama-model", default="qwen2.5-coder:1.5b", help="Default Ollama model")
+    init_p.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama server URL")
 
     return parser
 
 
-def _init_config(workspace: Path, ollama_model: str) -> None:
+def _init_config(workspace: Path, ollama_model: str, ollama_url: str = "http://localhost:11434") -> None:
     config_dir = workspace / ".lackpy"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "templates").mkdir(exist_ok=True)
@@ -117,7 +121,7 @@ order = ["templates", "rules", "ollama-local"]
 
 [inference.providers.ollama-local]
 plugin = "ollama"
-host = "http://localhost:11434"
+host = "{ollama_url}"
 model = "{ollama_model}"
 
 [kit]
@@ -142,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace = args.workspace or Path.cwd()
 
     if args.command == "init":
-        _init_config(workspace, args.ollama_model)
+        _init_config(workspace, args.ollama_model, args.ollama_url)
         return 0
 
     if args.command == "spec":

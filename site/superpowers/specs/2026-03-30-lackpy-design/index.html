@@ -1,0 +1,2157 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Python that lacks most of Python. Restricted program generation and execution for tool composition.">
+      
+      
+      
+        <link rel="canonical" href="https://lackpy.readthedocs.io/superpowers/specs/2026-03-30-lackpy-design/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>lackpy Design Spec - lackpy</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../../css/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lackpy-design-spec" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="lackpy" class="md-header__button md-logo" aria-label="lackpy" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lackpy
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              lackpy Design Spec
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/teague/lackpy" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    teague/lackpy
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="lackpy" class="md-nav__button md-logo" aria-label="lackpy" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lackpy
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/teague/lackpy" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    teague/lackpy
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../tutorial/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/language-spec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Language Spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/kits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kits & Toolbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Extending
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extending/tool-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extending/inference-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extending/custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#core-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#module-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Module Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lang-validation-and-grading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lang/ — Validation and Grading
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="lang/ — Validation and Grading">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allowed-ast-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allowed AST Nodes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forbidden-constructs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forbidden Constructs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#allowed-builtins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allowed Builtins
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-validation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Validation Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grade-computation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grade Computation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kit-tool-selection-and-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kit/ — Tool Selection and Registry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="kit/ — Tool Selection and Registry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-toolbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Toolbox
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool Providers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kit-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kit Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#infer-inference-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        infer/ — Inference Pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="infer/ — Inference Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#provider-based-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider-Based Dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#v1-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1 Providers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-sanitization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Sanitization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run/ — Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="run/ — Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#executor-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Executor Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#v1-implementation-ast-compile-restricted-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1 Implementation (AST compile + restricted run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#v2-nsjail-executor-designed-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v2: nsjail Executor (designed later)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sandbox-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sandbox Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trace-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trace Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#servicepy-unified-service-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        service.py — Unified Service Layer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="service.py — Unified Service Layer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delegate-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        delegate Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp/ — MCP Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clipy-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cli.py — CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v2-roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v2 Roadmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#unit-tests-validator-highest-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unit Tests: Validator (highest priority)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unit-tests-custom-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unit Tests: Custom Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-tests-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration Tests: Execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-tests-kit-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration Tests: Kit Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-tests-require-ollama" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Tests (require Ollama)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inference-provider-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inference Provider Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="lackpy-design-spec">lackpy Design Spec<a class="headerlink" href="#lackpy-design-spec" title="Permanent link">&para;</a></h1>
+<p><em>Python that lacks most of Python. A micro-inferencer that translates intent into sandboxed tool-composition programs.</em></p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>lackpy is an MCP tool and CLI that accepts natural language intent from an outer agent or human, generates a restricted Python program using a pluggable inference pipeline, validates it against a strict AST whitelist and namespace, runs it inside a sandboxed environment, and returns a structured execution trace.</p>
+<p>It is a complete star topology at micro scale: the outer agent is the Principal, the inference pipeline is the Inferencer, the AST filter + namespace is the Harness, and the executor is the Executor. The whole thing is exposed as both an MCP server and a CLI, both backed by a unified service layer.</p>
+<p>lackpy is part of the Rigged developer tool suite (agent-riggs, kibitzer, fledgling, blq, jetsam) but is independently installable and usable. agent-riggs audits lackpy usage and can register templates via the lackpy API, but is not a dependency.</p>
+<h2 id="core-architecture">Core Architecture<a class="headerlink" href="#core-architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>delegate(intent, kit, params, sandbox, rules) -&gt; trace
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  Kit Resolution
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  |-- Predefined kit name (&quot;debug&quot;, &quot;implement&quot;)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  |-- Explicit tool list ([&quot;read&quot;, &quot;glob&quot;, &quot;find_callers&quot;])
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  |-- Full mapping ({&quot;tool_name&quot;: {provider details}})
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  +-- Quartermaster (v2: model-inferred kit from intent)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  Inference Pipeline (plugin-based, priority-ordered)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  |-- Templates (pattern match against .lackpy/templates/)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  |-- Rules (keyword -&gt; program, deterministic)
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  |-- Ollama (local model, configurable)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>  |-- Anthropic API (Haiku fallback)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  +-- ... (extensible: Bedrock, OpenAI, remote Ollama, cache, etc.)
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>  -&gt; AST validation (whitelist walk + custom rules)
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  -&gt; Namespace validation (all calls in resolved kit or allowed builtins)
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  -&gt; Grade computation (join of tool grades from kit)
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  -&gt; Execution (v1: AST compile + restricted run; v2: nsjail sandbox)
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  -&gt; Structured trace capture
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  -&gt; Return trace to caller
+</code></pre></div>
+<h2 id="package-structure">Package Structure<a class="headerlink" href="#package-structure" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>lackpy/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>|-- __init__.py              # Version, public API
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>|-- lang/
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>|   |-- __init__.py
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>|   |-- grammar.py           # ALLOWED_NODES, FORBIDDEN_NODES, FORBIDDEN_NAMES
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>|   |-- validator.py         # ast.parse -&gt; walk -&gt; validate against whitelist + namespace
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>|   |-- grader.py            # Compute grade from tool grades in resolved kit
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>|   |-- rules.py             # Custom validation rules (AST visitors)
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>|   +-- spec.py              # The lackpy language spec as structured data
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>|-- kit/
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>|   |-- __init__.py
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>|   |-- registry.py          # Kit resolution: name/list/dict/None -&gt; ResolvedKit
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>|   |-- toolbox.py           # Plugin-based tool provider store
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>|   +-- providers/
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>|       |-- __init__.py
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>|       |-- base.py          # ToolProvider protocol
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>|       |-- builtin.py       # Built-in tools (read, glob, etc.)
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>|       +-- python.py        # Python import-based tools (fledgling, blq, etc.)
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>|-- infer/
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>|   |-- __init__.py
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>|   |-- dispatch.py          # Priority-ordered provider dispatch
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>|   |-- prompt.py            # System prompt template (Jupyter cell framing)
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>|   |-- sanitize.py          # Output sanitization (strip fences, preamble)
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>|   +-- providers/
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>|       |-- __init__.py
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>|       |-- base.py          # InferenceProvider protocol
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>|       |-- templates.py     # Tier 0: pattern library
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>|       |-- rules.py         # Tier 1: keyword-based generation
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>|       |-- ollama.py        # Tier 2: Ollama client
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>|       +-- anthropic.py     # Tier 3: Anthropic API fallback
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>|-- run/
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>|   |-- __init__.py
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>|   |-- base.py              # Executor protocol
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>|   |-- runner.py            # v1: AST compile + restricted run with traced namespace
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>|   +-- trace.py             # Trace data structures and capture
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>|-- service.py               # Unified service layer: delegate, generate, run_program, create
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>|-- mcp/
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>|   |-- __init__.py
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>|   +-- server.py            # FastMCP server: thin adapter over service
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>|-- cli.py                   # CLI: thin adapter over service
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>|-- config.py                # Configuration loading (config.toml)
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>+-- py.typed                 # PEP 561 marker
+</code></pre></div>
+<h2 id="module-design">Module Design<a class="headerlink" href="#module-design" title="Permanent link">&para;</a></h2>
+<h3 id="lang-validation-and-grading"><code>lang/</code> — Validation and Grading<a class="headerlink" href="#lang-validation-and-grading" title="Permanent link">&para;</a></h3>
+<p>The security-critical core. <strong>Zero dependencies beyond Python stdlib.</strong> Uses only the <code>ast</code> module.</p>
+<h4 id="allowed-ast-nodes">Allowed AST Nodes<a class="headerlink" href="#allowed-ast-nodes" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">ALLOWED_NODES</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="c1"># Structural</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Module</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Expr</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Assign</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">AugAssign</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">For</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">If</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">With</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="c1"># Expressions</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Call</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Name</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Attribute</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Subscript</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">List</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Dict</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Tuple</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Set</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">ListComp</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">DictComp</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">SetComp</span><span class="p">,</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Compare</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">BoolOp</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">UnaryOp</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">BinOp</span><span class="p">,</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">JoinedStr</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">FormattedValue</span><span class="p">,</span>  <span class="c1"># f-strings</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Constant</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Starred</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Index</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Slice</span><span class="p">,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="c1"># Comprehension internals</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">comprehension</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">IfExp</span><span class="p">,</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="c1"># Context nodes (required by Python AST)</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Load</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Store</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Del</span><span class="p">,</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="c1"># Operators</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Add</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Sub</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Mult</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Div</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Mod</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">FloorDiv</span><span class="p">,</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Eq</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">NotEq</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Lt</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">LtE</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Gt</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">GtE</span><span class="p">,</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Is</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">IsNot</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">In</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">NotIn</span><span class="p">,</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">And</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Or</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Not</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">USub</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">UAdd</span><span class="p">,</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="p">}</span>
+</code></pre></div>
+<h4 id="forbidden-constructs">Forbidden Constructs<a class="headerlink" href="#forbidden-constructs" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">FORBIDDEN_NODES</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Import</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">ImportFrom</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">FunctionDef</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">AsyncFunctionDef</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">ClassDef</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Lambda</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">While</span><span class="p">,</span>                    <span class="c1"># No unbounded iteration</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Try</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">ExceptHandler</span><span class="p">,</span>   <span class="c1"># No exception swallowing</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Raise</span><span class="p">,</span>                    <span class="c1"># No exception raising</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Global</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">Nonlocal</span><span class="p">,</span>     <span class="c1"># No scope escape</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Yield</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">YieldFrom</span><span class="p">,</span>     <span class="c1"># No generators</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Await</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">AsyncFor</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">AsyncWith</span><span class="p">,</span>  <span class="c1"># No async</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Assert</span><span class="p">,</span>                   <span class="c1"># Outer agent evaluates, not the program</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Delete</span><span class="p">,</span>                   <span class="c1"># No del statements</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">ast</span><span class="o">.</span><span class="n">Match</span><span class="p">,</span>                    <span class="c1"># No structural pattern matching</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="p">}</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="n">FORBIDDEN_NAMES</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="s1">&#39;__import__&#39;</span><span class="p">,</span> <span class="s1">&#39;open&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="s1">&#39;globals&#39;</span><span class="p">,</span> <span class="s1">&#39;locals&#39;</span><span class="p">,</span> <span class="s1">&#39;vars&#39;</span><span class="p">,</span> <span class="s1">&#39;dir&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    <span class="s1">&#39;getattr&#39;</span><span class="p">,</span> <span class="s1">&#39;setattr&#39;</span><span class="p">,</span> <span class="s1">&#39;delattr&#39;</span><span class="p">,</span> <span class="s1">&#39;hasattr&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    <span class="s1">&#39;__builtins__&#39;</span><span class="p">,</span> <span class="s1">&#39;__build_class__&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    <span class="s1">&#39;breakpoint&#39;</span><span class="p">,</span> <span class="s1">&#39;exit&#39;</span><span class="p">,</span> <span class="s1">&#39;quit&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>    <span class="s1">&#39;type&#39;</span><span class="p">,</span> <span class="s1">&#39;super&#39;</span><span class="p">,</span> <span class="s1">&#39;classmethod&#39;</span><span class="p">,</span> <span class="s1">&#39;staticmethod&#39;</span><span class="p">,</span> <span class="s1">&#39;property&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>    <span class="s1">&#39;memoryview&#39;</span><span class="p">,</span> <span class="s1">&#39;bytearray&#39;</span><span class="p">,</span> <span class="s1">&#39;bytes&#39;</span><span class="p">,</span>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>    <span class="s1">&#39;map&#39;</span><span class="p">,</span> <span class="s1">&#39;filter&#39;</span><span class="p">,</span> <span class="s1">&#39;reduce&#39;</span><span class="p">,</span>  <span class="c1"># Use comprehensions instead</span>
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>    <span class="s1">&#39;input&#39;</span><span class="p">,</span>                     <span class="c1"># No stdin</span>
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="p">}</span>
+</code></pre></div>
+<p>Note: <code>eval</code>, <code>exec</code>, and <code>compile</code> are not in FORBIDDEN_NAMES because they
+are already blocked by the namespace check — they are not in ALLOWED_BUILTINS
+and would not be in any kit. FORBIDDEN_NAMES is specifically for names that
+might appear as variable references or could be confused with allowed constructs.</p>
+<h4 id="allowed-builtins">Allowed Builtins<a class="headerlink" href="#allowed-builtins" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">ALLOWED_BUILTINS</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="s1">&#39;len&#39;</span><span class="p">,</span> <span class="s1">&#39;sorted&#39;</span><span class="p">,</span> <span class="s1">&#39;reversed&#39;</span><span class="p">,</span> <span class="s1">&#39;enumerate&#39;</span><span class="p">,</span> <span class="s1">&#39;zip&#39;</span><span class="p">,</span> <span class="s1">&#39;range&#39;</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="s1">&#39;min&#39;</span><span class="p">,</span> <span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;sum&#39;</span><span class="p">,</span> <span class="s1">&#39;any&#39;</span><span class="p">,</span> <span class="s1">&#39;all&#39;</span><span class="p">,</span> <span class="s1">&#39;abs&#39;</span><span class="p">,</span> <span class="s1">&#39;round&#39;</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="s1">&#39;str&#39;</span><span class="p">,</span> <span class="s1">&#39;int&#39;</span><span class="p">,</span> <span class="s1">&#39;float&#39;</span><span class="p">,</span> <span class="s1">&#39;bool&#39;</span><span class="p">,</span> <span class="s1">&#39;list&#39;</span><span class="p">,</span> <span class="s1">&#39;dict&#39;</span><span class="p">,</span> <span class="s1">&#39;set&#39;</span><span class="p">,</span> <span class="s1">&#39;tuple&#39;</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="s1">&#39;isinstance&#39;</span><span class="p">,</span> <span class="s1">&#39;print&#39;</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">}</span>
+</code></pre></div>
+<h4 id="validation-pipeline">Validation Pipeline<a class="headerlink" href="#validation-pipeline" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>Parse</strong>: <code>ast.parse(program_text)</code> — reject on syntax error</li>
+<li><strong>Node walk</strong>: Walk entire AST, reject if any node type not in <code>ALLOWED_NODES</code></li>
+<li><strong>Name check</strong>: All <code>ast.Name</code> nodes checked against <code>FORBIDDEN_NAMES</code></li>
+<li><strong>Namespace check</strong>: All <code>ast.Call</code> nodes where function is a <code>Name</code> — reject if not in resolved kit or <code>ALLOWED_BUILTINS</code></li>
+<li><strong>For-loop check</strong>: All <code>ast.For</code> nodes must iterate over a call result or variable</li>
+<li><strong>String literal check</strong>: No string contains <code>__</code> (blocks dunder access via string manipulation)</li>
+<li><strong>Custom rules</strong>: Any additional AST visitor rules provided by kit, caller, or config</li>
+</ol>
+<p>Returns:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ValidationResult</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">valid</span><span class="p">:</span> <span class="nb">bool</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">errors</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">grade</span><span class="p">:</span> <span class="n">Grade</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">calls</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>      <span class="c1"># tool calls found in the program</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">variables</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>  <span class="c1"># variables assigned in the program</span>
+</code></pre></div>
+<h4 id="custom-validation-rules">Custom Validation Rules<a class="headerlink" href="#custom-validation-rules" title="Permanent link">&para;</a></h4>
+<p>Additional rules are AST visitors that can only <strong>tighten</strong> the core checks, never loosen them. Each rule is a callable that takes an <code>ast.Module</code> and returns a list of error strings (empty means pass).</p>
+<p>Examples:
+- <code>no_loops</code> — forbid all <code>ast.For</code> nodes
+- <code>max_depth(n)</code> — limit AST nesting depth
+- <code>max_calls(n)</code> — limit number of tool calls
+- <code>no_nested_calls</code> — forbid calls as arguments to other calls (force intermediate variables)</p>
+<p>Note: custom rules can only restrict within the bounds of <code>ALLOWED_NODES</code>. A rule cannot introduce new node types (e.g., requiring <code>Try</code>/<code>ExceptHandler</code> would conflict with <code>FORBIDDEN_NODES</code>). If a future use case needs expanded node support, that's a spec change, not a custom rule.</p>
+<p>Rules can be specified by:
+- The kit definition (kit-level constraints)
+- The caller explicitly (<code>delegate(..., rules=["no_loops"])</code>)
+- Configuration presets</p>
+<h4 id="grade-computation">Grade Computation<a class="headerlink" href="#grade-computation" title="Permanent link">&para;</a></h4>
+<p>Grade is the join (max) of all tool grades in the resolved kit. Each tool in the toolbox optionally declares <code>grade_w</code> (world coupling) and <code>effects_ceiling</code>. Tools without declared grades default to a conservative maximum.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">Grade</span><span class="p">:</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">w</span><span class="p">:</span> <span class="nb">int</span>  <span class="c1"># world coupling (0=pure, 1=pinhole read, 2=scoped exec, 3=scoped write)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">d</span><span class="p">:</span> <span class="nb">int</span>  <span class="c1"># effects ceiling</span>
+</code></pre></div>
+<h3 id="kit-tool-selection-and-registry"><code>kit/</code> — Tool Selection and Registry<a class="headerlink" href="#kit-tool-selection-and-registry" title="Permanent link">&para;</a></h3>
+<h4 id="the-toolbox">The Toolbox<a class="headerlink" href="#the-toolbox" title="Permanent link">&para;</a></h4>
+<p>The toolbox is a <strong>plugin-based provider store</strong> containing all known tools and how to reach them. It lives at <code>.lackpy/toolbox/</code> as configuration, with provider plugins handling resolution to callables.</p>
+<p>Each toolbox entry specifies:
+- <strong>name</strong>: Tool identifier used in programs
+- <strong>provider</strong>: Which provider plugin resolves this tool (<code>builtin</code>, <code>python</code>, <code>mcp-local</code>, <code>mcp-system</code>, <code>inline</code>, etc.)
+- <strong>provider_config</strong>: Provider-specific configuration (module + function, server + tool name, code path, etc.)
+- <strong>description</strong>: Human-readable description (used in inference prompts)
+- <strong>args</strong>: Argument spec (names, types, descriptions)
+- <strong>returns</strong>: Return type description
+- <strong>grade_w</strong>: Optional world coupling grade
+- <strong>effects_ceiling</strong>: Optional effects ceiling grade</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolSpec</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">provider</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">provider_config</span><span class="p">:</span> <span class="nb">dict</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">args</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">ArgSpec</span><span class="p">]</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">returns</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">grade_w</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span>       <span class="c1"># conservative default</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">effects_ceiling</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span>
+</code></pre></div>
+<h4 id="tool-providers">Tool Providers<a class="headerlink" href="#tool-providers" title="Permanent link">&para;</a></h4>
+<p>Provider plugins implement a common protocol:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolProvider</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">available</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tool_spec</span><span class="p">:</span> <span class="n">ToolSpec</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<p>v1 providers:
+- <strong><code>builtin</code></strong>: Tools implemented inside lackpy itself (read, glob, write, edit)
+- <strong><code>python</code></strong>: Import a function from an installed Python package (e.g., <code>fledgling.api:find_definitions</code>)</p>
+<p>Future providers (v2+):
+- <strong><code>mcp-local</code></strong>: Connect to a project-local MCP server (<code>.mcp.json</code>)
+- <strong><code>mcp-system</code></strong>: Connect to a system-level MCP server (<code>~/.claude/mcp.json</code>)
+- <strong><code>inline</code></strong>: Load a Python file from <code>.lackpy/tools/</code></p>
+<h4 id="kit-resolution">Kit Resolution<a class="headerlink" href="#kit-resolution" title="Permanent link">&para;</a></h4>
+<p>The <code>kit</code> parameter accepts four forms:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Type</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Predefined name</td>
+<td><code>str</code></td>
+<td>Look up kit file in <code>.lackpy/kits/</code>, resolve each tool from toolbox</td>
+</tr>
+<tr>
+<td>Explicit list</td>
+<td><code>list[str]</code></td>
+<td>Resolve each named tool from toolbox</td>
+</tr>
+<tr>
+<td>Full mapping</td>
+<td><code>dict</code></td>
+<td>Tool names mapped to toolbox names or inline provider configs</td>
+</tr>
+<tr>
+<td>Quartermaster</td>
+<td><code>None</code></td>
+<td>v1: raises <code>NotImplementedError</code>. v2: model infers minimal kit from intent</td>
+</tr>
+</tbody>
+</table>
+<p>Predefined kits live as flat files in <code>.lackpy/kits/</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nn">---</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">debug</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Read-only code exploration and analysis</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="nn">---</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="l l-Scalar l-Scalar-Plain">read</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="l l-Scalar l-Scalar-Plain">glob</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="l l-Scalar l-Scalar-Plain">find_definitions</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="l l-Scalar l-Scalar-Plain">find_callers</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="l l-Scalar l-Scalar-Plain">run_tests</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="l l-Scalar l-Scalar-Plain">errors</span>
+</code></pre></div>
+<p>Kit resolution produces a <code>ResolvedKit</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ResolvedKit</span><span class="p">:</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">tools</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ToolSpec</span><span class="p">]</span>       <span class="c1"># name -&gt; spec with resolved callable</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">callables</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]</span>   <span class="c1"># name -&gt; actual callable for execution</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">grade</span><span class="p">:</span> <span class="n">Grade</span>                     <span class="c1"># aggregate grade (join of tool grades)</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>                 <span class="c1"># formatted namespace description for prompts</span>
+</code></pre></div>
+<h3 id="infer-inference-pipeline"><code>infer/</code> — Inference Pipeline<a class="headerlink" href="#infer-inference-pipeline" title="Permanent link">&para;</a></h3>
+<h4 id="provider-based-dispatch">Provider-Based Dispatch<a class="headerlink" href="#provider-based-dispatch" title="Permanent link">&para;</a></h4>
+<p>The inference pipeline is a priority-ordered list of provider plugins. Each provider implements:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">InferenceProvider</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">available</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">intent</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">namespace_desc</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="n">error_feedback</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<p>Dispatch iterates providers in configured order. For each provider:
+1. Check <code>available()</code> — skip if not
+2. Call <code>generate()</code> — skip if returns <code>None</code>
+3. Sanitize output (strip markdown fences, preamble)
+4. Validate against kit + rules
+5. If valid, return. If invalid, retry once with error feedback (provider-dependent), then try next provider.</p>
+<h4 id="v1-providers">v1 Providers<a class="headerlink" href="#v1-providers" title="Permanent link">&para;</a></h4>
+<p><strong>Templates</strong> (<code>templates.py</code>):
+- Pattern-match intent against <code>.lackpy/templates/</code> files
+- Each template has a regex/glob pattern with <code>{placeholder}</code> captures
+- Returns instantiated program if match confidence exceeds threshold
+- Tracks success/fail counts for ratchet</p>
+<p>Template file format (<code>.lackpy/templates/</code>):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nn">---</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">find-callers</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;find</span><span class="nv"> </span><span class="s">(all</span><span class="nv"> </span><span class="s">)?(callers|usages|references)</span><span class="nv"> </span><span class="s">of</span><span class="nv"> </span><span class="s">{name}&quot;</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="nt">success_count</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="nt">fail_count</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="nn">---</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="l l-Scalar l-Scalar-Plain">results = find_callers(&quot;{name}&quot;)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="l l-Scalar l-Scalar-Plain">[f&quot;{r[&#39;file&#39;]}:{r[&#39;line&#39;]}&quot; for r in results]</span>
+</code></pre></div></p>
+<p><strong>Rules</strong> (<code>rules.py</code>):
+- Deterministic keyword-to-program mapping
+- Finite set of high-confidence patterns (e.g., "read file X" -&gt; <code>content = read("X")\ncontent</code>)
+- No model call, zero cost
+- Returns <code>None</code> if no rule matches</p>
+<p><strong>Ollama</strong> (<code>ollama.py</code>):
+- Connects to local or remote Ollama instance
+- Default model: <code>qwen2.5-coder:1.5b</code>
+- System prompt uses Jupyter cell framing with namespace description from resolved kit
+- One retry with validation error feedback before failing
+- Requires <code>ollama</code> package (optional dependency)</p>
+<p><strong>Anthropic</strong> (<code>anthropic.py</code>):
+- Haiku fallback when Ollama unavailable or fails
+- Same prompt construction as Ollama
+- Requires <code>anthropic</code> package (optional dependency)</p>
+<h4 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h4>
+<p>Providers are configured in <code>.lackpy/config.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">[inference]</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;templates&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;rules&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;ollama-local&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;anthropic-haiku&quot;</span><span class="p">]</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">[inference.providers.templates]</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;templates&quot;</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.8</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">min_uses</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="k">[inference.providers.rules]</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;rules&quot;</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="k">[inference.providers.ollama-local]</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;ollama&quot;</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434&quot;</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;qwen2.5-coder:1.5b&quot;</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="n">keep_alive</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;30m&quot;</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="k">[inference.providers.anthropic-haiku]</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;anthropic&quot;</span>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-haiku-4-5-20251001&quot;</span>
+</code></pre></div>
+<p>Adding a new provider (e.g., remote Ollama, Bedrock, OpenAI, cache) is a new plugin entry in configuration, not a code change to the dispatch pipeline.</p>
+<h4 id="system-prompt">System Prompt<a class="headerlink" href="#system-prompt" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>You are a Jupyter notebook cell generator. Write a single cell
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>using ONLY the pre-loaded kernel namespace below.
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>Output ONLY the cell contents — no markdown, no explanation, no code fences.
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>Assign tool results to variables and reuse them. Never call the same function twice
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>when you can reuse a variable.
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>Kernel namespace:
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>{namespace_description}
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>Builtins: {builtins_list}
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>{params_section}
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>Not available: import, def, class, while, try/except, lambda, open
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>The cell&#39;s last expression is displayed as output.
+</code></pre></div>
+<p>The <code>{params_section}</code> is conditionally included when params are provided:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>Pre-set variables (already defined, use directly):
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>  schema: str — the config schema definition
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>  target_dir: str — directory to search
+</code></pre></div></p>
+<p>The <code>{namespace_description}</code> is generated from the resolved kit:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>  read(path) -&gt; str: Read file contents
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>  edit(path, old_str, new_str) -&gt; bool: Replace text in file
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>  glob(pattern) -&gt; list[str]: Find files matching pattern
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>  find_definitions(name) -&gt; list[dict{file,line,name,type}]: Find definitions
+</code></pre></div></p>
+<h4 id="output-sanitization">Output Sanitization<a class="headerlink" href="#output-sanitization" title="Permanent link">&para;</a></h4>
+<p>Applied to all model output before validation:
+1. Strip leading/trailing whitespace
+2. Remove <code>python ...</code> wrapping
+3. Remove "Here's the code:" style preamble lines</p>
+<h3 id="run-execution"><code>run/</code> — Execution<a class="headerlink" href="#run-execution" title="Permanent link">&para;</a></h3>
+<h4 id="executor-protocol">Executor Protocol<a class="headerlink" href="#executor-protocol" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Executor</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">tree</span><span class="p">:</span> <span class="n">ast</span><span class="o">.</span><span class="n">Module</span><span class="p">,</span> <span class="n">namespace</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Callable</span><span class="p">],</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>        <span class="n">sandbox</span><span class="p">:</span> <span class="n">SandboxConfig</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ExecutionResult</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<p>The executor takes a <strong>validated AST</strong> (not a string), compiles it, and runs it. The AST is the source of truth through the entire pipeline: parse -&gt; validate -&gt; transform -&gt; compile -&gt; run.</p>
+<h4 id="v1-implementation-ast-compile-restricted-run">v1 Implementation (AST compile + restricted run)<a class="headerlink" href="#v1-implementation-ast-compile-restricted-run" title="Permanent link">&para;</a></h4>
+<ol>
+<li>Wrap each callable in the namespace to capture trace entries (tool name, args, result, duration, success/error)</li>
+<li>Add allowed builtins to traced namespace</li>
+<li>Rewrite last expression in AST to <code>__result__ = &lt;expr&gt;</code> to capture output</li>
+<li><code>compile(tree, '&lt;lackpy&gt;', 'exec')</code> to produce a code object</li>
+<li>Run the code object with <code>{"__builtins__": {}}</code> + the traced namespace</li>
+<li>Collect <code>__result__</code>, trace, and final variable state</li>
+</ol>
+<p>Security posture: the AST validation is the primary safety layer. Running with empty <code>__builtins__</code> and a controlled namespace is the secondary layer. The AST validator blocks the constructs needed for known escape vectors (no attribute access to dunders, no <code>getattr</code>, no <code>type()</code>, no strings containing <code>__</code>).</p>
+<h4 id="v2-nsjail-executor-designed-later">v2: nsjail Executor (designed later)<a class="headerlink" href="#v2-nsjail-executor-designed-later" title="Permanent link">&para;</a></h4>
+<p>Will use the <code>nsjail-python</code> package which provides:
+- Fluent <code>Jail()</code> builder API
+- <code>sandbox()</code> preset function
+- <code>Runner</code> class with sync/async execution
+- <code>NsJailResult</code> with returncode, stdout, stderr, timeout/OOM detection</p>
+<p>The nsjail executor will implement the same <code>Executor</code> protocol. Design deferred until the generation pipeline is working and we understand the real shape of generated programs.</p>
+<h4 id="sandbox-configuration">Sandbox Configuration<a class="headerlink" href="#sandbox-configuration" title="Permanent link">&para;</a></h4>
+<p>Sandbox policy is specified as either a named preset or a literal config object:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">SandboxConfig</span> <span class="o">=</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">NsJailConfig</span> <span class="o">|</span> <span class="kc">None</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="c1"># str -&gt; resolve named preset to NsJailConfig</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="c1"># NsJailConfig -&gt; use directly</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># None -&gt; v1 default (no sandbox, restricted run fallback)</span>
+</code></pre></div>
+<p>Named presets are resolved at the service layer. The executor only deals with concrete configs.</p>
+<h4 id="trace-structure">Trace Structure<a class="headerlink" href="#trace-structure" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">TraceEntry</span><span class="p">:</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="n">step</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    <span class="n">tool</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>    <span class="n">args</span><span class="p">:</span> <span class="nb">dict</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="n">result</span><span class="p">:</span> <span class="n">Any</span>           <span class="c1"># summarized (truncated large outputs)</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="n">duration_ms</span><span class="p">:</span> <span class="nb">float</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="n">success</span><span class="p">:</span> <span class="nb">bool</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    <span class="n">error</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a><span class="k">class</span><span class="w"> </span><span class="nc">Trace</span><span class="p">:</span>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>    <span class="n">entries</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">TraceEntry</span><span class="p">]</span>
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>    <span class="n">program</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span>
+<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>    <span class="n">grade</span><span class="p">:</span> <span class="n">Grade</span>
+<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a>    <span class="n">generation_tier</span><span class="p">:</span> <span class="nb">str</span>          <span class="c1"># provider name</span>
+<a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a>    <span class="n">generation_model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+<a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a>    <span class="n">generation_time_ms</span><span class="p">:</span> <span class="nb">float</span>
+<a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a>    <span class="n">execution_time_ms</span><span class="p">:</span> <span class="nb">float</span>
+<a id="__codelineno-19-21" name="__codelineno-19-21" href="#__codelineno-19-21"></a>    <span class="n">total_time_ms</span><span class="p">:</span> <span class="nb">float</span>
+<a id="__codelineno-19-22" name="__codelineno-19-22" href="#__codelineno-19-22"></a>    <span class="n">files_read</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<a id="__codelineno-19-23" name="__codelineno-19-23" href="#__codelineno-19-23"></a>    <span class="n">files_modified</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<a id="__codelineno-19-24" name="__codelineno-19-24" href="#__codelineno-19-24"></a>    <span class="n">variables</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>     <span class="c1"># final variable state (summarized)</span>
+</code></pre></div>
+<h3 id="servicepy-unified-service-layer"><code>service.py</code> — Unified Service Layer<a class="headerlink" href="#servicepy-unified-service-layer" title="Permanent link">&para;</a></h3>
+<p>The service layer orchestrates the pipeline. Both MCP and CLI are thin adapters over these methods.</p>
+<h4 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Params type: simple values or rich metadata</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">Params</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span> <span class="o">|</span> <span class="n">ParamSpec</span><span class="p">]</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="c1"># Where ParamSpec is:</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1">#   {&quot;value&quot;: Any, &quot;type&quot;: str, &quot;description&quot;: str}</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="c1"># Simple form: {&quot;schema&quot;: &quot;&lt;content&gt;&quot;, &quot;target_dir&quot;: &quot;src/&quot;}</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="c1"># Rich form:   {&quot;schema&quot;: {&quot;value&quot;: &quot;&lt;content&gt;&quot;, &quot;type&quot;: &quot;str&quot;,</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="c1">#                           &quot;description&quot;: &quot;the config schema&quot;}}</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">delegate</span><span class="p">(</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>    <span class="n">intent</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;debug&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">Params</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>    <span class="n">sandbox</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">SandboxConfig</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>    <span class="n">rules</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DelegateResult</span><span class="p">:</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Full pipeline: resolve kit -&gt; infer -&gt; validate -&gt; run -&gt; trace.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a>
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span>
+<a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a>    <span class="n">intent</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;debug&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">Params</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-22" name="__codelineno-20-22" href="#__codelineno-20-22"></a>    <span class="n">rules</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-23" name="__codelineno-20-23" href="#__codelineno-20-23"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GenerateResult</span><span class="p">:</span>
+<a id="__codelineno-20-24" name="__codelineno-20-24" href="#__codelineno-20-24"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Infer + validate, no execution. Returns the program for inspection.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-25" name="__codelineno-20-25" href="#__codelineno-20-25"></a>
+<a id="__codelineno-20-26" name="__codelineno-20-26" href="#__codelineno-20-26"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run_program</span><span class="p">(</span>
+<a id="__codelineno-20-27" name="__codelineno-20-27" href="#__codelineno-20-27"></a>    <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-20-28" name="__codelineno-20-28" href="#__codelineno-20-28"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;debug&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-29" name="__codelineno-20-29" href="#__codelineno-20-29"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">Params</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-30" name="__codelineno-20-30" href="#__codelineno-20-30"></a>    <span class="n">sandbox</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">SandboxConfig</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-31" name="__codelineno-20-31" href="#__codelineno-20-31"></a>    <span class="n">rules</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-32" name="__codelineno-20-32" href="#__codelineno-20-32"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RunResult</span><span class="p">:</span>
+<a id="__codelineno-20-33" name="__codelineno-20-33" href="#__codelineno-20-33"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate + run a caller-provided program.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-34" name="__codelineno-20-34" href="#__codelineno-20-34"></a>
+<a id="__codelineno-20-35" name="__codelineno-20-35" href="#__codelineno-20-35"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span>
+<a id="__codelineno-20-36" name="__codelineno-20-36" href="#__codelineno-20-36"></a>    <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-20-37" name="__codelineno-20-37" href="#__codelineno-20-37"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;debug&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-38" name="__codelineno-20-38" href="#__codelineno-20-38"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-39" name="__codelineno-20-39" href="#__codelineno-20-39"></a>    <span class="n">pattern</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-40" name="__codelineno-20-40" href="#__codelineno-20-40"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CreateResult</span><span class="p">:</span>
+<a id="__codelineno-20-41" name="__codelineno-20-41" href="#__codelineno-20-41"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate a caller-provided program and save as a template.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-42" name="__codelineno-20-42" href="#__codelineno-20-42"></a>
+<a id="__codelineno-20-43" name="__codelineno-20-43" href="#__codelineno-20-43"></a><span class="k">def</span><span class="w"> </span><span class="nf">kit_info</span><span class="p">(</span>
+<a id="__codelineno-20-44" name="__codelineno-20-44" href="#__codelineno-20-44"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span><span class="p">,</span>
+<a id="__codelineno-20-45" name="__codelineno-20-45" href="#__codelineno-20-45"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KitInfoResult</span><span class="p">:</span>
+<a id="__codelineno-20-46" name="__codelineno-20-46" href="#__codelineno-20-46"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolve a kit and return tools, grades, descriptions.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-47" name="__codelineno-20-47" href="#__codelineno-20-47"></a>
+<a id="__codelineno-20-48" name="__codelineno-20-48" href="#__codelineno-20-48"></a><span class="k">def</span><span class="w"> </span><span class="nf">kit_list</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">KitSummary</span><span class="p">]:</span>
+<a id="__codelineno-20-49" name="__codelineno-20-49" href="#__codelineno-20-49"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;List available predefined kits.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-50" name="__codelineno-20-50" href="#__codelineno-20-50"></a>
+<a id="__codelineno-20-51" name="__codelineno-20-51" href="#__codelineno-20-51"></a><span class="k">def</span><span class="w"> </span><span class="nf">kit_create</span><span class="p">(</span>
+<a id="__codelineno-20-52" name="__codelineno-20-52" href="#__codelineno-20-52"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-20-53" name="__codelineno-20-53" href="#__codelineno-20-53"></a>    <span class="n">tools</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+<a id="__codelineno-20-54" name="__codelineno-20-54" href="#__codelineno-20-54"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-55" name="__codelineno-20-55" href="#__codelineno-20-55"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KitSummary</span><span class="p">:</span>
+<a id="__codelineno-20-56" name="__codelineno-20-56" href="#__codelineno-20-56"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create and save a new predefined kit.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-57" name="__codelineno-20-57" href="#__codelineno-20-57"></a>
+<a id="__codelineno-20-58" name="__codelineno-20-58" href="#__codelineno-20-58"></a><span class="k">def</span><span class="w"> </span><span class="nf">toolbox_list</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">ToolInfo</span><span class="p">]:</span>
+<a id="__codelineno-20-59" name="__codelineno-20-59" href="#__codelineno-20-59"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;List all registered tools with metadata.&quot;&quot;&quot;</span>
+<a id="__codelineno-20-60" name="__codelineno-20-60" href="#__codelineno-20-60"></a>
+<a id="__codelineno-20-61" name="__codelineno-20-61" href="#__codelineno-20-61"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span>
+<a id="__codelineno-20-62" name="__codelineno-20-62" href="#__codelineno-20-62"></a>    <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-20-63" name="__codelineno-20-63" href="#__codelineno-20-63"></a>    <span class="n">kit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;debug&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-64" name="__codelineno-20-64" href="#__codelineno-20-64"></a>    <span class="n">rules</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-65" name="__codelineno-20-65" href="#__codelineno-20-65"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ValidationResult</span><span class="p">:</span>
+<a id="__codelineno-20-66" name="__codelineno-20-66" href="#__codelineno-20-66"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate a program without running it.&quot;&quot;&quot;</span>
+</code></pre></div>
+<h4 id="params">Params<a class="headerlink" href="#params" title="Permanent link">&para;</a></h4>
+<p>Params are caller-provided variables injected into both the inference prompt and the execution namespace. They allow the caller to pass context (file contents, search results, configuration) without baking it into the intent string.</p>
+<p><strong>Prompt injection</strong>: Param names, types, and descriptions appear in the system prompt as pre-set variables. The full values are NOT included in the inference prompt — only metadata. This keeps inference cheap even when params contain large content.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Pre-set variables:
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>  schema: str — the config schema definition
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>  target_dir: str — directory to search
+</code></pre></div>
+<p><strong>Execution injection</strong>: Param values are injected as top-level variables in the execution namespace. The generated program references them directly (<code>schema</code>, not <code>params["schema"]</code>).</p>
+<p><strong>Name collision</strong>: Param names are validated at resolution time — they must not shadow tool names or builtin names. Collisions are reported as errors.</p>
+<p><strong>Namespace check</strong>: Param names are added to the set of allowed names during validation, so the validator accepts references to them.</p>
+<h4 id="delegate-pipeline"><code>delegate</code> Pipeline<a class="headerlink" href="#delegate-pipeline" title="Permanent link">&para;</a></h4>
+<ol>
+<li>Resolve kit -&gt; <code>ResolvedKit</code></li>
+<li>Resolve params -&gt; validate names, extract metadata for prompt, extract values for namespace</li>
+<li>Build namespace description from resolved kit + param metadata</li>
+<li>Dispatch to inference providers in priority order -&gt; program string</li>
+<li>Parse program -&gt; <code>ast.Module</code></li>
+<li>Validate AST against core checks + custom rules + kit namespace + param names</li>
+<li>Compute grade from resolved kit tool grades</li>
+<li>Inject param values into execution namespace</li>
+<li>Run via executor (v1: AST compile + restricted run with traced namespace)</li>
+<li>Capture trace</li>
+<li>Return <code>DelegateResult</code> with program, trace, grade, output, metadata</li>
+</ol>
+<h3 id="mcp-mcp-server"><code>mcp/</code> — MCP Server<a class="headerlink" href="#mcp-mcp-server" title="Permanent link">&para;</a></h3>
+<p>Thin adapter over the service layer. All tools, no resources.</p>
+<p><strong>Tools:</strong>
+- <code>delegate(intent, kit, params, sandbox, rules)</code> — full pipeline
+- <code>generate(intent, kit, params, rules)</code> — infer + validate, no execution
+- <code>run_program(program, kit, params, sandbox, rules)</code> — validate + run a provided program
+- <code>create(program, kit, name, pattern)</code> — validate + save as template
+- <code>validate(program, kit, rules)</code> — check without running
+- <code>kit_info(kit)</code> — resolve kit, return tools/grades/descriptions
+- <code>kit_list()</code> — available predefined kits
+- <code>kit_create(name, tools, description)</code> — create a new predefined kit
+- <code>toolbox_list()</code> — all registered tools with metadata</p>
+<h3 id="clipy-cli"><code>cli.py</code> — CLI<a class="headerlink" href="#clipy-cli" title="Permanent link">&para;</a></h3>
+<p>Thin adapter over the service layer.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># Primary operations</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>lackpy<span class="w"> </span>delegate<span class="w"> </span><span class="s2">&quot;find callers of validate_token&quot;</span><span class="w"> </span>--kit<span class="w"> </span>debug
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>lackpy<span class="w"> </span>generate<span class="w"> </span><span class="s2">&quot;fix parse_header&quot;</span><span class="w"> </span>--kit<span class="w"> </span>implement
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>lackpy<span class="w"> </span>run<span class="w"> </span>program.py<span class="w"> </span>--kit<span class="w"> </span>debug
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>lackpy<span class="w"> </span>create<span class="w"> </span>program.py<span class="w"> </span>--name<span class="w"> </span>find-callers<span class="w"> </span>--kit<span class="w"> </span>debug<span class="w"> </span>--pattern<span class="w"> </span><span class="s2">&quot;find callers of {name}&quot;</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="c1"># Validation / inspection</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>lackpy<span class="w"> </span>validate<span class="w"> </span>program.py<span class="w"> </span>--kit<span class="w"> </span>debug
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>lackpy<span class="w"> </span>spec
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="c1"># Kit management</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>lackpy<span class="w"> </span>kit<span class="w"> </span>list
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>lackpy<span class="w"> </span>kit<span class="w"> </span>info<span class="w"> </span>debug
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>lackpy<span class="w"> </span>kit<span class="w"> </span>info<span class="w"> </span>--tools<span class="w"> </span>read,glob,find_callers
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>lackpy<span class="w"> </span>kit<span class="w"> </span>create<span class="w"> </span>my-kit<span class="w"> </span>--tools<span class="w"> </span>read,glob,find_callers
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="c1"># Toolbox management</span>
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>lackpy<span class="w"> </span>toolbox<span class="w"> </span>list
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>lackpy<span class="w"> </span>toolbox<span class="w"> </span>show<span class="w"> </span><span class="nb">read</span>
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>
+<a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="c1"># Templates</span>
+<a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>lackpy<span class="w"> </span>template<span class="w"> </span>list
+<a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>lackpy<span class="w"> </span>template<span class="w"> </span><span class="nb">test</span><span class="w"> </span>&lt;name&gt;
+<a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>
+<a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a><span class="c1"># Setup</span>
+<a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a>lackpy<span class="w"> </span>init
+<a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a>lackpy<span class="w"> </span>init<span class="w"> </span>--ollama-model<span class="w"> </span>qwen2.5-coder:1.5b
+<a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a>lackpy<span class="w"> </span>status
+</code></pre></div>
+<h2 id="configuration_1">Configuration<a class="headerlink" href="#configuration_1" title="Permanent link">&para;</a></h2>
+<p><code>.lackpy/config.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">[inference]</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;templates&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;rules&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;ollama-local&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;anthropic-haiku&quot;</span><span class="p">]</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="k">[inference.providers.templates]</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;templates&quot;</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="n">threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.8</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">min_uses</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="k">[inference.providers.rules]</span>
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;rules&quot;</span>
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="k">[inference.providers.ollama-local]</span>
+<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;ollama&quot;</span>
+<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434&quot;</span>
+<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;qwen2.5-coder:1.5b&quot;</span>
+<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="n">keep_alive</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;30m&quot;</span>
+<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>
+<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a><span class="k">[inference.providers.anthropic-haiku]</span>
+<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a><span class="n">plugin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;anthropic&quot;</span>
+<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-haiku-4-5-20251001&quot;</span>
+<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>
+<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a><span class="k">[sandbox]</span>
+<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="w">          </span><span class="c1"># v1: restricted run fallback; v2: nsjail</span>
+<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">120</span>
+<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a><span class="n">memory_mb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">512</span>
+<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>
+<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a><span class="k">[kit]</span>
+<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;debug&quot;</span>
+<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>
+<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a><span class="k">[tool_providers]</span>
+<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a><span class="c1"># Builtin tools</span>
+<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a><span class="n">read</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a><span class="n">edit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a><span class="n">write</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a><span class="n">glob</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a>
+<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a><span class="c1"># Python import tools</span>
+<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a><span class="n">find_definitions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">module</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;fledgling.api&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">function</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;find_definitions&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a><span class="n">find_callers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">module</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;fledgling.api&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">function</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;find_callers&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a><span class="n">run_tests</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">module</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;blq.api&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">function</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;run_tests&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a><span class="n">errors</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">provider</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">module</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;blq.api&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">function</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;get_errors&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="k">[project]</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;lackpy&quot;</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Python that lacks most of Python. Restricted program generation and execution for tool composition.&quot;</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="n">requires-python</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&gt;=3.10&quot;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c1"># Zero required dependencies — core validation needs only stdlib</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="k">[project.optional-dependencies]</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="n">ollama</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;ollama&gt;=0.4&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="n">sandbox</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;nsjail-python&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="n">anthropic</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;anthropic&gt;=0.40&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="n">mcp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;mcp[cli]&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="n">fledgling</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;fledgling&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a><span class="n">blq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;blq-cli&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a><span class="n">full</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;lackpy[ollama,sandbox,anthropic,mcp,fledgling,blq]&quot;</span><span class="p">]</span>
+<a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a>
+<a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a><span class="k">[project.scripts]</span>
+<a id="__codelineno-24-17" name="__codelineno-24-17" href="#__codelineno-24-17"></a><span class="n">lackpy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;lackpy.cli:main&quot;</span>
+</code></pre></div>
+<p>Core package (<code>lang/</code> validation + <code>run/</code> runner) has <strong>zero dependencies</strong> beyond Python stdlib.</p>
+<h2 id="design-principles">Design Principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>Zero-dependency core.</strong> The validator and restricted executor use only Python stdlib. Everything else is optional and pluggable.</p>
+</li>
+<li>
+<p><strong>The AST is the security boundary.</strong> Not the sandbox (belt), not the namespace (suspenders) — the AST whitelist is the primary safety layer. If a program passes validation, it can only do things the namespace allows. The sandbox catches bugs in the validator.</p>
+</li>
+<li>
+<p><strong>The model is untrusted.</strong> Every model output passes through the full validation pipeline. Safety comes from the pipeline, not the model.</p>
+</li>
+<li>
+<p><strong>Plugin-based extensibility.</strong> Both the toolbox (tool providers) and the inference pipeline (inference providers) are plugin-based. Adding a new tool backend or a new model provider is configuration, not code changes to the core.</p>
+</li>
+<li>
+<p><strong>Graceful degradation everywhere.</strong> No Ollama? Skip that provider. No nsjail? Use restricted run. No fledgling? Tool excluded from kits. No agent-riggs? Templates still work locally. The tool works with just Python stdlib + a model.</p>
+</li>
+<li>
+<p><strong>The program is the trace.</strong> A lackpy program is both the execution specification and the audit trail. The AST is fully parseable, the tool calls are enumerable, the grade is decidable at parse time.</p>
+</li>
+<li>
+<p><strong>The ratchet is built in.</strong> Every successful execution is a potential template. Templates replace model calls. The steady state is that the model is rarely called because its best outputs have been promoted. Two feed paths: explicit (<code>create</code>) and promotion (from successful traces).</p>
+</li>
+<li>
+<p><strong>Separation of concerns.</strong> lackpy owns tool selection (kits) and program generation/validation/execution. Kibitzer owns mode enforcement (permissions, write boundaries, sandboxing policy). agent-riggs audits and contributes templates but is not a dependency.</p>
+</li>
+</ol>
+<h2 id="v2-roadmap">v2 Roadmap<a class="headerlink" href="#v2-roadmap" title="Permanent link">&para;</a></h2>
+<p>Items deferred from v1, with interfaces defined but not implemented:</p>
+<ul>
+<li><strong>nsjail executor</strong>: Design the sandbox execution model once the generation pipeline is working and the shape of generated programs is understood. Will use the <code>nsjail-python</code> package.</li>
+<li><strong>Quartermaster</strong>: <code>kit=None</code> triggers model-inferred kit selection. Uses same Ollama instance with a prompt listing available tools and the intent. Returns a kit.</li>
+<li><strong>MCP tool providers</strong>: <code>mcp-local</code> and <code>mcp-system</code> provider plugins for the toolbox. lackpy becomes both MCP server and client, reading configs from <code>.mcp.json</code>, <code>~/.claude/mcp.json</code>, etc.</li>
+<li><strong>Additional inference providers</strong>: Bedrock, OpenAI, Claude Code subprocess, cache layer, remote Ollama instances.</li>
+</ul>
+<h2 id="testing-strategy">Testing Strategy<a class="headerlink" href="#testing-strategy" title="Permanent link">&para;</a></h2>
+<h3 id="unit-tests-validator-highest-priority">Unit Tests: Validator (highest priority)<a class="headerlink" href="#unit-tests-validator-highest-priority" title="Permanent link">&para;</a></h3>
+<p>For each forbidden construct, a program that uses it and an assertion that the validator rejects it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_rejects_import</span><span class="p">():</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">validate</span><span class="p">(</span><span class="s2">&quot;import os&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">valid</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_rejects_function_def</span><span class="p">():</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">validate</span><span class="p">(</span><span class="s2">&quot;def f(): pass&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">valid</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_rejects_while</span><span class="p">():</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">validate</span><span class="p">(</span><span class="s2">&quot;while True: pass&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">valid</span>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_rejects_forbidden_name</span><span class="p">():</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">validate</span><span class="p">(</span><span class="s2">&quot;__import__(&#39;os&#39;)&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">valid</span>
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_rejects_unknown_function</span><span class="p">():</span>
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">validate</span><span class="p">(</span><span class="s2">&quot;unknown_tool()&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">valid</span>
+<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a>
+<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_accepts_valid_program</span><span class="p">():</span>
+<a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">validate</span><span class="p">(</span><span class="s2">&quot;x = read(&#39;test.py&#39;)</span><span class="se">\n</span><span class="s2">len(x)&quot;</span><span class="p">,</span> <span class="n">allowed_names</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;read&quot;</span><span class="p">})</span>
+<a id="__codelineno-25-18" name="__codelineno-25-18" href="#__codelineno-25-18"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">valid</span>
+<a id="__codelineno-25-19" name="__codelineno-25-19" href="#__codelineno-25-19"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">calls</span> <span class="o">==</span> <span class="p">[</span><span class="s2">&quot;read&quot;</span><span class="p">,</span> <span class="s2">&quot;len&quot;</span><span class="p">]</span>
+</code></pre></div>
+<h3 id="unit-tests-custom-rules">Unit Tests: Custom Rules<a class="headerlink" href="#unit-tests-custom-rules" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_no_loops_rule</span><span class="p">():</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>    <span class="n">rule</span> <span class="o">=</span> <span class="n">no_loops</span><span class="p">()</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>    <span class="n">tree</span> <span class="o">=</span> <span class="n">ast</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="s2">&quot;for x in range(10): print(x)&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    <span class="k">assert</span> <span class="n">rule</span><span class="p">(</span><span class="n">tree</span><span class="p">)</span> <span class="o">!=</span> <span class="p">[]</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_max_calls_rule</span><span class="p">():</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>    <span class="n">rule</span> <span class="o">=</span> <span class="n">max_calls</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>    <span class="n">tree</span> <span class="o">=</span> <span class="n">ast</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="s2">&quot;a = read(&#39;x&#39;)</span><span class="se">\n</span><span class="s2">b = read(&#39;y&#39;)</span><span class="se">\n</span><span class="s2">c = read(&#39;z&#39;)&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>    <span class="k">assert</span> <span class="n">rule</span><span class="p">(</span><span class="n">tree</span><span class="p">)</span> <span class="o">!=</span> <span class="p">[]</span>
+</code></pre></div>
+<h3 id="integration-tests-execution">Integration Tests: Execution<a class="headerlink" href="#integration-tests-execution" title="Permanent link">&para;</a></h3>
+<p>Mock tool implementations returning known values:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_run_simple</span><span class="p">():</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>    <span class="n">namespace</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;read&quot;</span><span class="p">:</span> <span class="k">lambda</span> <span class="n">path</span><span class="p">:</span> <span class="s2">&quot;hello world&quot;</span><span class="p">}</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">run_program</span><span class="p">(</span><span class="s2">&quot;content = read(&#39;test.py&#39;)</span><span class="se">\n</span><span class="s2">len(content)&quot;</span><span class="p">,</span> <span class="n">kit</span><span class="o">=</span><span class="n">namespace</span><span class="p">)</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">output</span> <span class="o">==</span> <span class="mi">11</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">entries</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">tool</span> <span class="o">==</span> <span class="s2">&quot;read&quot;</span>
+</code></pre></div>
+<h3 id="integration-tests-kit-resolution">Integration Tests: Kit Resolution<a class="headerlink" href="#integration-tests-kit-resolution" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_resolve_predefined_kit</span><span class="p">():</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>    <span class="n">kit</span> <span class="o">=</span> <span class="n">resolve_kit</span><span class="p">(</span><span class="s2">&quot;debug&quot;</span><span class="p">)</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>    <span class="k">assert</span> <span class="s2">&quot;read&quot;</span> <span class="ow">in</span> <span class="n">kit</span><span class="o">.</span><span class="n">tools</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>    <span class="k">assert</span> <span class="s2">&quot;edit&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">kit</span><span class="o">.</span><span class="n">tools</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_resolve_explicit_list</span><span class="p">():</span>
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>    <span class="n">kit</span> <span class="o">=</span> <span class="n">resolve_kit</span><span class="p">([</span><span class="s2">&quot;read&quot;</span><span class="p">,</span> <span class="s2">&quot;glob&quot;</span><span class="p">])</span>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">kit</span><span class="o">.</span><span class="n">tools</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+</code></pre></div>
+<h3 id="model-tests-require-ollama">Model Tests (require Ollama)<a class="headerlink" href="#model-tests-require-ollama" title="Permanent link">&para;</a></h3>
+<p>Marked <code>@pytest.mark.ollama</code>, skipped if unavailable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">ollama</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_delegate_end_to_end</span><span class="p">():</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">delegate</span><span class="p">(</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>        <span class="s2">&quot;read the file src/main.py and print its length&quot;</span><span class="p">,</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>        <span class="n">kit</span><span class="o">=</span><span class="s2">&quot;debug&quot;</span><span class="p">,</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>    <span class="p">)</span>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">success</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>    <span class="k">assert</span> <span class="nb">any</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">tool</span> <span class="o">==</span> <span class="s2">&quot;read&quot;</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">trace</span><span class="o">.</span><span class="n">entries</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="inference-provider-tests">Inference Provider Tests<a class="headerlink" href="#inference-provider-tests" title="Permanent link">&para;</a></h3>
+<p>Each provider tested independently with known inputs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_template_matching</span><span class="p">():</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>    <span class="n">provider</span> <span class="o">=</span> <span class="n">TemplatesProvider</span><span class="p">(</span><span class="n">templates_dir</span><span class="o">=</span><span class="n">test_templates</span><span class="p">)</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">provider</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="s2">&quot;find callers of validate_token&quot;</span><span class="p">,</span> <span class="n">namespace_desc</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>    <span class="k">assert</span> <span class="s2">&quot;find_callers&quot;</span> <span class="ow">in</span> <span class="n">result</span>
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_rules_provider</span><span class="p">():</span>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>    <span class="n">provider</span> <span class="o">=</span> <span class="n">RulesProvider</span><span class="p">()</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">provider</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="s2">&quot;read file src/main.py&quot;</span><span class="p">,</span> <span class="n">namespace_desc</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>    <span class="k">assert</span> <span class="s2">&quot;read(&quot;</span> <span class="ow">in</span> <span class="n">result</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
