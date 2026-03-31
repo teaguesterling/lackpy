@@ -168,11 +168,11 @@ from lackpy.lackey.providers import fledgling
 find_definitions = Tool(fledgling)
 ```
 
-Same as MCP but resolved from `.lackpy/providers/fledgling.yml`:
-```yaml
-name: fledgling
-type: mcp
-server: fledgling
+Same as MCP but resolved from `.lackpy/providers/fledgling.toml`:
+```toml
+name = "fledgling"
+type = "mcp"
+server = "fledgling"
 ```
 
 **Provider module protocol:**
@@ -796,8 +796,8 @@ The templates provider loads Lackey files, extracts `pattern`, and uses it for i
 .lackpy/
 ├── config.toml
 ├── providers/
-│   ├── fledgling.yml
-│   └── blq.yml
+│   ├── fledgling.toml
+│   └── blq.toml
 ├── templates/            # Lackey files with pattern (templates)
 │   ├── find_callers.py
 │   ├── read_file.py
