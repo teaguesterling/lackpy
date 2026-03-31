@@ -15,6 +15,10 @@ ALLOWED_NODES: set[type] = {
     ast.Constant, ast.Starred, ast.Slice,
     # Comprehension internals
     ast.comprehension, ast.IfExp,
+    # Lambda (restricted to key= argument — enforced by validator)
+    ast.Lambda, ast.arguments, ast.arg,
+    # Keyword arguments
+    ast.keyword,
     # Context nodes
     ast.Load, ast.Store, ast.Del,
     # Operators
@@ -28,7 +32,6 @@ FORBIDDEN_NODES: set[type] = {
     ast.Import, ast.ImportFrom,
     ast.FunctionDef, ast.AsyncFunctionDef,
     ast.ClassDef,
-    ast.Lambda,
     ast.While,
     ast.Try, ast.ExceptHandler,
     ast.Raise,

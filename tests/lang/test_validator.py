@@ -31,10 +31,9 @@ class TestForbiddenNodes:
         assert not result.valid
         assert any("ClassDef" in e for e in result.errors)
 
-    def test_rejects_lambda(self):
-        result = validate("f = lambda x: x", allowed_names=set())
-        assert not result.valid
-        assert any("Lambda" in e for e in result.errors)
+    def test_rejects_standalone_lambda(self):
+        """Lambda is only allowed as key= argument, not standalone."""
+        assert not validate("x = lambda: 1", allowed_names=set()).valid
 
     def test_rejects_while(self):
         result = validate("while True:\n    pass")
@@ -183,3 +182,42 @@ class TestValidPrograms:
         result = validate("sort_by([{'a': 1}], 'a')")
         assert result.valid
         assert "sort_by" in result.calls
+
+
+class TestLambdaRestriction:
+    def test_allows_lambda_as_sort_key(self):
+        result = validate(
+            "sorted([{'a': 1}], key=lambda x: x['a'])",
+            allowed_names=set(),
+        )
+        assert result.valid
+
+    def test_allows_lambda_in_sort_by(self):
+        result = validate(
+            "sort_by([{'a': 1}], key=lambda x: x['a'])",
+            allowed_names=set(),
+        )
+        assert result.valid
+
+    def test_allows_lambda_with_min_max(self):
+        result = validate(
+            "items = [{'v': 1}, {'v': 2}]\nmin(items, key=lambda x: x['v'])",
+            allowed_names=set(),
+        )
+        assert result.valid
+
+    def test_rejects_lambda_as_value(self):
+        result = validate("x = lambda: 1", allowed_names=set())
+        assert not result.valid
+        assert any("key= argument" in e for e in result.errors)
+
+    def test_rejects_lambda_as_positional_arg(self):
+        result = validate("sorted([1, 2], lambda x: x)", allowed_names=set())
+        assert not result.valid
+
+    def test_rejects_lambda_in_non_key_kwarg(self):
+        result = validate(
+            "sorted([1], reverse=lambda x: x)",
+            allowed_names=set(),
+        )
+        assert not result.valid

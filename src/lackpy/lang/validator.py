@@ -63,6 +63,12 @@ def validate(
             errors=[f"Parse error: {e.msg} (line {e.lineno})"],
         )
 
+    # Build parent map for lambda restriction check (step 5.5)
+    parent_map: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent_map[id(child)] = node
+
     # Step 2: Node walk — reject disallowed node types
     for node in ast.walk(tree):
         node_type = type(node)
@@ -96,6 +102,16 @@ def validate(
                 errors.append(
                     f"For-loop at line {node.lineno} must iterate over "
                     f"a function call or variable"
+                )
+
+    # Step 5.5: Lambda check — only allowed as key= keyword argument value
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Lambda):
+            parent = parent_map.get(id(node))
+            if not (isinstance(parent, ast.keyword) and parent.arg == "key"):
+                errors.append(
+                    f"Lambda at line {node.lineno} is only allowed as key= argument "
+                    f"(e.g., key=lambda x: x['field'])"
                 )
 
     # Step 6: String literal check — no dunder strings

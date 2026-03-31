@@ -19,8 +19,12 @@ def test_key_forbidden_nodes_present():
     assert ast.Import in FORBIDDEN_NODES
     assert ast.FunctionDef in FORBIDDEN_NODES
     assert ast.While in FORBIDDEN_NODES
-    assert ast.Lambda in FORBIDDEN_NODES
     assert ast.ClassDef in FORBIDDEN_NODES
+
+
+def test_lambda_in_allowed_not_forbidden():
+    assert ast.Lambda in ALLOWED_NODES
+    assert ast.Lambda not in FORBIDDEN_NODES
 
 
 def test_key_allowed_nodes_present():
