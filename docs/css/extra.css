@@ -1,0 +1,4 @@
+/* Slightly tighter code blocks */
+.md-typeset code {
+    font-size: 0.85em;
+}

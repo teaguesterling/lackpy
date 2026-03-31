@@ -18,6 +18,16 @@ fledgling = ["fledgling"]
 blq = ["blq-cli"]
 full = ["lackpy[ollama,sandbox,anthropic,mcp,fledgling,blq]"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+docs = [
+    "mkdocs-material>=9",
+    "mkdocstrings[python]>=0.24",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
+]
+
+[project.urls]
+Documentation = "https://lackpy.readthedocs.io"
+Repository = "https://github.com/teague/lackpy"
 
 [project.scripts]
 lackpy = "lackpy.cli:main"
