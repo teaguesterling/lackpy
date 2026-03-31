@@ -1,6 +1,6 @@
 """lackpy: Python that lacks most of Python."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .service import LackpyService
 from .lang.validator import validate, ValidationResult
