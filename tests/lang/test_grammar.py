@@ -44,3 +44,7 @@ def test_key_builtins_present():
     assert "print" in ALLOWED_BUILTINS
     assert "str" in ALLOWED_BUILTINS
     assert "range" in ALLOWED_BUILTINS
+
+
+def test_sort_by_in_builtins():
+    assert "sort_by" in ALLOWED_BUILTINS

@@ -57,4 +57,5 @@ ALLOWED_BUILTINS: frozenset[str] = frozenset({
     "min", "max", "sum", "any", "all", "abs", "round",
     "str", "int", "float", "bool", "list", "dict", "set", "tuple",
     "isinstance", "print",
+    "sort_by",
 })

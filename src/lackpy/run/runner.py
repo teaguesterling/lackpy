@@ -11,6 +11,10 @@ from .base import ExecutionResult
 from .trace import Trace, make_traced
 
 
+def _sort_by(items, key, reverse=False):
+    return sorted(items, key=lambda x: x[key] if isinstance(x, dict) else getattr(x, key), reverse=reverse)
+
+
 class RestrictedRunner:
     def run(self, program: str, namespace: dict[str, Callable],
             params: dict[str, Any] | None = None) -> ExecutionResult:
@@ -22,7 +26,10 @@ class RestrictedRunner:
             traced_ns[name] = make_traced(name, fn, trace)
 
         for name in ALLOWED_BUILTINS:
-            traced_ns[name] = getattr(_builtins_mod, name)
+            if name == "sort_by":
+                traced_ns[name] = _sort_by
+            else:
+                traced_ns[name] = getattr(_builtins_mod, name)
 
         if params:
             for name, value in params.items():

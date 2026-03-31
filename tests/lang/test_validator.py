@@ -178,3 +178,8 @@ class TestValidPrograms:
         result = validate("def (broken syntax")
         assert not result.valid
         assert any("Parse error" in e for e in result.errors)
+
+    def test_sort_by_allowed(self):
+        result = validate("sort_by([{'a': 1}], 'a')")
+        assert result.valid
+        assert "sort_by" in result.calls

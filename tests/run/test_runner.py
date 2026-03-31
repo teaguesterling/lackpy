@@ -73,3 +73,21 @@ class TestSecurity:
     def test_builtins_restricted(self, runner, mock_namespace):
         result = runner.run("compile('1', '', 'eval')", mock_namespace)
         assert not result.success
+
+
+class TestSortByBuiltin:
+    def test_sort_by_dict_key(self, runner, mock_namespace):
+        result = runner.run(
+            "items = [{'name': 'b', 'val': 2}, {'name': 'a', 'val': 1}]\nsort_by(items, 'name')",
+            mock_namespace,
+        )
+        assert result.success
+        assert result.output == [{'name': 'a', 'val': 1}, {'name': 'b', 'val': 2}]
+
+    def test_sort_by_reverse(self, runner, mock_namespace):
+        result = runner.run(
+            "items = [{'v': 1}, {'v': 3}, {'v': 2}]\nsort_by(items, 'v', reverse=True)",
+            mock_namespace,
+        )
+        assert result.success
+        assert result.output == [{'v': 3}, {'v': 2}, {'v': 1}]
