@@ -235,7 +235,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.success else 1
 
     if args.command == "generate":
-        result = asyncio.run(svc.generate(args.intent, kit=kit))
+        try:
+            result = asyncio.run(svc.generate(args.intent, kit=kit))
+        except RuntimeError as e:
+            print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
+            return 1
         print(result.program)
         return 0
 
@@ -247,7 +251,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "delegate":
         sandbox = getattr(args, "sandbox", None)
-        result = asyncio.run(svc.delegate(args.intent, kit=kit, sandbox=sandbox))
+        try:
+            result = asyncio.run(svc.delegate(args.intent, kit=kit, sandbox=sandbox))
+        except RuntimeError as e:
+            print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
+            return 1
         print(json.dumps(result, indent=2))
         return 0 if result["success"] else 1
 
