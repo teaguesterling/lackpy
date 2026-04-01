@@ -50,14 +50,23 @@ INTENTS = [
 ]
 
 ALL_MODELS = [
+    # Small (< 1.5GB)
     "qwen2.5-coder:0.5b",
-    "qwen2.5-coder:1.5b",
     "qwen3:0.6b",
+    "qwen2.5-coder:1.5b",
     "qwen2.5:1.5b",
+    "llama3.2:1b",
+    # Medium (1.5-3GB)
     "codegemma:2b",
     "smollm2:latest",
-    "phi4-mini:latest",
     "llama3.2:latest",
+    "phi4-mini:latest",
+    "qwen2.5-coder:3b",
+    "qwen2.5:3b",
+    "granite-code:3b",
+    # Large (3-8GB)
+    "qwen2.5-coder:7b",
+    "qwen2.5:7b",
 ]
 
 
