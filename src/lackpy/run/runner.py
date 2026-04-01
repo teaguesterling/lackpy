@@ -24,7 +24,8 @@ class RestrictedRunner:
     """
 
     def run(self, program: str, namespace: dict[str, Callable],
-            params: dict[str, Any] | None = None) -> ExecutionResult:
+            params: dict[str, Any] | None = None,
+            kibitzer_session: Any = None) -> ExecutionResult:
         """Compile and execute a lackpy program in a restricted namespace.
 
         The program's last expression (if any) is captured as the output.
@@ -35,6 +36,7 @@ class RestrictedRunner:
             namespace: Mapping of tool names to callables, injected into the
                 execution globals alongside allowed builtins.
             params: Named parameter values to inject into the namespace.
+            kibitzer_session: Optional KibitzerSession for per-call tracking.
 
         Returns:
             An ExecutionResult with success, output, trace, and variables.
@@ -45,7 +47,7 @@ class RestrictedRunner:
 
         traced_ns: dict[str, Any] = {}
         for name, fn in namespace.items():
-            traced_ns[name] = make_traced(name, fn, trace)
+            traced_ns[name] = make_traced(name, fn, trace, kibitzer_session=kibitzer_session)
 
         for name in ALLOWED_BUILTINS:
             if name == "sort_by":

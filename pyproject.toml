@@ -16,7 +16,8 @@ anthropic = ["anthropic>=0.40"]
 mcp = ["mcp[cli]"]
 fledgling = ["fledgling"]
 blq = ["blq-cli"]
-full = ["lackpy[ollama,sandbox,anthropic,mcp,fledgling,blq]"]
+kibitzer = ["kibitzer>=0.3"]
+full = ["lackpy[ollama,sandbox,anthropic,mcp,fledgling,blq,kibitzer]"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 docs = [
     "mkdocs-material>=9",

@@ -46,17 +46,22 @@ class Trace:
     files_modified: list[str] = field(default_factory=list)
 
 
-def make_traced(name: str, fn: Callable, trace: Trace) -> Callable:
+def make_traced(name: str, fn: Callable, trace: Trace,
+                kibitzer_session: Any = None) -> Callable:
     """Wrap a callable to record each invocation in a Trace.
 
     The wrapper captures positional and keyword arguments, measures wall-clock
     duration, appends a TraceEntry to ``trace``, and re-raises any exception
     after recording it.
 
+    If a kibitzer_session is provided, each call is also reported to Kibitzer
+    via after_call() for mode tracking and coaching.
+
     Args:
         name: Tool name to record in each TraceEntry.
         fn: The callable to wrap.
         trace: The Trace instance to append entries to.
+        kibitzer_session: Optional KibitzerSession for per-call tracking.
 
     Returns:
         A wrapper callable with the same signature as ``fn``.
@@ -82,6 +87,8 @@ def make_traced(name: str, fn: Callable, trace: Trace) -> Callable:
                 result=_summarize(result), duration_ms=duration,
                 success=True, error=None,
             ))
+            if kibitzer_session:
+                kibitzer_session.after_call(name, call_args, success=True)
             return result
         except Exception as e:
             duration = (time.perf_counter() - start) * 1000
@@ -90,6 +97,8 @@ def make_traced(name: str, fn: Callable, trace: Trace) -> Callable:
                 result=None, duration_ms=duration,
                 success=False, error=str(e),
             ))
+            if kibitzer_session:
+                kibitzer_session.after_call(name, call_args, success=False)
             raise
 
     return wrapper

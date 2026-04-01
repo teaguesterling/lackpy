@@ -1,0 +1,220 @@
+[
+  {
+    "intent": "find all public functions",
+    "qm_mode": "rules",
+    "ops": [
+      "find",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn:public').callers().save('feat: add public function')",
+    "qm_time": 0,
+    "asm_time": 7.576894998550415,
+    "total_time": 7.576894998550415,
+    "score": 4,
+    "baseline_chain": "select('.fn:public').callers().save('feat: add public function')",
+    "baseline_time": 2.425389051437378,
+    "baseline_score": 4
+  },
+  {
+    "intent": "find callers of validate_token",
+    "qm_mode": "rules",
+    "ops": [
+      "callers",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn#validate_token').callers().save('feat: add error handling')",
+    "qm_time": 0,
+    "asm_time": 1.3978209495544434,
+    "total_time": 1.3978209495544434,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').callers().save('feat: add token validation')",
+    "baseline_time": 2.0845859050750732,
+    "baseline_score": 4
+  },
+  {
+    "intent": "add a timeout parameter to all exported functions, format, test, and commit",
+    "qm_mode": "rules",
+    "ops": [
+      "addParam",
+      "black",
+      "find",
+      "save",
+      "select",
+      "test"
+    ],
+    "ops_count": 6,
+    "chain": "select('.fn:exported').addParam('timeout: int = 30')",
+    "qm_time": 0,
+    "asm_time": 1.2705557346343994,
+    "total_time": 1.2705557346343994,
+    "score": 4,
+    "baseline_chain": "select('.fn:exported').append('timeout: int = 30')\n.callers()\n.format()\n.test()\n.save('feat: add timeout')",
+    "baseline_time": 3.589068651199341,
+    "baseline_score": 3
+  },
+  {
+    "intent": "find functions that return None",
+    "qm_mode": "rules",
+    "ops": [
+      "find",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn:returns(None)').callers().save('fix: add error handling')",
+    "qm_time": 0,
+    "asm_time": 1.3650012016296387,
+    "total_time": 1.3650012016296387,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').filter(fn => fn.return_value() === None).save('fix: add error handling')",
+    "baseline_time": 2.6511850357055664,
+    "baseline_score": 4
+  },
+  {
+    "intent": "find similar functions to validate_token and compare them",
+    "qm_mode": "rules",
+    "ops": [
+      "compare",
+      "select",
+      "similar"
+    ],
+    "ops_count": 3,
+    "chain": "select('.fn#validate_token').compare().callers()",
+    "qm_time": 0,
+    "asm_time": 1.1476211547851562,
+    "total_time": 1.1476211547851562,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').similar(0.7)",
+    "baseline_time": 1.8315484523773193,
+    "baseline_score": 4
+  },
+  {
+    "intent": "show the call chain starting from handle_request",
+    "qm_mode": "rules",
+    "ops": [
+      "call_chain",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn:has(.ret > .none)').callers()",
+    "qm_time": 0,
+    "asm_time": 1.1759674549102783,
+    "total_time": 1.1759674549102783,
+    "score": 4,
+    "baseline_chain": "select('.fn#handle_request').call_chain()",
+    "baseline_time": 1.7600712776184082,
+    "baseline_score": 4
+  },
+  {
+    "intent": "add error handling to all database query calls",
+    "qm_mode": "rules",
+    "ops": [
+      "guard",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn[name^=\"query\"]').guard('DatabaseError', 'log and reraise')",
+    "qm_time": 0,
+    "asm_time": 1.4120922088623047,
+    "total_time": 1.4120922088623047,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').guard('DatabaseError', 'log and reraise')",
+    "baseline_time": 2.085676908493042,
+    "baseline_score": 4
+  },
+  {
+    "intent": "show what would break if I change validate_token",
+    "qm_mode": "rules",
+    "ops": [
+      "impact",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn#validate_token').callers().save('fix: add error handling')",
+    "qm_time": 0,
+    "asm_time": 1.3965671062469482,
+    "total_time": 1.3965671062469482,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').guard('DatabaseError', 'log and reraise')",
+    "baseline_time": 2.016787052154541,
+    "baseline_score": 4
+  },
+  {
+    "intent": "find dead code that no one calls anymore",
+    "qm_mode": "rules",
+    "ops": [
+      "callers",
+      "filter",
+      "select"
+    ],
+    "ops_count": 3,
+    "chain": "select('.fn').guard('DatabaseError', 'log and reraise')",
+    "qm_time": 0,
+    "asm_time": 1.1009714603424072,
+    "total_time": 1.1009714603424072,
+    "score": 4,
+    "baseline_chain": "select('.fn:no_call').count()",
+    "baseline_time": 2.097238063812256,
+    "baseline_score": 4
+  },
+  {
+    "intent": "extract the common pattern from all validate_ functions into validate_credential",
+    "qm_mode": "rules",
+    "ops": [
+      "extract",
+      "refactor",
+      "select",
+      "similar"
+    ],
+    "ops_count": 4,
+    "chain": "select('.fn#validate_token').callers().extract('validate_credential')",
+    "qm_time": 0,
+    "asm_time": 1.2835814952850342,
+    "total_time": 1.2835814952850342,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').extract('validate_credential')",
+    "baseline_time": 1.8801565170288086,
+    "baseline_score": 4
+  },
+  {
+    "intent": "find functions with high complexity and low test coverage",
+    "qm_mode": "rules",
+    "ops": [
+      "complexity",
+      "coverage",
+      "filter",
+      "select",
+      "test"
+    ],
+    "ops_count": 5,
+    "chain": "select('.fn:complexity > 10').filter(fn => fn.coverage() < 0.5).call_chain()",
+    "qm_time": 0,
+    "asm_time": 1.8322334289550781,
+    "total_time": 1.8322334289550781,
+    "score": 4,
+    "baseline_chain": "select('.fn#validate_token').complexity().filter(fn => fn.coverage() < 0.5)",
+    "baseline_time": 2.7455039024353027,
+    "baseline_score": 4
+  },
+  {
+    "intent": "rename process_data to transform_batch everywhere",
+    "qm_mode": "rules",
+    "ops": [
+      "filter",
+      "find",
+      "rename",
+      "select",
+      "source"
+    ],
+    "ops_count": 5,
+    "chain": "select('.fn#process_data').rename('transform_batch')",
+    "qm_time": 0,
+    "asm_time": 1.2844469547271729,
+    "total_time": 1.2844469547271729,
+    "score": 4,
+    "baseline_chain": "select('.fn#process_data').rename('transform_batch')",
+    "baseline_time": 1.7941615581512451,
+    "baseline_score": 4
+  }
+]

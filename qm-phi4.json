@@ -1,0 +1,184 @@
+[
+  {
+    "intent": "find all public functions",
+    "qm_mode": "rules",
+    "ops": [
+      "find",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn').filter(fn => fn.is_public())",
+    "qm_time": 0,
+    "asm_time": 14.104640483856201,
+    "total_time": 14.104640483856201,
+    "score": 4
+  },
+  {
+    "intent": "find callers of validate_token",
+    "qm_mode": "rules",
+    "ops": [
+      "callers",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.fn#validate_token').callers()",
+    "qm_time": 0,
+    "asm_time": 1.501955509185791,
+    "total_time": 1.501955509185791,
+    "score": 4
+  },
+  {
+    "intent": "add a timeout parameter to all exported functions, format, test, and commit",
+    "qm_mode": "rules",
+    "ops": [
+      "addParam",
+      "black",
+      "find",
+      "save",
+      "select",
+      "test"
+    ],
+    "ops_count": 6,
+    "chain": "select('.fn:exported').addParam('timeout: int = 30').black().test().save('feat: add timeout')",
+    "qm_time": 0,
+    "asm_time": 3.118248462677002,
+    "total_time": 3.118248462677002,
+    "score": 4
+  },
+  {
+    "intent": "find functions that return None",
+    "qm_mode": "rules",
+    "ops": [
+      "find",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": ".find('.fn').filter(function => function.ret === 'None')",
+    "qm_time": 0,
+    "asm_time": 1.6604423522949219,
+    "total_time": 1.6604423522949219,
+    "score": 2
+  },
+  {
+    "intent": "find similar functions to validate_token and compare them",
+    "qm_mode": "rules",
+    "ops": [
+      "compare",
+      "select",
+      "similar"
+    ],
+    "ops_count": 3,
+    "chain": "select('.fn#validate_token').similar(0.7).compare()",
+    "qm_time": 0,
+    "asm_time": 1.7427117824554443,
+    "total_time": 1.7427117824554443,
+    "score": 4
+  },
+  {
+    "intent": "show the call chain starting from handle_request",
+    "qm_mode": "rules",
+    "ops": [
+      "call_chain",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": ".select('.handle_request').call_chain()",
+    "qm_time": 0,
+    "asm_time": 1.478919267654419,
+    "total_time": 1.478919267654419,
+    "score": 4
+  },
+  {
+    "intent": "add error handling to all database query calls",
+    "qm_mode": "rules",
+    "ops": [
+      "guard",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": "select('.db.query').guard('DatabaseError', 'log and reraise')",
+    "qm_time": 0,
+    "asm_time": 2.1571216583251953,
+    "total_time": 2.1571216583251953,
+    "score": 4
+  },
+  {
+    "intent": "show what would break if I change validate_token",
+    "qm_mode": "rules",
+    "ops": [
+      "impact",
+      "select"
+    ],
+    "ops_count": 2,
+    "chain": ".select('.validate_token').impact()",
+    "qm_time": 0,
+    "asm_time": 1.1835529804229736,
+    "total_time": 1.1835529804229736,
+    "score": 4
+  },
+  {
+    "intent": "find dead code that no one calls anymore",
+    "qm_mode": "rules",
+    "ops": [
+      "callers",
+      "filter",
+      "select"
+    ],
+    "ops_count": 3,
+    "chain": "select('.fn:not(.called)').dead_code().remove()",
+    "qm_time": 0,
+    "asm_time": 1.6420061588287354,
+    "total_time": 1.6420061588287354,
+    "score": 4
+  },
+  {
+    "intent": "extract the common pattern from all validate_ functions into validate_credential",
+    "qm_mode": "rules",
+    "ops": [
+      "extract",
+      "refactor",
+      "select",
+      "similar"
+    ],
+    "ops_count": 4,
+    "chain": "select('.fn[name^=\"validate_\"]').refactor('validate_credential')",
+    "qm_time": 0,
+    "asm_time": 2.2197265625,
+    "total_time": 2.2197265625,
+    "score": 4
+  },
+  {
+    "intent": "find functions with high complexity and low test coverage",
+    "qm_mode": "rules",
+    "ops": [
+      "complexity",
+      "coverage",
+      "filter",
+      "select",
+      "test"
+    ],
+    "ops_count": 5,
+    "chain": "select('.fn').filter(fn => fn.complexity() > 10).filter(fn => !fn.test())",
+    "qm_time": 0,
+    "asm_time": 2.4785187244415283,
+    "total_time": 2.4785187244415283,
+    "score": 4
+  },
+  {
+    "intent": "rename process_data to transform_batch everywhere",
+    "qm_mode": "rules",
+    "ops": [
+      "filter",
+      "find",
+      "rename",
+      "select",
+      "source"
+    ],
+    "ops_count": 5,
+    "chain": "select('.fn').filter(fn => fn.name === 'process_data').rename('transform_batch')",
+    "qm_time": 0,
+    "asm_time": 2.145021438598633,
+    "total_time": 2.145021438598633,
+    "score": 4
+  }
+]

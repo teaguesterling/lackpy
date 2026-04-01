@@ -73,12 +73,22 @@ def _strip_top_level_return(program: str) -> str:
     return ast.unparse(tree)
 
 
+try:
+    from kibitzer import KibitzerSession
+    _HAS_KIBITZER = True
+except ImportError:
+    _HAS_KIBITZER = False
+
+
 class LackpyService:
     """Unified service layer orchestrating the lackpy pipeline.
 
     Both the MCP server and CLI are thin adapters over this class.
     Initialize with a workspace path to set the working directory
     for tool execution.
+
+    When kibitzer is installed, the service automatically creates a
+    KibitzerSession for mode enforcement, tool tracking, and coaching.
 
     Args:
         workspace: Root directory for tool execution. Defaults to cwd.
@@ -96,6 +106,8 @@ class LackpyService:
             self.toolbox.register_tool(spec)
         self._inference_providers: list = []
         self._init_inference_providers()
+        self._kibitzer: Any = None
+        self._init_kibitzer()
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"
@@ -117,6 +129,26 @@ class LackpyService:
                 self._inference_providers.append(AnthropicProvider(
                     model=provider_cfg.get("model", "claude-haiku-4-5-20251001"),
                 ))
+
+    def _init_kibitzer(self) -> None:
+        """Initialize Kibitzer session if available."""
+        if not _HAS_KIBITZER:
+            return
+        try:
+            self._kibitzer = KibitzerSession(project_dir=self._workspace)
+            self._kibitzer.load()
+            # Register our tools so Kibitzer can make grade-aware decisions
+            self._kibitzer.register_tools([
+                {
+                    "name": spec.name,
+                    "grade": {"w": spec.grade_w, "d": spec.effects_ceiling},
+                    "description": spec.description,
+                    "effects": "write" if spec.grade_w >= 3 else "read" if spec.grade_w >= 1 else "none",
+                }
+                for spec in self.toolbox.list_tools()
+            ])
+        except Exception:
+            self._kibitzer = None
 
     def _resolve_kit(self, kit: str | list[str] | dict | None) -> ResolvedKit:
         if kit is None:
@@ -241,6 +273,15 @@ class LackpyService:
         start = time.perf_counter()
         resolved = self._resolve_kit(kit)
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
+
+        # Kibitzer: register context for this delegation
+        if self._kibitzer:
+            self._kibitzer.register_context({
+                "source": "lackpy",
+                "intent": intent,
+                "kit": list(resolved.tools.keys()),
+            })
+
         if _program_override:
             from .infer.dispatch import GenerationResult
             gen_result = GenerationResult(
@@ -250,14 +291,52 @@ class LackpyService:
             )
         else:
             gen_result = await self.generate(intent, kit, params, rules)
+
+        # Kibitzer: validate planned calls before execution
+        kibitzer_suggestions: list[str] = []
+        if self._kibitzer:
+            validation_result = validate(gen_result.program, allowed_names=set(resolved.tools.keys()) | param_names)
+            if validation_result.valid:
+                planned = [{"tool": call, "input": {}} for call in validation_result.calls
+                           if call not in ALLOWED_BUILTINS]
+                violations = self._kibitzer.validate_calls(planned)
+                if violations:
+                    return {
+                        "success": False,
+                        "program": gen_result.program,
+                        "grade": {"w": resolved.grade.w, "d": resolved.grade.d},
+                        "generation_tier": gen_result.provider_name,
+                        "error": "Kibitzer mode policy violation: " + "; ".join(v.reason for v in violations),
+                        "correction_strategy": gen_result.correction_strategy,
+                        "correction_attempts": gen_result.correction_attempts,
+                    }
+
         prev_cwd = os.getcwd()
         try:
             os.chdir(self._workspace)
-            exec_result = self._runner.run(gen_result.program, resolved.callables, params=param_values)
+            exec_result = self._runner.run(
+                gen_result.program, resolved.callables, params=param_values,
+                kibitzer_session=self._kibitzer,
+            )
         finally:
             os.chdir(prev_cwd)
+
+        # Kibitzer: get coaching suggestions after execution
+        if self._kibitzer:
+            kibitzer_suggestions = self._kibitzer.get_suggestions()
+            # Report generation outcome
+            self._kibitzer.report_generation({
+                "intent": intent,
+                "program": gen_result.program,
+                "provider": gen_result.provider_name,
+                "correction_attempts": gen_result.correction_attempts,
+                "correction_strategy": gen_result.correction_strategy,
+                "success": exec_result.success,
+            })
+            self._kibitzer.save()
+
         total_ms = (time.perf_counter() - start) * 1000
-        return {
+        result = {
             "success": exec_result.success,
             "program": gen_result.program,
             "grade": {"w": resolved.grade.w, "d": resolved.grade.d},
@@ -275,6 +354,9 @@ class LackpyService:
             "correction_strategy": gen_result.correction_strategy,
             "correction_attempts": gen_result.correction_attempts,
         }
+        if kibitzer_suggestions:
+            result["kibitzer_suggestions"] = kibitzer_suggestions
+        return result
 
     def parse_lackey(self, path: Path) -> Any:
         """Parse a Lackey file and extract metadata."""
