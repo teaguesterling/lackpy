@@ -7,9 +7,12 @@ Usage:
 
 import argparse
 import json
+import os
+import sys
 import time
 
-
+# Force unbuffered stdout so output appears immediately when piped
+sys.stdout.reconfigure(line_buffering=True)
 
 import ollama
 
