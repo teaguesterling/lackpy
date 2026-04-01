@@ -16,8 +16,16 @@ Usage:
 import argparse
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 import ollama
+
+
+def _chat_with_timeout(client, model, messages, options, timeout):
+    """Run a chat call with a hard timeout using a thread."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(client.chat, model=model, messages=messages, options=options)
+        return future.result(timeout=timeout)
 
 FULL_API = """select(css) / source(glob).find(css) - entry. CSS: .fn .cls .call #name :has() :not() :exported [name^="test_"]
 .find(css) .filter(fn => cond) .callers() .callees() .similar(n) .reachable(n) .call_chain()
@@ -126,16 +134,17 @@ def score_output(content: str) -> int:
     return sum([has_select, has_chain, is_single_expr, no_def])
 
 
-def run_quartermaster(client, model: str, intent: str) -> tuple[list[str], float, int]:
+def run_quartermaster(client, model: str, intent: str, timeout: int = 60) -> tuple[list[str], float, int]:
     """Stage 1: Select operations for the intent."""
     start = time.time()
-    resp = client.chat(
-        model=model,
+    resp = _chat_with_timeout(
+        client, model,
         messages=[
             {"role": "system", "content": QM_SYSTEM},
             {"role": "user", "content": intent},
         ],
         options={"temperature": 0.1},
+        timeout=timeout,
     )
     elapsed = time.time() - start
     content = strip_fences(resp.message.content.strip())
@@ -146,18 +155,19 @@ def run_quartermaster(client, model: str, intent: str) -> tuple[list[str], float
     return ops, elapsed, tokens
 
 
-def run_assembler(client, model: str, intent: str, ops: list[str]) -> tuple[str, float, int]:
+def run_assembler(client, model: str, intent: str, ops: list[str], timeout: int = 60) -> tuple[str, float, int]:
     """Stage 2: Write chain using only selected operations."""
     op_lines = "\n".join(f"  {OP_DESCRIPTIONS[op]}" for op in ops if op in OP_DESCRIPTIONS)
     system = ASM_SYSTEM_TEMPLATE.format(operations=op_lines)
     start = time.time()
-    resp = client.chat(
-        model=model,
+    resp = _chat_with_timeout(
+        client, model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": intent},
         ],
         options={"temperature": 0.2},
+        timeout=timeout,
     )
     elapsed = time.time() - start
     content = strip_fences(resp.message.content.strip())
@@ -170,6 +180,7 @@ def main():
     parser.add_argument("--host", default="http://localhost:11435")
     parser.add_argument("--qm-model", default="qwen2.5-coder:0.5b", help="Quartermaster model (tool selection)")
     parser.add_argument("--asm-model", default="qwen2.5-coder:1.5b", help="Assembler model (chain writing)")
+    parser.add_argument("--timeout", type=int, default=60, help="Timeout per call in seconds (default: 60)")
     parser.add_argument("--output", default=None, help="Save results as JSON")
     parser.add_argument("--baseline", action="store_true", help="Also run assembler without quartermaster (full API)")
     args = parser.parse_args()
@@ -188,9 +199,14 @@ def main():
         print(f"INTENT: {intent}")
 
         # Stage 1: Quartermaster
+        qm_time = 0
+        asm_time = 0
         try:
-            ops, qm_time, qm_tokens = run_quartermaster(client, args.qm_model, intent)
+            ops, qm_time, qm_tokens = run_quartermaster(client, args.qm_model, intent, timeout=args.timeout)
             print(f"  QM ({qm_time:.1f}s, {qm_tokens}t): {', '.join(ops)}")
+        except FuturesTimeout:
+            print(f"  QM TIMEOUT ({args.timeout}s)")
+            ops = []
         except Exception as e:
             print(f"  QM ERROR: {e}")
             ops = []
@@ -198,11 +214,16 @@ def main():
         # Stage 2: Assembler with selected ops
         if ops:
             try:
-                chain, asm_time, asm_tokens = run_assembler(client, args.asm_model, intent, ops)
+                chain, asm_time, asm_tokens = run_assembler(client, args.asm_model, intent, ops, timeout=args.timeout)
                 sc = score_output(chain)
                 total_time = qm_time + asm_time
                 print(f"  ASM ({asm_time:.1f}s, {asm_tokens}t) [{sc}/4]: {chain[:100]}")
                 print(f"  TOTAL: {total_time:.1f}s, ops={len(ops)}")
+            except FuturesTimeout:
+                chain = "TIMEOUT"
+                sc = 0
+                total_time = qm_time + args.timeout
+                print(f"  ASM TIMEOUT ({args.timeout}s)")
             except Exception as e:
                 chain = f"ERROR: {e}"
                 sc = 0
@@ -215,7 +236,7 @@ def main():
 
         entry = {
             "intent": intent, "ops": ops, "chain": chain,
-            "qm_time": qm_time if ops else 0, "asm_time": asm_time if ops else 0,
+            "qm_time": qm_time, "asm_time": asm_time,
             "total_time": total_time, "score": sc,
         }
 
@@ -223,12 +244,14 @@ def main():
         if args.baseline:
             try:
                 all_ops = list(OP_DESCRIPTIONS.keys())
-                bl_chain, bl_time, bl_tokens = run_assembler(client, args.asm_model, intent, all_ops)
+                bl_chain, bl_time, bl_tokens = run_assembler(client, args.asm_model, intent, all_ops, timeout=args.timeout)
                 bl_sc = score_output(bl_chain)
                 print(f"  BASE ({bl_time:.1f}s, {bl_tokens}t) [{bl_sc}/4]: {bl_chain[:100]}")
                 entry["baseline_chain"] = bl_chain
                 entry["baseline_time"] = bl_time
                 entry["baseline_score"] = bl_sc
+            except FuturesTimeout:
+                print(f"  BASE TIMEOUT ({args.timeout}s)")
             except Exception as e:
                 print(f"  BASE ERROR: {e}")
 

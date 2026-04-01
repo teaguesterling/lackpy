@@ -8,6 +8,7 @@ Usage:
 import argparse
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 import ollama
 
@@ -73,18 +74,26 @@ def strip_fences(content: str) -> str:
     return content.strip()
 
 
-def run_model(client, model: str, intents: list[str]) -> list[dict]:
+def _chat_with_timeout(client, model, messages, options, timeout):
+    """Run a chat call with a hard timeout using a thread."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(client.chat, model=model, messages=messages, options=options)
+        return future.result(timeout=timeout)
+
+
+def run_model(client, model: str, intents: list[str], timeout: int = 60) -> list[dict]:
     results = []
     for intent in intents:
         start = time.time()
         try:
-            resp = client.chat(
-                model=model,
+            resp = _chat_with_timeout(
+                client, model,
                 messages=[
                     {"role": "system", "content": SYSTEM},
                     {"role": "user", "content": intent},
                 ],
                 options={"temperature": 0.2},
+                timeout=timeout,
             )
             elapsed = time.time() - start
             content = strip_fences(resp.message.content.strip())
@@ -98,6 +107,10 @@ def run_model(client, model: str, intents: list[str]) -> list[dict]:
                 "time": elapsed, "tokens": gen_tokens,
                 "prompt_tokens": prompt_tokens, "score": sc,
             })
+        except FuturesTimeout:
+            elapsed = time.time() - start
+            print(f"  [T/O] {intent[:50]:50s} | {elapsed:.0f}s (timeout)")
+            results.append({"intent": intent, "output": "TIMEOUT", "time": elapsed, "tokens": 0, "score": 0})
         except Exception as e:
             elapsed = time.time() - start
             print(f"  [ERR] {intent[:50]:50s} | {e}")
@@ -109,6 +122,7 @@ def main():
     parser = argparse.ArgumentParser(description="Compare models on pluckit chain generation")
     parser.add_argument("--host", default="http://localhost:11435", help="Ollama host")
     parser.add_argument("--models", default=None, help="Comma-separated model list (default: all small models)")
+    parser.add_argument("--timeout", type=int, default=60, help="Timeout per intent in seconds (default: 60)")
     parser.add_argument("--output", default=None, help="Save full results as JSON")
     args = parser.parse_args()
 
@@ -131,7 +145,7 @@ def main():
         print(f'\n{"#" * 70}')
         print(f"MODEL: {model}")
         print(f'{"#" * 70}')
-        model_results = run_model(client, model, INTENTS)
+        model_results = run_model(client, model, INTENTS, timeout=args.timeout)
 
         avg_score = sum(r["score"] for r in model_results) / len(model_results)
         avg_time = sum(r["time"] for r in model_results) / len(model_results)
