@@ -32,6 +32,7 @@ Repository = "https://github.com/teague/lackpy"
 
 [project.scripts]
 lackpy = "lackpy.cli:main"
+lackpyctl = "lackpy.ctl:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lackpy"]
