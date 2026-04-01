@@ -87,9 +87,9 @@ def run_model(client, model: str, intents: list[str]) -> list[dict]:
                 options={"temperature": 0.2},
             )
             elapsed = time.time() - start
-            content = strip_fences(resp["message"]["content"].strip())
-            gen_tokens = resp.get("eval_count", 0)
-            prompt_tokens = resp.get("prompt_eval_count", 0)
+            content = strip_fences(resp.message.content.strip())
+            gen_tokens = getattr(resp, "eval_count", 0) or 0
+            prompt_tokens = getattr(resp, "prompt_eval_count", 0) or 0
             sc = score_output(content)
 
             print(f"  [{sc}/4] {intent[:50]:50s} | {elapsed:.1f}s {gen_tokens:3d}t | {content[:90]}")
@@ -116,7 +116,11 @@ def main():
     client = ollama.Client(host=args.host)
 
     # Check which models are available
-    available = {m["name"] for m in client.list().get("models", [])}
+    listed = client.list()
+    if hasattr(listed, "models"):
+        available = {m.model for m in listed.models}
+    else:
+        available = {m["name"] for m in listed.get("models", [])}
     models = [m for m in models if m in available]
     skipped = [m for m in (args.models.split(",") if args.models else ALL_MODELS) if m not in available]
     if skipped:

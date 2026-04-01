@@ -138,8 +138,8 @@ def run_quartermaster(client, model: str, intent: str) -> tuple[list[str], float
         options={"temperature": 0.1},
     )
     elapsed = time.time() - start
-    content = strip_fences(resp["message"]["content"].strip())
-    tokens = resp.get("eval_count", 0)
+    content = strip_fences(resp.message.content.strip())
+    tokens = getattr(resp, "eval_count", 0) or 0
     # Parse comma-separated ops
     ops = [op.strip().strip(".").strip("()") for op in content.split(",")]
     ops = [op for op in ops if op and op in OP_DESCRIPTIONS]
@@ -160,8 +160,8 @@ def run_assembler(client, model: str, intent: str, ops: list[str]) -> tuple[str,
         options={"temperature": 0.2},
     )
     elapsed = time.time() - start
-    content = strip_fences(resp["message"]["content"].strip())
-    tokens = resp.get("eval_count", 0)
+    content = strip_fences(resp.message.content.strip())
+    tokens = getattr(resp, "eval_count", 0) or 0
     return content, elapsed, tokens
 
 
