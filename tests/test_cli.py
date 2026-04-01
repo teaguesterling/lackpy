@@ -57,3 +57,16 @@ def test_parser_generate_flag():
     args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read"])
     assert args.intent == "read file main.py"
     assert args.generate is True
+
+
+def test_parser_param_flag():
+    parser = build_parser()
+    args = parser.parse_args(["-c", "read file test.txt", "--param", "x=1", "--param", "y=2"])
+    assert args.param == ["x=1", "y=2"]
+
+
+def test_parser_validate_flag():
+    parser = build_parser()
+    args = parser.parse_args(["--validate", "-c", "x = 1"])
+    assert args.validate is True
+    assert args.intent == "x = 1"
