@@ -272,6 +272,8 @@ class LackpyService:
             "files_modified": exec_result.trace.files_modified,
             "output": exec_result.output,
             "error": exec_result.error,
+            "correction_strategy": gen_result.correction_strategy,
+            "correction_attempts": gen_result.correction_attempts,
         }
 
     def parse_lackey(self, path: Path) -> Any:
