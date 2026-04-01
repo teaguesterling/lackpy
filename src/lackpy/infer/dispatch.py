@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..lang.validator import validate
-from .hints import enrich_errors
+from .cleanup import deterministic_cleanup
+from .correction import CorrectionChain
 from .sanitize import sanitize_output
 
 
@@ -19,11 +20,17 @@ class GenerationResult:
         program: The generated and validated lackpy program source.
         provider_name: Name of the provider that produced the program.
         generation_time_ms: Total wall-clock time for generation in milliseconds.
+        correction_strategy: The correction strategy used, or None if no correction needed.
+        correction_attempts: Number of correction attempts made (0 if none needed).
+        attempts_log: Full log of correction attempts, or None if no correction was run.
     """
 
     program: str
     provider_name: str
     generation_time_ms: float
+    correction_strategy: str | None = None
+    correction_attempts: int = 0
+    attempts_log: list | None = None
 
 
 class InferenceDispatcher:
@@ -31,8 +38,8 @@ class InferenceDispatcher:
 
     Iterates through providers in order, attempts generation with each available
     provider, and returns the first result that passes validation. If the first
-    attempt from a provider fails validation, one retry with enriched error
-    feedback is attempted before moving on.
+    attempt from a provider fails validation, the CorrectionChain is invoked
+    (deterministic cleanup, few-shot retry, fresh fixer) before moving on.
 
     Args:
         providers: Ordered list of provider plugin instances. Each must have
@@ -47,8 +54,9 @@ class InferenceDispatcher:
         """Generate a valid lackpy program from a natural language intent.
 
         Tries each available provider in priority order, validating the output
-        after each attempt. On validation failure, one retry with enriched error
-        feedback is issued before moving to the next provider.
+        after each attempt. On validation failure, the CorrectionChain is invoked
+        (deterministic cleanup → few-shot retry → fresh fixer) before moving to
+        the next provider.
 
         Args:
             intent: Natural language description of the desired program.
@@ -75,24 +83,38 @@ class InferenceDispatcher:
                 continue
 
             program = sanitize_output(raw)
+            program = deterministic_cleanup(program)
             validation = validate(program, allowed_names=allowed_names, extra_rules=extra_rules)
             if validation.valid:
                 elapsed = (time.perf_counter() - start) * 1000
                 return GenerationResult(program=program, provider_name=provider.name, generation_time_ms=elapsed)
 
             errors_by_provider[provider.name] = validation.errors
-            enriched = enrich_errors(validation.errors, namespace_desc)
-            raw = await provider.generate(intent, namespace_desc, error_feedback=enriched)
-            if raw is None:
-                continue
 
-            program = sanitize_output(raw)
-            validation = validate(program, allowed_names=allowed_names, extra_rules=extra_rules)
-            if validation.valid:
+            chain = CorrectionChain()
+            correction = await chain.correct(
+                program=program,
+                errors=validation.errors,
+                namespace_desc=namespace_desc,
+                intent=intent,
+                allowed_names=allowed_names,
+                provider=provider,
+                extra_rules=extra_rules,
+            )
+            if correction is not None:
                 elapsed = (time.perf_counter() - start) * 1000
-                return GenerationResult(program=program, provider_name=provider.name, generation_time_ms=elapsed)
+                return GenerationResult(
+                    program=correction.program,
+                    provider_name=provider.name,
+                    generation_time_ms=elapsed,
+                    correction_strategy=correction.strategy,
+                    correction_attempts=correction.attempts,
+                    attempts_log=chain.attempts,
+                )
 
-            errors_by_provider[provider.name] = validation.errors
+            errors_by_provider[provider.name] = (
+                chain.attempts[-1].errors if chain.attempts else validation.errors
+            )
 
         provider_names = [p.name for p in self._providers if p.available()]
         raise RuntimeError(

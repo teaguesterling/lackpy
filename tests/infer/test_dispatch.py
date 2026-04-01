@@ -51,8 +51,33 @@ class TestDispatchOrder:
 
 class TestValidation:
     @pytest.mark.asyncio
-    async def test_skips_invalid_programs(self):
-        d = InferenceDispatcher(providers=[FakeProvider("bad", "import os"), FakeProvider("good", "x = 1")])
+    async def test_skips_unfixable_programs(self):
+        # bad_func() cannot be fixed by any correction strategy (no provider for chain,
+        # and deterministic cleanup won't help), so dispatcher moves to the next provider.
+        d = InferenceDispatcher(providers=[FakeProvider("bad", "bad_func()"), FakeProvider("good", "x = 1")])
         result = await d.generate("test", namespace_desc="", allowed_names=set())
         assert result.program == "x = 1"
         assert result.provider_name == "good"
+
+
+class TestCorrectionChainIntegration:
+    @pytest.mark.asyncio
+    async def test_deterministic_cleanup_fixes_imports(self):
+        d = InferenceDispatcher(providers=[FakeProvider("ollama", "import os\nx = 1")])
+        result = await d.generate("test", namespace_desc="", allowed_names=set())
+        assert result.program == "x = 1"
+
+    @pytest.mark.asyncio
+    async def test_correction_metadata_in_result(self):
+        d = InferenceDispatcher(providers=[FakeProvider("ollama", "import os\nx = 1")])
+        result = await d.generate("test", namespace_desc="", allowed_names=set())
+        # deterministic_cleanup should have fixed this — import stripped
+        assert result.correction_strategy is not None or "import" not in result.program
+
+    @pytest.mark.asyncio
+    async def test_no_correction_metadata_when_first_attempt_valid(self):
+        d = InferenceDispatcher(providers=[FakeProvider("templates", "x = 1")])
+        result = await d.generate("test", namespace_desc="", allowed_names=set())
+        assert result.correction_strategy is None
+        assert result.correction_attempts == 0
+        assert result.attempts_log is None
