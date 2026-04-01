@@ -8,7 +8,8 @@ Usage:
 import argparse
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+
 
 import ollama
 
@@ -74,11 +75,28 @@ def strip_fences(content: str) -> str:
     return content.strip()
 
 
+class _ChatResult:
+    """Mimics the shape of ollama ChatResponse for streaming results."""
+    def __init__(self, content, eval_count, prompt_eval_count):
+        self.message = type("Msg", (), {"content": content})()
+        self.eval_count = eval_count
+        self.prompt_eval_count = prompt_eval_count
+
+
 def _chat_with_timeout(client, model, messages, options, timeout):
-    """Run a chat call with a hard timeout using a thread."""
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(client.chat, model=model, messages=messages, options=options)
-        return future.result(timeout=timeout)
+    """Stream a chat call and bail if timeout is exceeded."""
+    start = time.time()
+    chunks = []
+    eval_count = 0
+    prompt_eval_count = 0
+    for chunk in client.chat(model=model, messages=messages, options=options, stream=True):
+        if time.time() - start > timeout:
+            raise TimeoutError(f"Exceeded {timeout}s")
+        token = chunk.message.content or ""
+        chunks.append(token)
+        eval_count = getattr(chunk, "eval_count", 0) or eval_count
+        prompt_eval_count = getattr(chunk, "prompt_eval_count", 0) or prompt_eval_count
+    return _ChatResult("".join(chunks), eval_count, prompt_eval_count)
 
 
 def run_model(client, model: str, intents: list[str], timeout: int = 60) -> list[dict]:
@@ -107,7 +125,7 @@ def run_model(client, model: str, intents: list[str], timeout: int = 60) -> list
                 "time": elapsed, "tokens": gen_tokens,
                 "prompt_tokens": prompt_tokens, "score": sc,
             })
-        except FuturesTimeout:
+        except TimeoutError:
             elapsed = time.time() - start
             print(f"  [T/O] {intent[:50]:50s} | {elapsed:.0f}s (timeout)")
             results.append({"intent": intent, "output": "TIMEOUT", "time": elapsed, "tokens": 0, "score": 0})

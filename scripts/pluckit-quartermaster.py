@@ -16,16 +16,34 @@ Usage:
 import argparse
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+
 
 import ollama
 
 
+class _ChatResult:
+    """Mimics the shape of ollama ChatResponse for streaming results."""
+    def __init__(self, content, eval_count, prompt_eval_count):
+        self.message = type("Msg", (), {"content": content})()
+        self.eval_count = eval_count
+        self.prompt_eval_count = prompt_eval_count
+
+
 def _chat_with_timeout(client, model, messages, options, timeout):
-    """Run a chat call with a hard timeout using a thread."""
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(client.chat, model=model, messages=messages, options=options)
-        return future.result(timeout=timeout)
+    """Stream a chat call and bail if timeout is exceeded."""
+    start = time.time()
+    chunks = []
+    eval_count = 0
+    prompt_eval_count = 0
+    for chunk in client.chat(model=model, messages=messages, options=options, stream=True):
+        if time.time() - start > timeout:
+            raise TimeoutError(f"Exceeded {timeout}s")
+        token = chunk.message.content or ""
+        chunks.append(token)
+        eval_count = getattr(chunk, "eval_count", 0) or eval_count
+        prompt_eval_count = getattr(chunk, "prompt_eval_count", 0) or prompt_eval_count
+    return _ChatResult("".join(chunks), eval_count, prompt_eval_count)
 
 FULL_API = """select(css) / source(glob).find(css) - entry. CSS: .fn .cls .call #name :has() :not() :exported [name^="test_"]
 .find(css) .filter(fn => cond) .callers() .callees() .similar(n) .reachable(n) .call_chain()
@@ -204,7 +222,7 @@ def main():
         try:
             ops, qm_time, qm_tokens = run_quartermaster(client, args.qm_model, intent, timeout=args.timeout)
             print(f"  QM ({qm_time:.1f}s, {qm_tokens}t): {', '.join(ops)}")
-        except FuturesTimeout:
+        except TimeoutError:
             print(f"  QM TIMEOUT ({args.timeout}s)")
             ops = []
         except Exception as e:
@@ -219,7 +237,7 @@ def main():
                 total_time = qm_time + asm_time
                 print(f"  ASM ({asm_time:.1f}s, {asm_tokens}t) [{sc}/4]: {chain[:100]}")
                 print(f"  TOTAL: {total_time:.1f}s, ops={len(ops)}")
-            except FuturesTimeout:
+            except TimeoutError:
                 chain = "TIMEOUT"
                 sc = 0
                 total_time = qm_time + args.timeout
@@ -250,7 +268,7 @@ def main():
                 entry["baseline_chain"] = bl_chain
                 entry["baseline_time"] = bl_time
                 entry["baseline_score"] = bl_sc
-            except FuturesTimeout:
+            except TimeoutError:
                 print(f"  BASE TIMEOUT ({args.timeout}s)")
             except Exception as e:
                 print(f"  BASE ERROR: {e}")
