@@ -1,0 +1,12 @@
+[inference]
+order = ["templates", "rules", "ollama-local"]
+
+[inference.providers.ollama-local]
+plugin = "ollama"
+host = "http://localhost:11435"
+model = "qwen2.5-coder:1.5b"
+temperature = 0.2
+keep_alive = "30m"
+
+[kit]
+default = "debug"

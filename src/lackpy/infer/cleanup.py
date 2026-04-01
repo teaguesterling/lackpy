@@ -63,6 +63,123 @@ class _OpenRewriter(ast.NodeTransformer):
         return node
 
 
+class _WithOpenRewriter(ast.NodeTransformer):
+    """Rewrite `with open(path) as f: body` to inline read() calls.
+
+    Transforms patterns like:
+        with open(f, 'r') as fh:
+            content = fh.read()
+        →  content = read(f)
+
+        with open(f) as fh:
+            lines = fh.readlines()
+        →  lines = read(f).splitlines()
+    """
+
+    def visit_With(self, node: ast.With) -> ast.AST | list[ast.stmt]:
+        self.generic_visit(node)
+
+        if len(node.items) != 1:
+            return node
+
+        item = node.items[0]
+        # Must be: with open(...) as <name>
+        if (
+            not isinstance(item.context_expr, ast.Call)
+            or not isinstance(item.context_expr.func, ast.Name)
+            or item.context_expr.func.id != "open"
+            or item.optional_vars is None
+            or not isinstance(item.optional_vars, ast.Name)
+            or not item.context_expr.args
+        ):
+            return node
+
+        path_arg = item.context_expr.args[0]
+        file_var = item.optional_vars.id
+
+        # Rewrite body statements that use the file variable
+        new_body: list[ast.stmt] = []
+        for stmt in node.body:
+            rewritten = self._rewrite_file_usage(stmt, file_var, path_arg)
+            if rewritten is not None:
+                new_body.append(rewritten)
+            else:
+                # Can't rewrite this statement — keep the whole with block
+                return node
+
+        return new_body
+
+    def _rewrite_file_usage(
+        self, stmt: ast.stmt, file_var: str, path_arg: ast.expr,
+    ) -> ast.stmt | None:
+        """Try to rewrite a single statement that uses the file handle.
+
+        Returns rewritten statement, or None if it can't be rewritten.
+        """
+        # Match: target = fh.read()
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == file_var
+        ):
+            method = stmt.value.func.attr
+            if method == "read":
+                # target = read(path)
+                new_value = ast.Call(
+                    func=ast.Name(id="read", ctx=ast.Load()),
+                    args=[path_arg],
+                    keywords=[],
+                )
+                new_stmt = ast.Assign(
+                    targets=stmt.targets, value=new_value,
+                    lineno=stmt.lineno, col_offset=stmt.col_offset,
+                )
+                return ast.copy_location(new_stmt, stmt)
+
+            if method == "readlines":
+                # target = read(path).splitlines()
+                read_call = ast.Call(
+                    func=ast.Name(id="read", ctx=ast.Load()),
+                    args=[path_arg],
+                    keywords=[],
+                )
+                new_value = ast.Call(
+                    func=ast.Attribute(
+                        value=read_call, attr="splitlines", ctx=ast.Load(),
+                    ),
+                    args=[], keywords=[],
+                )
+                new_stmt = ast.Assign(
+                    targets=stmt.targets, value=new_value,
+                    lineno=stmt.lineno, col_offset=stmt.col_offset,
+                )
+                return ast.copy_location(new_stmt, stmt)
+
+        # Match: for line in fh: ... (iterate lines)
+        if (
+            isinstance(stmt, ast.For)
+            and isinstance(stmt.iter, ast.Name)
+            and stmt.iter.id == file_var
+        ):
+            # for line in fh → for line in read(path).splitlines()
+            read_call = ast.Call(
+                func=ast.Name(id="read", ctx=ast.Load()),
+                args=[path_arg], keywords=[],
+            )
+            stmt.iter = ast.Call(
+                func=ast.Attribute(
+                    value=read_call, attr="splitlines", ctx=ast.Load(),
+                ),
+                args=[], keywords=[],
+            )
+            return stmt
+
+        return None
+
+
 class _OsPathRewriter(ast.NodeTransformer):
     """Rewrite os.path.basename(x) and os.path.join(a, b) to stdlib-free equivalents."""
 
@@ -144,6 +261,7 @@ def deterministic_cleanup(program: str) -> str:
         return text_cleaned
 
     try:
+        tree = _WithOpenRewriter().visit(tree)
         tree = _OpenRewriter().visit(tree)
         tree = _OsPathRewriter().visit(tree)
         ast.fix_missing_locations(tree)
