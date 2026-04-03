@@ -220,7 +220,15 @@ class LackpyService:
             strategy_cls = STRATEGIES[effective_mode]
             strategy = strategy_cls()
             dispatcher = InferenceDispatcher(providers=self._inference_providers)
-            provider = dispatcher.get_provider()
+            # SPM needs an LLM provider (skip deterministic templates/rules)
+            if effective_mode == "spm":
+                llm_providers = [p for p in dispatcher.get_providers()
+                                 if p.name not in ("templates", "rules")]
+                if not llm_providers:
+                    raise RuntimeError("SPM mode requires an LLM provider (e.g. ollama, anthropic)")
+                provider = llm_providers[0]
+            else:
+                provider = dispatcher.get_provider()
             step = strategy.build(provider)
             ctx = StepContext(
                 intent=intent, kit=resolved,
