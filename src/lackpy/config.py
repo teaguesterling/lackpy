@@ -24,6 +24,7 @@ class LackpyConfig:
     sandbox_enabled: bool = False
     sandbox_timeout: int = 120
     sandbox_memory_mb: int = 512
+    inference_mode: str | None = None
     tool_providers: dict[str, dict[str, Any]] = field(default_factory=dict)
     config_dir: Path = field(default_factory=lambda: Path(".lackpy"))
 
@@ -47,6 +48,7 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
     return LackpyConfig(
         inference_order=inference.get("order", ["templates", "rules"]),
         inference_providers=providers,
+        inference_mode=inference.get("mode"),
         kit_default=kit.get("default", "debug"),
         sandbox_enabled=sandbox.get("enabled", False),
         sandbox_timeout=sandbox.get("timeout_seconds", 120),

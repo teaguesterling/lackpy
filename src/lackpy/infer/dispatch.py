@@ -49,6 +49,17 @@ class InferenceDispatcher:
     def __init__(self, providers: list[Any]) -> None:
         self._providers = providers
 
+    def get_provider(self) -> Any:
+        """Return the first available provider."""
+        for provider in self._providers:
+            if provider.available():
+                return provider
+        raise RuntimeError("No inference providers available")
+
+    def get_providers(self) -> list:
+        """Return all available providers in priority order."""
+        return [p for p in self._providers if p.available()]
+
     async def generate(self, intent: str, namespace_desc: str, allowed_names: set[str],
                        params_desc: str | None = None, extra_rules: list | None = None) -> GenerationResult:
         """Generate a valid lackpy program from a natural language intent.

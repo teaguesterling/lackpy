@@ -191,7 +191,8 @@ class LackpyService:
         return validate(program, allowed_names=allowed, extra_rules=rules)
 
     async def generate(self, intent: str, kit: str | list[str] | dict | None = None,
-                       params: dict[str, Any] | None = None, rules: list | None = None) -> GenerationResult:
+                       params: dict[str, Any] | None = None, rules: list | None = None,
+                       mode: str | None = None) -> GenerationResult:
         """Generate a lackpy program from a natural language intent.
 
         Args:
@@ -199,6 +200,7 @@ class LackpyService:
             kit: Kit name, list of tool names, or dict mapping.
             params: Named input values available to the generated program.
             rules: Additional validation rules the generated program must satisfy.
+            mode: Inference strategy mode (e.g. '1-shot', 'spm'). Defaults to config or '1-shot'.
 
         Returns:
             A GenerationResult with the generated program and provider metadata.
@@ -206,8 +208,39 @@ class LackpyService:
         Raises:
             RuntimeError: If all inference providers fail to produce a valid program.
         """
+        from .infer.strategy import STRATEGIES
+        from .infer.context import StepContext
+
         resolved = self._resolve_kit(kit)
         _, params_desc, param_names = self._resolve_params(params, resolved)
+
+        effective_mode = mode or self._config.inference_mode
+
+        if effective_mode and effective_mode in STRATEGIES:
+            strategy_cls = STRATEGIES[effective_mode]
+            strategy = strategy_cls()
+            dispatcher = InferenceDispatcher(providers=self._inference_providers)
+            provider = dispatcher.get_provider()
+            step = strategy.build(provider)
+            ctx = StepContext(
+                intent=intent, kit=resolved,
+                params_desc=params_desc, extra_rules=rules,
+            )
+            ctx = await step.run(ctx)
+            if ctx.current and ctx.current.valid:
+                return GenerationResult(
+                    program=ctx.current.program,
+                    provider_name=ctx.current.trace.provider_name or "unknown",
+                    generation_time_ms=sum(p.trace.duration_ms for p in ctx.programs),
+                    correction_strategy=ctx.current.trace.step_name if len(ctx.programs) > 2 else None,
+                    correction_attempts=max(0, len(ctx.programs) - 1),
+                )
+            raise RuntimeError(
+                f"Strategy '{effective_mode}' failed. "
+                f"Last errors: {ctx.current.errors if ctx.current else 'no programs generated'}"
+            )
+
+        # Default: legacy dispatcher path
         dispatcher = InferenceDispatcher(providers=self._inference_providers)
         allowed = set(resolved.tools.keys()) | param_names
         return await dispatcher.generate(
@@ -249,7 +282,8 @@ class LackpyService:
     async def delegate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
                        rules: list | None = None,
-                       _program_override: str | None = None) -> dict[str, Any]:
+                       _program_override: str | None = None,
+                       mode: str | None = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
 
         Combines generate and run_program: generates a program from intent, then
@@ -290,7 +324,7 @@ class LackpyService:
                 generation_time_ms=0.0,
             )
         else:
-            gen_result = await self.generate(intent, kit, params, rules)
+            gen_result = await self.generate(intent, kit, params, rules, mode=mode)
 
         # Kibitzer: validate planned calls before execution
         kibitzer_suggestions: list[str] = []

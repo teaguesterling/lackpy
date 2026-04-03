@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kit", default=None, help="Kit name, comma-separated list, or @file")
     parser.add_argument("--param", action="append", default=None, help="Parameter: key=value (repeatable)")
     parser.add_argument("--validate", action="store_true", default=False, help="Validate without running")
+    parser.add_argument("--mode", default=None, help="Inference mode: 1-shot, spm (default: from config or legacy)")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -58,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     delegate_p.add_argument("intent", help="Natural language intent")
     delegate_p.add_argument("--kit", default=None, help="Kit name, comma-separated list, or @file")
     delegate_p.add_argument("--sandbox", default=None, help="Sandbox profile")
+    delegate_p.add_argument("--mode", default=None, help="Inference mode: 1-shot, spm")
 
     # generate
     generate_p = subparsers.add_parser("generate", help="[deprecated: use -c --generate] Generate a program from intent without running")
@@ -242,8 +244,10 @@ def main(argv: list[str] | None = None) -> int:
         svc = LackpyService(workspace=workspace)
         kit = _parse_kit(args.kit) if args.kit else None
 
+        mode = getattr(args, 'mode', None)
+
         if args.create:
-            gen = asyncio.run(svc.generate(args.intent, kit=kit))
+            gen = asyncio.run(svc.generate(args.intent, kit=kit, mode=mode))
             tools = kit if isinstance(kit, list) else []
             path = asyncio.run(svc.create_lackey(
                 program=gen.program, name=args.name or "Generated",
@@ -258,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.generate:
             try:
-                gen = asyncio.run(svc.generate(args.intent, kit=kit))
+                gen = asyncio.run(svc.generate(args.intent, kit=kit, mode=mode))
             except RuntimeError as e:
                 print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
                 return 1
@@ -267,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Default: delegate (generate + run)
         try:
-            result = asyncio.run(svc.delegate(args.intent, kit=kit))
+            result = asyncio.run(svc.delegate(args.intent, kit=kit, mode=mode))
         except RuntimeError as e:
             print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
             return 1
@@ -419,8 +423,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "delegate":
         sandbox = getattr(args, "sandbox", None)
+        delegate_mode = getattr(args, "mode", None)
         try:
-            result = asyncio.run(svc.delegate(args.intent, kit=kit, sandbox=sandbox))
+            result = asyncio.run(svc.delegate(args.intent, kit=kit, sandbox=sandbox, mode=delegate_mode))
         except RuntimeError as e:
             print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
             return 1
