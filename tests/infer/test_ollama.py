@@ -14,18 +14,18 @@ def provider():
 class TestGeneration:
     @pytest.mark.asyncio
     async def test_generate_returns_content(self, provider):
-        mock_response = {"message": {"content": "x = read('test.py')\nlen(x)"}}
+        mock_response = {"message": {"content": "x = read_file('test.py')\nlen(x)"}}
         with patch.object(provider, "available", return_value=True), \
              patch.object(provider, "_chat", new_callable=AsyncMock, return_value=mock_response):
-            result = await provider.generate("read test.py", namespace_desc="  read(path) -> str: Read file")
+            result = await provider.generate("read test.py", namespace_desc="  read_file(path) -> str: Read file")
             assert result is not None
-            assert "read(" in result
+            assert "read_file(" in result
 
     @pytest.mark.asyncio
     async def test_generate_with_error_feedback(self, provider):
-        mock_response = {"message": {"content": "x = read('test.py')\nlen(x)"}}
+        mock_response = {"message": {"content": "x = read_file('test.py')\nlen(x)"}}
         with patch.object(provider, "available", return_value=True), \
              patch.object(provider, "_chat", new_callable=AsyncMock, return_value=mock_response):
-            result = await provider.generate("read test.py", namespace_desc="  read(path) -> str: Read file",
+            result = await provider.generate("read test.py", namespace_desc="  read_file(path) -> str: Read file",
                                              error_feedback=["Unknown function: 'open'"])
             assert result is not None

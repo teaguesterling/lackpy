@@ -23,14 +23,14 @@ class TestFullRoundtrip:
     @pytest.mark.asyncio
     async def test_generate_create_parse_run(self, service, workspace):
         # 1. Generate a program via rules
-        gen = await service.generate("read file hello.txt", kit=["read"])
-        assert "read(" in gen.program
+        gen = await service.generate("read file hello.txt", kit=["read_file"])
+        assert "read_file(" in gen.program
 
         # 2. Create a Lackey file from it
         path = await service.create_lackey(
             program=gen.program,
             name="ReadHello",
-            tools=["read"],
+            tools=["read_file"],
             params={"target": {"type": "str", "default": "hello.txt"}},
             returns="str",
             creation_log=[
@@ -44,7 +44,7 @@ class TestFullRoundtrip:
         # 3. Parse it back
         info = service.parse_lackey(path)
         assert info.class_name == "ReadHello"
-        assert "read" in info.tools
+        assert "read_file" in info.tools
         assert info.has_creation_log is True
 
         # 4. Run it

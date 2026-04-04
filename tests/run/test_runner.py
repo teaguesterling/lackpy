@@ -13,36 +13,36 @@ def runner():
 @pytest.fixture
 def mock_namespace():
     return {
-        "read": lambda path: f"contents of {path}",
-        "glob": lambda pattern: ["a.py", "b.py"],
+        "read_file": lambda path: f"contents of {path}",
+        "find_files": lambda pattern: ["a.py", "b.py"],
     }
 
 
 class TestBasicExecution:
     def test_simple_assignment_and_output(self, runner, mock_namespace):
-        result = runner.run("x = read('test.py')\nlen(x)", mock_namespace)
+        result = runner.run("x = read_file('test.py')\nlen(x)", mock_namespace)
         assert result.success
         assert result.output == len("contents of test.py")
 
     def test_captures_trace(self, runner, mock_namespace):
-        result = runner.run("x = read('f.py')", mock_namespace)
+        result = runner.run("x = read_file('f.py')", mock_namespace)
         assert result.success
         assert len(result.trace.entries) == 1
-        assert result.trace.entries[0].tool == "read"
+        assert result.trace.entries[0].tool == "read_file"
 
     def test_captures_variables(self, runner, mock_namespace):
-        result = runner.run("x = read('f.py')\ny = len(x)", mock_namespace)
+        result = runner.run("x = read_file('f.py')\ny = len(x)", mock_namespace)
         assert result.success
         assert "x" in result.variables
         assert "y" in result.variables
 
     def test_last_expression_captured(self, runner, mock_namespace):
-        result = runner.run("files = glob('*.py')\nlen(files)", mock_namespace)
+        result = runner.run("files = find_files('*.py')\nlen(files)", mock_namespace)
         assert result.success
         assert result.output == 2
 
     def test_no_last_expression(self, runner, mock_namespace):
-        result = runner.run("x = read('f.py')", mock_namespace)
+        result = runner.run("x = read_file('f.py')", mock_namespace)
         assert result.success
         assert result.output is None
 
@@ -63,8 +63,8 @@ class TestErrorHandling:
     def test_runtime_error_captured(self, runner, mock_namespace):
         def bad_read(path):
             raise FileNotFoundError("no such file")
-        ns = {"read": bad_read}
-        result = runner.run("x = read('missing.py')", ns)
+        ns = {"read_file": bad_read}
+        result = runner.run("x = read_file('missing.py')", ns)
         assert not result.success
         assert "no such file" in result.error
 

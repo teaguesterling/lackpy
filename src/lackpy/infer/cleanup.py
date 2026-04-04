@@ -36,7 +36,7 @@ class _OpenRewriter(ast.NodeTransformer):
             if method == "read":
                 # open(path).read() -> read(path)
                 new_node = ast.Call(
-                    func=ast.Name(id="read", ctx=ast.Load()),
+                    func=ast.Name(id="read_file", ctx=ast.Load()),
                     args=[path_arg],
                     keywords=[],
                 )
@@ -45,7 +45,7 @@ class _OpenRewriter(ast.NodeTransformer):
             if method == "readlines":
                 # open(path).readlines() -> read(path).splitlines()
                 read_call = ast.Call(
-                    func=ast.Name(id="read", ctx=ast.Load()),
+                    func=ast.Name(id="read_file", ctx=ast.Load()),
                     args=[path_arg],
                     keywords=[],
                 )
@@ -129,7 +129,7 @@ class _WithOpenRewriter(ast.NodeTransformer):
             if method == "read":
                 # target = read(path)
                 new_value = ast.Call(
-                    func=ast.Name(id="read", ctx=ast.Load()),
+                    func=ast.Name(id="read_file", ctx=ast.Load()),
                     args=[path_arg],
                     keywords=[],
                 )
@@ -142,7 +142,7 @@ class _WithOpenRewriter(ast.NodeTransformer):
             if method == "readlines":
                 # target = read(path).splitlines()
                 read_call = ast.Call(
-                    func=ast.Name(id="read", ctx=ast.Load()),
+                    func=ast.Name(id="read_file", ctx=ast.Load()),
                     args=[path_arg],
                     keywords=[],
                 )
@@ -166,7 +166,7 @@ class _WithOpenRewriter(ast.NodeTransformer):
         ):
             # for line in fh → for line in read(path).splitlines()
             read_call = ast.Call(
-                func=ast.Name(id="read", ctx=ast.Load()),
+                func=ast.Name(id="read_file", ctx=ast.Load()),
                 args=[path_arg], keywords=[],
             )
             stmt.iter = ast.Call(

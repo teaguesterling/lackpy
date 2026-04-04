@@ -14,21 +14,21 @@ def toolbox():
 
 
 def test_register_tool(toolbox):
-    spec = ToolSpec(name="read", provider="builtin", provider_config={},
+    spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents",
                     args=[ArgSpec(name="path", type="str", description="File path")],
                     returns="str", grade_w=1, effects_ceiling=1)
     toolbox.register_tool(spec)
-    assert "read" in toolbox.tools
+    assert "read_file" in toolbox.tools
 
 
 def test_resolve_tool(toolbox):
-    spec = ToolSpec(name="read", provider="builtin", provider_config={},
+    spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents",
                     args=[ArgSpec(name="path", type="str", description="File path")],
                     returns="str")
     toolbox.register_tool(spec)
-    fn = toolbox.resolve("read")
+    fn = toolbox.resolve("read_file")
     assert callable(fn)
 
 
@@ -38,20 +38,20 @@ def test_resolve_unknown_tool_raises(toolbox):
 
 
 def test_list_tools(toolbox):
-    spec = ToolSpec(name="read", provider="builtin", provider_config={},
+    spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents", args=[], returns="str")
     toolbox.register_tool(spec)
     tools = toolbox.list_tools()
     assert len(tools) == 1
-    assert tools[0].name == "read"
+    assert tools[0].name == "read_file"
 
 
 def test_format_namespace_description(toolbox):
-    spec = ToolSpec(name="read", provider="builtin", provider_config={},
+    spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents",
                     args=[ArgSpec(name="path", type="str", description="File path")],
                     returns="str")
     toolbox.register_tool(spec)
-    desc = toolbox.format_description(["read"])
-    assert "read(path)" in desc
+    desc = toolbox.format_description(["read_file"])
+    assert "read_file(path)" in desc
     assert "str" in desc

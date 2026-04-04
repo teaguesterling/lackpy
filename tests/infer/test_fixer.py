@@ -5,8 +5,8 @@ from lackpy.infer.fixer import build_fixer_prompt, build_fixer_messages
 
 class TestBuildFixerPrompt:
     def test_contains_namespace(self):
-        prompt = build_fixer_prompt("  read(path) -> str: Read file contents")
-        assert "read(path)" in prompt
+        prompt = build_fixer_prompt("  read_file(path) -> str: Read file contents")
+        assert "read_file(path)" in prompt
 
     def test_has_fixer_framing(self):
         prompt = build_fixer_prompt("")
@@ -65,7 +65,7 @@ class TestBuildFixerMessages:
             intent="do something",
             broken_program="x = 1",
             errors="no errors",
-            namespace_desc="read(path) -> str",
+            namespace_desc="read_file(path) -> str",
         )
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -78,7 +78,7 @@ class TestBuildFixerMessages:
             intent="x",
             broken_program="x",
             errors="x",
-            namespace_desc="read(path) -> str",
+            namespace_desc="read_file(path) -> str",
         )
         system_content = messages[0]["content"]
         assert "fixing" in system_content.lower() or "fix" in system_content.lower()

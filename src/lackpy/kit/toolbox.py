@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import sys
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+# Names that will confuse small language models if used as tool names.
+# Includes Python stdlib top-level modules and builtin functions.
+_MASKING_NAMES: frozenset[str] = frozenset(
+    getattr(sys, "stdlib_module_names", set()) | set(dir(__builtins__))
+)
 
 
 @dataclass
@@ -72,7 +80,20 @@ class Toolbox:
 
         Args:
             spec: The ToolSpec to add. Overwrites any existing spec with the same name.
+
+        Warns:
+            UserWarning: If the tool name masks a Python stdlib module or builtin,
+                which causes small language models to generate incorrect code.
         """
+        if spec.name in _MASKING_NAMES:
+            warnings.warn(
+                f"Tool name '{spec.name}' masks a Python stdlib module or builtin. "
+                f"Small language models may generate `{spec.name}.{spec.name}()` or "
+                f"`import {spec.name}` instead of calling the tool directly. "
+                f"Consider a more specific name (e.g. '{spec.name}_file').",
+                UserWarning,
+                stacklevel=2,
+            )
         self.tools[spec.name] = spec
 
     def resolve(self, name: str) -> Callable[..., Any]:

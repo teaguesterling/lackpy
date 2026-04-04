@@ -19,7 +19,7 @@ def templates_dir(tmp_path):
         '---\nname: read-file\n'
         'pattern: "read (the )?file {path}"\n'
         'success_count: 5\nfail_count: 1\n---\n'
-        "content = read('{path}')\ncontent\n"
+        "content = read_file('{path}')\ncontent\n"
     )
     return tmp_path
 
@@ -41,7 +41,7 @@ class TestTemplateMatching:
     async def test_matches_read_file(self, provider):
         result = await provider.generate("read the file src/main.py", namespace_desc="")
         assert result is not None
-        assert "read" in result
+        assert "read_file" in result
         assert "src/main.py" in result
 
     @pytest.mark.asyncio

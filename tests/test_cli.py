@@ -54,7 +54,7 @@ def test_parser_create_flag():
 
 def test_parser_generate_flag():
     parser = build_parser()
-    args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read"])
+    args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read_file"])
     assert args.intent == "read file main.py"
     assert args.generate is True
 

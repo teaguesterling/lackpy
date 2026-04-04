@@ -23,14 +23,14 @@ def service(workspace):
 class TestCorrectionInDelegate:
     @pytest.mark.asyncio
     async def test_delegate_returns_correction_info(self, service):
-        result = await service.delegate("read file test.txt", kit=["read"])
+        result = await service.delegate("read file test.txt", kit=["read_file"])
         assert result["success"]
         assert "correction_strategy" in result
         assert "correction_attempts" in result
 
     @pytest.mark.asyncio
     async def test_correction_fields_have_correct_types(self, service):
-        result = await service.delegate("read file test.txt", kit=["read"])
+        result = await service.delegate("read file test.txt", kit=["read_file"])
         assert result["correction_strategy"] is None or isinstance(result["correction_strategy"], str)
         assert isinstance(result["correction_attempts"], int)
 
@@ -38,7 +38,7 @@ class TestCorrectionInDelegate:
     async def test_program_override_has_correction_defaults(self, service):
         """_program_override path should have None/0 correction fields."""
         result = await service.delegate(
-            "read file test.txt", kit=["read"], _program_override='read("test.txt")'
+            "read file test.txt", kit=["read_file"], _program_override='read_file("test.txt")'
         )
         assert result["correction_strategy"] is None
         assert result["correction_attempts"] == 0

@@ -5,14 +5,14 @@ from lackpy.infer.hints import enrich_errors
 
 def test_open_hint_when_read_available():
     errors = ["Forbidden name: 'open' at line 3"]
-    result = enrich_errors(errors, "  read(path) -> str: Read file")
-    assert any("read(path)" in h for h in result)
+    result = enrich_errors(errors, "  read_file(path) -> str: Read file")
+    assert any("read_file(path)" in h for h in result)
 
 
 def test_no_open_hint_when_read_not_available():
     errors = ["Forbidden name: 'open' at line 3"]
-    result = enrich_errors(errors, "  glob(pattern) -> list: Find files")
-    assert not any("read(path)" in h for h in result)
+    result = enrich_errors(errors, "  find_files(pattern) -> list: Find files")
+    assert not any("read_file(path)" in h for h in result)
 
 
 def test_functiondef_hint():
@@ -44,6 +44,6 @@ def test_multiple_hints():
         "Forbidden name: 'open' at line 1",
         "Forbidden AST node: FunctionDef at line 3",
     ]
-    result = enrich_errors(errors, "  read(path) -> str: Read file")
+    result = enrich_errors(errors, "  read_file(path) -> str: Read file")
     hints = [h for h in result if h != "--- Suggestions ---" and h not in errors]
     assert len(hints) >= 2

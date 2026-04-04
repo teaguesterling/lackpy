@@ -12,10 +12,10 @@ from ...lang.grader import Grade
 
 # Patterns in standard Python that map to lackpy tools
 _TOOL_PATTERNS: dict[str, list[str]] = {
-    "glob": ["glob.glob", "glob.iglob", "glob("],
-    "read": ["open(", ".read(", "readlines(", "read("],
-    "write": [".write(", "write("],
-    "edit": ["edit(", ".replace("],
+    "find_files": ["glob.glob", "glob.iglob", "glob(", "find_files("],
+    "read_file": ["open(", ".read(", "readlines(", "read(", "read_file("],
+    "write_file": [".write(", "write(", "write_file("],
+    "edit_file": ["edit(", ".replace(", "edit_file("],
 }
 
 

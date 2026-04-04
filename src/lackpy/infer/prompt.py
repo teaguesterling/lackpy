@@ -14,7 +14,7 @@ Assign tool results to variables and reuse them. Never call the same function tw
 when you can reuse a variable.
 
 You orchestrate tools to find and modify existing code. \
-Use read(path) to get file contents.
+Use read_file(path) to get file contents.
 
 Kernel namespace:
 {namespace_desc}

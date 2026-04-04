@@ -14,12 +14,12 @@ def workspace(tmp_path):
     (config_dir / "config.toml").write_text('[inference]\norder = ["templates", "rules"]\n\n[kit]\ndefault = "debug"\n')
     kits_dir = config_dir / "kits"
     kits_dir.mkdir()
-    (kits_dir / "debug.kit").write_text("---\nname: debug\ndescription: Read-only\n---\nread\nglob\n")
+    (kits_dir / "debug.kit").write_text("---\nname: debug\ndescription: Read-only\n---\nread_file\nfind_files\n")
     templates_dir = config_dir / "templates"
     templates_dir.mkdir()
     (templates_dir / "read-file.tmpl").write_text(
         '---\nname: read-file\npattern: "read (the )?file {path}"\nsuccess_count: 5\nfail_count: 0\n---\n'
-        "content = read('{path}')\ncontent\n"
+        "content = read_file('{path}')\ncontent\n"
     )
     (tmp_path / "hello.txt").write_text("hello world")
     (tmp_path / "src").mkdir()
@@ -30,11 +30,11 @@ def workspace(tmp_path):
 @pytest.fixture
 def service(workspace):
     svc = LackpyService(workspace=workspace)
-    for name, desc, grade in [("read", "Read file contents", 1), ("glob", "Find files matching pattern", 1)]:
+    for name, desc, grade in [("read_file", "Read file contents", 1), ("find_files", "Find files matching pattern", 1)]:
         svc.toolbox.register_tool(ToolSpec(
             name=name, provider="builtin", description=desc,
-            args=[ArgSpec(name="path" if name == "read" else "pattern", type="str")],
-            returns="str" if name == "read" else "list[str]",
+            args=[ArgSpec(name="path" if name == "read_file" else "pattern", type="str")],
+            returns="str" if name == "read_file" else "list[str]",
             grade_w=grade, effects_ceiling=grade,
         ))
     return svc
@@ -47,13 +47,13 @@ class TestTemplateDelegate:
         assert result["success"]
         assert result["generation_tier"] == "templates"
         assert result["output"] == "hello world"
-        assert any(e["tool"] == "read" for e in result["trace"])
+        assert any(e["tool"] == "read_file" for e in result["trace"])
 
 
 class TestRulesDelegate:
     @pytest.mark.asyncio
     async def test_read_file_via_rules(self, service):
-        result = await service.delegate("read file hello.txt", kit=["read"])
+        result = await service.delegate("read file hello.txt", kit=["read_file"])
         assert result["success"]
         assert result["output"] == "hello world"
 
@@ -61,7 +61,7 @@ class TestRulesDelegate:
 class TestRunProgram:
     @pytest.mark.asyncio
     async def test_run_with_glob(self, service):
-        result = await service.run_program("files = glob('src/*.py')\nlen(files)", kit=["glob"])
+        result = await service.run_program("files = find_files('src/*.py')\nlen(files)", kit=["find_files"])
         assert result.success
         assert result.output == 1
 
@@ -70,8 +70,8 @@ class TestCreate:
     @pytest.mark.asyncio
     async def test_create_template(self, service):
         result = await service.create(
-            "content = read('{path}')\nlen(content)",
-            kit=["read"], name="file-length", pattern="how long is {path}",
+            "content = read_file('{path}')\nlen(content)",
+            kit=["read_file"], name="file-length", pattern="how long is {path}",
         )
         assert result["success"]
         assert Path(result["path"]).exists()
@@ -83,15 +83,15 @@ class TestKitManagement:
         assert any(k["name"] == "debug" for k in kits)
 
     def test_kit_create_and_info(self, service):
-        service.kit_create("readonly", ["read", "glob"], "Read-only tools")
+        service.kit_create("readonly", ["read_file", "find_files"], "Read-only tools")
         info = service.kit_info("readonly")
-        assert "read" in info["tools"]
+        assert "read_file" in info["tools"]
         assert info["grade"]["w"] == 1
 
 
 class TestParamsIntegration:
     @pytest.mark.asyncio
     async def test_run_with_params(self, service):
-        result = await service.run_program("len(content)", kit=["read"], params={"content": "test string"})
+        result = await service.run_program("len(content)", kit=["read_file"], params={"content": "test string"})
         assert result.success
         assert result.output == 11

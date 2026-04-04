@@ -4,8 +4,8 @@ from lackpy.infer.prompt import build_system_prompt
 
 
 def test_includes_namespace():
-    prompt = build_system_prompt(namespace_desc="  read(path) -> str: Read file contents")
-    assert "read(path)" in prompt
+    prompt = build_system_prompt(namespace_desc="  read_file(path) -> str: Read file contents")
+    assert "read_file(path)" in prompt
     assert "Kernel namespace:" in prompt
 
 
@@ -32,7 +32,7 @@ def test_includes_orchestration_guidance():
 
 def test_includes_read_guidance():
     prompt = build_system_prompt(namespace_desc="")
-    assert "read(path)" in prompt
+    assert "read_file(path)" in prompt
 
 def test_no_forbidden_list():
     prompt = build_system_prompt(namespace_desc="")

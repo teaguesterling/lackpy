@@ -13,9 +13,9 @@ def provider():
 class TestRuleMatching:
     @pytest.mark.asyncio
     async def test_read_file_rule(self, provider):
-        result = await provider.generate("read file src/main.py", namespace_desc="  read(path) -> str: Read file")
+        result = await provider.generate("read file src/main.py", namespace_desc="  read_file(path) -> str: Read file")
         assert result is not None
-        assert "read(" in result
+        assert "read_file(" in result
         assert "src/main.py" in result
 
     @pytest.mark.asyncio
@@ -27,9 +27,9 @@ class TestRuleMatching:
 
     @pytest.mark.asyncio
     async def test_glob_rule(self, provider):
-        result = await provider.generate("find all python files", namespace_desc="  glob(pattern) -> list: Find files")
+        result = await provider.generate("find all python files", namespace_desc="  find_files(pattern) -> list: Find files")
         assert result is not None
-        assert "glob(" in result
+        assert "find_files(" in result
 
     @pytest.mark.asyncio
     async def test_no_match_returns_none(self, provider):

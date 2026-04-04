@@ -32,23 +32,23 @@ class TestMaxDepth:
 
 class TestMaxCalls:
     def test_rejects_too_many_calls(self):
-        tree = ast.parse("a = read('x')\nb = read('y')\nc = read('z')")
+        tree = ast.parse("a = read_file('x')\nb = read_file('y')\nc = read_file('z')")
         errors = max_calls(2)(tree)
         assert len(errors) > 0
 
     def test_accepts_within_limit(self):
-        tree = ast.parse("a = read('x')\nb = read('y')")
+        tree = ast.parse("a = read_file('x')\nb = read_file('y')")
         errors = max_calls(2)(tree)
         assert errors == []
 
 
 class TestNoNestedCalls:
     def test_rejects_nested_call(self):
-        tree = ast.parse("len(read('x'))")
+        tree = ast.parse("len(read_file('x'))")
         errors = no_nested_calls(tree)
         assert len(errors) > 0
 
     def test_accepts_flat_calls(self):
-        tree = ast.parse("x = read('f')\nlen(x)")
+        tree = ast.parse("x = read_file('f')\nlen(x)")
         errors = no_nested_calls(tree)
         assert errors == []

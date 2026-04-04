@@ -24,7 +24,7 @@ def test_strips_preamble_with_fence():
 
 
 def test_passthrough_clean_code():
-    raw = "x = read('test.py')\nlen(x)"
+    raw = "x = read_file('test.py')\nlen(x)"
     assert sanitize_output(raw) == raw
 
 

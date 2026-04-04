@@ -114,13 +114,13 @@ class TestNamespaceCheck:
         assert result.valid, result.errors
 
     def test_accepts_kit_function(self):
-        result = validate("data = read('file.txt')", allowed_names={"read"})
+        result = validate("data = read_file('file.txt')", allowed_names={"read_file"})
         assert result.valid, result.errors
 
     def test_rejects_call_not_in_kit(self):
-        result = validate("data = read('file.txt')")
+        result = validate("data = read_file('file.txt')")
         assert not result.valid
-        assert any("read" in e for e in result.errors)
+        assert any("read_file" in e for e in result.errors)
 
 
 class TestStringCheck:
@@ -146,10 +146,10 @@ class TestForLoopCheck:
 
 class TestValidPrograms:
     def test_simple_read_and_len(self):
-        code = "data = read('file.txt')\nn = len(data)"
-        result = validate(code, allowed_names={"read"})
+        code = "data = read_file('file.txt')\nn = len(data)"
+        result = validate(code, allowed_names={"read_file"})
         assert result.valid, result.errors
-        assert "read" in result.calls
+        assert "read_file" in result.calls
         assert "len" in result.calls
         assert "data" in result.variables
 
@@ -165,12 +165,12 @@ class TestValidPrograms:
 
     def test_multiple_assigns_and_calls(self):
         code = (
-            "data = read('input.txt')\n"
+            "data = read_file('input.txt')\n"
             "lines = data.split('\\n')\n"
             "n = len(lines)\n"
             "result = sorted(lines)\n"
         )
-        result = validate(code, allowed_names={"read"})
+        result = validate(code, allowed_names={"read_file"})
         assert result.valid, result.errors
 
     def test_returns_syntax_error(self):

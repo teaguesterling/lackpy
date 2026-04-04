@@ -11,16 +11,16 @@ from lackpy.lang.grader import Grade
 
 def _make_kit():
     tools = {
-        "glob": ToolSpec(name="glob", provider="builtin", description="Find files",
+        "find_files": ToolSpec(name="find_files", provider="builtin", description="Find files",
                          args=[], returns="list[str]", grade_w=1, effects_ceiling=1),
     }
     return ResolvedKit(
         tools=tools, callables={n: lambda *a: None for n in tools},
-        grade=Grade(w=1, d=1), description="glob(pattern) -> list[str]: Find files",
+        grade=Grade(w=1, d=1), description="find_files(pattern) -> list[str]: Find files",
     )
 
 
-def _make_provider(output="glob('**/*.py')"):
+def _make_provider(output="find_files('**/*.py')"):
     provider = MagicMock()
     provider.name = "test"
     provider.generate = AsyncMock(return_value=output)
@@ -39,13 +39,13 @@ class TestOneShotStrategy:
 
     @pytest.mark.asyncio
     async def test_valid_program_succeeds(self):
-        provider = _make_provider("files = glob('**/*.py')\nlen(files)")
+        provider = _make_provider("files = find_files('**/*.py')\nlen(files)")
         strategy = OneShotStrategy()
         step = strategy.build(provider)
         ctx = StepContext(intent="find python files", kit=_make_kit())
         ctx = await step.run(ctx)
         assert ctx.current.valid is True
-        assert "glob" in ctx.current.program
+        assert "find_files" in ctx.current.program
 
     @pytest.mark.asyncio
     async def test_invalid_program_tries_cleanup(self):
@@ -80,9 +80,9 @@ class TestSPMStrategy:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return "import glob\nfiles = glob.glob('**/*.py')\nlen(files)"
+                return "import glob\nfiles = glob.find_files('**/*.py')\nlen(files)"
             else:
-                return "files = glob('**/*.py')\nlen(files)"
+                return "files = find_files('**/*.py')\nlen(files)"
 
         provider = MagicMock()
         provider.name = "test"
@@ -95,7 +95,7 @@ class TestSPMStrategy:
 
         assert ctx.current.valid is True
         assert "import" not in ctx.current.program
-        assert "glob(" in ctx.current.program
+        assert "find_files(" in ctx.current.program
         assert call_count >= 2
 
 

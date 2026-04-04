@@ -9,12 +9,12 @@ from lackpy.lang.grader import Grade
 
 
 def _make_kit():
-    tools = {"read": ToolSpec(name="read", provider="builtin", description="Read file")}
+    tools = {"read_file": ToolSpec(name="read_file", provider="builtin", description="Read file")}
     return ResolvedKit(
         tools=tools,
         callables={n: lambda *a: None for n in tools},
         grade=Grade(w=1, d=1),
-        description="read(path) -> str",
+        description="read_file(path) -> str",
     )
 
 

@@ -24,8 +24,8 @@ def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
     error_text = " ".join(errors).lower()
 
     # open() instead of read()
-    if "open" in error_text and "read(" in namespace_desc:
-        hints.append("Use read(path) to get file contents.")
+    if "open" in error_text and "read_file(" in namespace_desc:
+        hints.append("Use read_file(path) to get file contents.")
 
     # Model wrote a function definition instead of calling a tool
     if "functiondef" in error_text:

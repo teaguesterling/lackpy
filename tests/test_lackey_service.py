@@ -11,14 +11,14 @@ from lackpy.lackey import Lackey, Tool
 class ReadFile(Lackey):
     """Read a file and return its contents."""
 
-    read = Tool()
+    read_file = Tool()
 
     path: str = "test.txt"
 
     returns: str
 
     def run(self) -> str:
-        content = self.read(self.path)
+        content = self.read_file(self.path)
         return content
 '''
 
@@ -45,10 +45,10 @@ class TestParseLackey:
     def test_parse_lackey(self, service, lackey_file):
         info = service.parse_lackey(lackey_file)
         assert info.class_name == "ReadFile"
-        assert "read" in info.tools
+        assert "read_file" in info.tools
         assert "path" in info.params
         assert info.returns == "str"
-        assert "read(path)" in info.run_body
+        assert "read_file(path)" in info.run_body
 
 
 class TestRunLackey:

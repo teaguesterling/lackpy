@@ -15,11 +15,11 @@ class TestGeneration:
     @pytest.mark.asyncio
     async def test_generate_returns_content(self, provider):
         mock_block = MagicMock()
-        mock_block.text = "x = read('test.py')\nlen(x)"
+        mock_block.text = "x = read_file('test.py')\nlen(x)"
         mock_response = MagicMock()
         mock_response.content = [mock_block]
         with patch.object(provider, "available", return_value=True), \
              patch.object(provider, "_create_message", new_callable=AsyncMock, return_value=mock_response):
-            result = await provider.generate("read test.py", namespace_desc="  read(path) -> str: Read file")
+            result = await provider.generate("read test.py", namespace_desc="  read_file(path) -> str: Read file")
             assert result is not None
-            assert "read(" in result
+            assert "read_file(" in result

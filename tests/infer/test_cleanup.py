@@ -32,19 +32,19 @@ class TestRewriteOpen:
     def test_rewrites_open_read(self):
         result = deterministic_cleanup("data = open(path).read()")
         assert "open" not in result
-        assert "read(path)" in result
+        assert "read_file(path)" in result
 
     def test_rewrites_open_readlines(self):
         result = deterministic_cleanup("lines = open(path).readlines()")
         assert "open" not in result
-        assert "read(path)" in result
+        assert "read_file(path)" in result
         assert "splitlines()" in result
 
     def test_open_in_loop(self):
         program = "for f in files:\n    data = open(f).read()"
         result = deterministic_cleanup(program)
         assert "open" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
 
     def test_leaves_read_alone(self):
         result = deterministic_cleanup("data = read(path)")
@@ -58,19 +58,19 @@ class TestRewriteWithOpen:
         result = deterministic_cleanup(program)
         assert "open" not in result
         assert "with" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
 
     def test_with_open_read_mode(self):
         program = "with open(f, 'r') as fh:\n    content = fh.read()"
         result = deterministic_cleanup(program)
         assert "open" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
 
     def test_with_open_readlines(self):
         program = "with open(f) as fh:\n    lines = fh.readlines()"
         result = deterministic_cleanup(program)
         assert "open" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
         assert "splitlines()" in result
 
     def test_with_open_in_loop(self):
@@ -78,7 +78,7 @@ class TestRewriteWithOpen:
         result = deterministic_cleanup(program)
         assert "open" not in result
         assert "with" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
 
     def test_full_model_pattern(self):
         """The exact pattern qwen2.5-coder generates for multi-file reads."""
@@ -93,7 +93,7 @@ class TestRewriteWithOpen:
         result = deterministic_cleanup(program)
         assert "open" not in result
         assert "with" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
         assert "glob(" in result
 
     def test_preserves_non_open_with(self):
@@ -106,7 +106,7 @@ class TestRewriteWithOpen:
         program = "with open(f) as fh:\n    for line in fh:\n        print(line)"
         result = deterministic_cleanup(program)
         assert "open" not in result
-        assert "read(f)" in result
+        assert "read_file(f)" in result
         assert "splitlines()" in result
 
 
@@ -146,7 +146,7 @@ class TestCombined:
         assert "import" not in result
         assert "open" not in result
         assert "os.path.basename" not in result
-        assert "read(filepath)" in result
+        assert "read_file(filepath)" in result
         assert "rsplit" in result
 
     def test_empty_after_cleanup(self):

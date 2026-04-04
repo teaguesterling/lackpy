@@ -4,13 +4,13 @@ from lackpy.lang.grader import Grade, compute_grade
 
 
 def test_grade_from_read_only_tools():
-    tools = {"read": {"grade_w": 1, "effects_ceiling": 1}, "glob": {"grade_w": 1, "effects_ceiling": 1}}
+    tools = {"read_file": {"grade_w": 1, "effects_ceiling": 1}, "find_files": {"grade_w": 1, "effects_ceiling": 1}}
     grade = compute_grade(tools)
     assert grade == Grade(w=1, d=1)
 
 
 def test_grade_from_mixed_tools():
-    tools = {"read": {"grade_w": 1, "effects_ceiling": 1}, "edit": {"grade_w": 3, "effects_ceiling": 3}}
+    tools = {"read_file": {"grade_w": 1, "effects_ceiling": 1}, "edit_file": {"grade_w": 3, "effects_ceiling": 3}}
     grade = compute_grade(tools)
     assert grade == Grade(w=3, d=3)
 

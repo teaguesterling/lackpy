@@ -18,10 +18,10 @@ class BuiltinProvider:
 
     def resolve(self, tool_spec: ToolSpec) -> Callable[..., Any]:
         implementations = {
-            "read": _builtin_read,
-            "glob": _builtin_glob,
-            "write": _builtin_write,
-            "edit": _builtin_edit,
+            "read_file": _builtin_read,
+            "find_files": _builtin_glob,
+            "write_file": _builtin_write,
+            "edit_file": _builtin_edit,
         }
         fn = implementations.get(tool_spec.name)
         if fn is None:

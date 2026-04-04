@@ -21,9 +21,9 @@ class RulesProvider:
         # Match "read file <path>" only when path is a single token (no spaces)
         # or quoted. Multi-word intents like "read file X and do Y" go to the model.
         m = re.match(r"read (?:the )?file ['\"]?(\S+)['\"]?\s*$", lower)
-        if m and "read(" in namespace_desc:
+        if m and "read_file(" in namespace_desc:
             path = re.match(r"read (?:the )?file ['\"]?(\S+)['\"]?\s*$", original, re.IGNORECASE).group(1)
-            return f"content = read('{path}')\ncontent"
+            return f"content = read_file('{path}')\ncontent"
 
         m = re.match(r"find (?:the )?definitions? (?:of |for )?(.+)", lower)
         if m and "find_definitions(" in namespace_desc:
@@ -36,17 +36,17 @@ class RulesProvider:
             return f"results = find_callers('{name}')\nresults"
 
         m = re.match(r"(?:find|list) all (\w+) files\s*$", lower)
-        if m and "glob(" in namespace_desc:
+        if m and "find_files(" in namespace_desc:
             # Map common language names to file extensions
             ext_map = {"python": "py", "javascript": "js", "typescript": "ts",
                        "rust": "rs", "ruby": "rb", "yaml": "yml"}
             ext = m.group(1).strip()
             ext = ext_map.get(ext, ext)
-            return f"files = glob('**/*.{ext}')\nfiles"
+            return f"files = find_files('**/*.{ext}')\nfiles"
 
         m = re.match(r"glob (.+)", lower)
-        if m and "glob(" in namespace_desc:
+        if m and "find_files(" in namespace_desc:
             pattern = re.match(r"glob (.+)", original, re.IGNORECASE).group(1).strip().strip("'\"")
-            return f"files = glob('{pattern}')\nfiles"
+            return f"files = find_files('{pattern}')\nfiles"
 
         return None

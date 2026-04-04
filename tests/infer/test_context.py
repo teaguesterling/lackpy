@@ -8,12 +8,12 @@ from lackpy.lang.grader import Grade
 
 
 def _make_kit(tools=None):
-    tools = tools or {"read": ToolSpec(name="read", provider="builtin", description="Read file")}
+    tools = tools or {"read_file": ToolSpec(name="read_file", provider="builtin", description="Read file")}
     return ResolvedKit(
         tools=tools,
         callables={n: lambda *a: None for n in tools},
         grade=Grade(w=1, d=1),
-        description="read(path) -> str: Read file",
+        description="read_file(path) -> str: Read file",
     )
 
 
@@ -22,7 +22,7 @@ class TestStepTrace:
         trace = StepTrace(
             step_name="generate", provider_name="ollama", model="qwen2.5:3b",
             system_prompt="You are...", user_prompt="find files",
-            raw_output="files = glob('**/*.py')", duration_ms=123.4,
+            raw_output="files = find_files('**/*.py')", duration_ms=123.4,
         )
         assert trace.step_name == "generate"
         assert trace.duration_ms == 123.4
@@ -40,13 +40,13 @@ class TestProgramState:
         trace = StepTrace(
             step_name="generate", provider_name="ollama", model="qwen2.5:3b",
             system_prompt=None, user_prompt="find files",
-            raw_output="glob('**/*.py')", duration_ms=100.0,
+            raw_output="find_files('**/*.py')", duration_ms=100.0,
         )
         state = ProgramState(
-            program="glob('**/*.py')", intent="find files", kit=_make_kit(),
+            program="find_files('**/*.py')", intent="find files", kit=_make_kit(),
             valid=None, errors=[], trace=trace,
         )
-        assert state.program == "glob('**/*.py')"
+        assert state.program == "find_files('**/*.py')"
         assert state.valid is None
 
     def test_program_state_with_errors(self):
