@@ -36,10 +36,11 @@ class OllamaProvider:
         )
 
     async def generate(self, intent: str, namespace_desc: str,
-                       config: dict | None = None, error_feedback: list[str] | None = None) -> str | None:
+                       config: dict | None = None, error_feedback: list[str] | None = None,
+                       system_prompt_override: str | None = None) -> str | None:
         if not self.available():
             return None
-        system = build_system_prompt(namespace_desc)
+        system = system_prompt_override or build_system_prompt(namespace_desc)
 
         is_retry = error_feedback and self._last_output
         if is_retry:

@@ -30,10 +30,11 @@ class AnthropicProvider:
         )
 
     async def generate(self, intent: str, namespace_desc: str,
-                       config: dict | None = None, error_feedback: list[str] | None = None) -> str | None:
+                       config: dict | None = None, error_feedback: list[str] | None = None,
+                       system_prompt_override: str | None = None) -> str | None:
         if not self.available():
             return None
-        system = build_system_prompt(namespace_desc)
+        system = system_prompt_override or build_system_prompt(namespace_desc)
         user_msg = intent
         if error_feedback:
             user_msg += "\n\nPrevious attempt had these errors, please fix:\n" + "\n".join(f"- {e}" for e in error_feedback)

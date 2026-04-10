@@ -42,6 +42,10 @@ class ToolSpec:
         returns: Return type annotation string.
         grade_w: World coupling level (0–3).
         effects_ceiling: Effects ceiling level (0–3).
+        examples: Tagged examples for retrieval-augmented prompting. Each
+            example is a dict with keys: ``intent``, ``code``, ``tags``.
+            At inference time, relevant examples are selected from the
+            pool of all kit tool examples and injected into the prompt.
     """
 
     name: str
@@ -52,6 +56,7 @@ class ToolSpec:
     returns: str = "Any"
     grade_w: int = 3
     effects_ceiling: int = 3
+    examples: list[dict] = field(default_factory=list)
 
 
 class Toolbox:

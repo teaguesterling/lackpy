@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..lang.grammar import ALLOWED_BUILTINS
+from .retrieval import Example, format_examples_for_prompt, retrieve_examples
 
 _TEMPLATE = """\
 You are a Jupyter notebook cell generator. Write a single cell \
@@ -20,19 +21,35 @@ Kernel namespace:
 {namespace_desc}
 
 Builtins: {builtins_list}
-{params_section}"""
+{params_section}{examples_section}"""
 
 
-def build_system_prompt(namespace_desc: str, params_desc: str | None = None) -> str:
+def build_system_prompt(
+    namespace_desc: str,
+    params_desc: str | None = None,
+    intent: str | None = None,
+    example_pool: list[Example] | None = None,
+    n_examples: int = 6,
+) -> str:
     """Build the system prompt for inference providers.
 
     Constructs the full instruction prompt from the tool namespace description,
-    allowed builtins, and optional parameter variable descriptions.
+    allowed builtins, optional parameter variable descriptions, and optionally
+    a set of retrieved examples.
+
+    When ``intent`` and ``example_pool`` are provided, the top ``n_examples``
+    most relevant examples are selected by keyword overlap and included in
+    the prompt. This keeps the prompt focused on patterns relevant to the
+    current query rather than stuffing every available example.
 
     Args:
         namespace_desc: Formatted string of available tools and their signatures.
-        params_desc: Optional description of pre-set parameter variables; inserted
-            into the prompt when provided.
+        params_desc: Optional description of pre-set parameter variables.
+        intent: Natural language intent. Required for example retrieval.
+        example_pool: Candidate examples to retrieve from. If None or empty,
+            no examples section is added.
+        n_examples: Maximum number of examples to include. Default 6 — tested
+            as the sweet spot for qwen2.5-coder models on structured output.
 
     Returns:
         The complete system prompt string ready to send to an inference provider.
@@ -44,11 +61,38 @@ def build_system_prompt(namespace_desc: str, params_desc: str | None = None) -> 
             f"\nPre-set variables (already defined, use directly):\n"
             f"{params_desc}\n\n"
         )
+
+    examples_section = ""
+    if intent and example_pool:
+        selected = retrieve_examples(intent, example_pool, n=n_examples)
+        if selected:
+            examples_section = "\n" + format_examples_for_prompt(selected) + "\n"
+
     return _TEMPLATE.format(
         namespace_desc=namespace_desc,
         builtins_list=builtins_list,
         params_section=params_section,
+        examples_section=examples_section,
     )
+
+
+def collect_example_pool(tool_specs: list) -> list[Example]:
+    """Gather all examples from a list of ToolSpec objects into a flat pool.
+
+    Each tool may contribute zero or more examples. Returns an empty list if
+    none are defined. Example dicts are converted to Example objects; entries
+    missing required fields are skipped.
+    """
+    pool: list[Example] = []
+    for spec in tool_specs:
+        for ex in getattr(spec, "examples", None) or []:
+            intent = ex.get("intent", "")
+            code = ex.get("code", "")
+            if not intent or not code:
+                continue
+            tags = set(ex.get("tags", []))
+            pool.append(Example(intent=intent, code=code, tags=tags))
+    return pool
 
 
 def format_params_description(params: dict) -> str:

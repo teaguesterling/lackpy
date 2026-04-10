@@ -63,7 +63,8 @@ class TemplatesProvider:
         return self._templates
 
     async def generate(self, intent: str, namespace_desc: str,
-                       config: dict | None = None, error_feedback: list[str] | None = None) -> str | None:
+                       config: dict | None = None, error_feedback: list[str] | None = None,
+                       system_prompt_override: str | None = None) -> str | None:
         for template in self._load():
             captures = template.match(intent)
             if captures is not None:
