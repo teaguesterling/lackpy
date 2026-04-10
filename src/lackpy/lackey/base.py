@@ -13,6 +13,23 @@ _RESERVED = frozenset({
 })
 
 
+def _get_class_annotations(cls: type, namespace: dict[str, Any]) -> dict[str, Any]:
+    """Return a class's own annotations, compatible with Python 3.10-3.14+.
+
+    Python 3.14 (PEP 649) made annotations lazy — they live in
+    ``__annotate_func__`` rather than a direct ``__annotations__`` dict in
+    the class namespace. ``inspect.get_annotations(cls)`` handles both
+    storage forms and only returns the class's own annotations (not
+    inherited ones).
+    """
+    import inspect
+    try:
+        return inspect.get_annotations(cls)
+    except Exception:
+        # Fallback for edge cases: pre-3.10 used namespace.get directly
+        return namespace.get("__annotations__", {})
+
+
 class LackeyMeta(type):
     def __new__(mcs, name: str, bases: tuple, namespace: dict[str, Any]) -> type:
         cls = super().__new__(mcs, name, bases, namespace)
@@ -26,7 +43,7 @@ class LackeyMeta(type):
         cls._tool_descriptors = tool_descriptors
 
         param_specs: dict[str, dict[str, Any]] = {}
-        annotations = namespace.get("__annotations__", {})
+        annotations = _get_class_annotations(cls, namespace)
         for param_name, param_type in annotations.items():
             if param_name in _RESERVED or param_name in tool_descriptors or param_name.startswith("_"):
                 continue
@@ -44,7 +61,6 @@ class Lackey(metaclass=LackeyMeta):
 
     returns: Any = None
     creation_log: Any = None
-    pattern: str | None = None
 
     _tool_descriptors: dict[str, Tool] = {}
     _param_specs: dict[str, dict[str, Any]] = {}
