@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lackpy"
-version = "0.3.0"
+version = "0.4.0"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
 requires-python = ">=3.10"
 dependencies = []
