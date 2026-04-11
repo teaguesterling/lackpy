@@ -35,10 +35,6 @@ def _python_gate(program: str) -> GateResult:
 
 # ── Assertion helpers ─────────────────────────────────────────────────
 
-def _is_nonempty_str(x: Any) -> bool:
-    return isinstance(x, str) and len(x) > 0
-
-
 def _contains_all(substrs: list[str]):
     def check(x: Any) -> bool:
         if not isinstance(x, str):
@@ -110,7 +106,7 @@ PYTHON_INTENTS: list[Intent] = [
         text="Find all callers of execute_sql in the codebase and return them as a list of caller filenames.",
         return_shape="list[str]",
         structural_gate=_python_gate,
-        exec_assertion=_is_list_with_any(["app.py", "api_v1.py", "api_v2.py", "auth.py", "db.py"]),
+        exec_assertion=_is_list_with_any(["app.py", "api_v1.py", "api_v2.py", "auth.py"]),
         notes="Single find_refs call; return shape is the file column of the result.",
     ),
     Intent(
