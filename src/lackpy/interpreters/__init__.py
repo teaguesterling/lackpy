@@ -12,6 +12,10 @@ originally built around is now one plugin among several:
 - :class:`~lackpy.interpreters.pss.PssInterpreter` — multi-rule
   selector sheets (selector + declaration blocks) rendered as markdown
   via pluckit's ``AstViewer`` plugin
+- :class:`~lackpy.interpreters.plucker.PluckerInterpreter` — fluent
+  chain expressions over pluckit's Plucker/Selection classes, with
+  the entry point ``source(code)`` and any pluckit method chain
+  following it
 
 Interpreters are registered in :data:`INTERPRETERS` and selected by name
 via ``--interpreter`` on the CLI or the ``interpreter=`` parameter on
@@ -37,13 +41,14 @@ from .registry import INTERPRETERS, get_interpreter, list_interpreters, register
 from .python import PythonInterpreter
 from .ast_select import AstSelectInterpreter
 from .pss import PssInterpreter
+from .plucker import PluckerInterpreter
 
 # Register the bundled interpreters at import time. Other interpreters
-# (e.g. claude-code, plucker) register themselves when their modules
-# are imported.
+# (e.g. claude-code) register themselves when their modules are imported.
 register_interpreter(PythonInterpreter)
 register_interpreter(AstSelectInterpreter)
 register_interpreter(PssInterpreter)
+register_interpreter(PluckerInterpreter)
 
 __all__ = [
     "ExecutionContext",
@@ -58,4 +63,5 @@ __all__ = [
     "PythonInterpreter",
     "AstSelectInterpreter",
     "PssInterpreter",
+    "PluckerInterpreter",
 ]
