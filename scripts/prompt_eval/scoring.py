@@ -72,3 +72,117 @@ def run_gate(intent: Intent, raw_generation: str) -> tuple[str, GateResult]:
     sanitized = sanitize_output(raw_generation)
     gate = intent.structural_gate(sanitized)
     return sanitized, gate
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Stage 2 — execution scoring
+# ─────────────────────────────────────────────────────────────────────
+
+import asyncio
+import time
+from pathlib import Path
+
+from lackpy.interpreters import (
+    AstSelectInterpreter,
+    ExecutionContext,
+    InterpreterExecutionResult,
+    PluckerInterpreter,
+    PssInterpreter,
+    PythonInterpreter,
+    run_interpreter,
+)
+
+from .eval_kit import build_eval_kit
+
+
+_INTERPRETER_FACTORIES = {
+    "python": PythonInterpreter,
+    "ast-select": AstSelectInterpreter,
+    "pss": PssInterpreter,
+    "plucker": PluckerInterpreter,
+}
+
+
+def _build_context(interpreter_name: str, toybox_dir: Path) -> ExecutionContext:
+    """Build an ExecutionContext appropriate for each interpreter.
+
+    The python interpreter needs the eval kit resolved against the
+    toybox base dir; the pluckit-backed interpreters need a `code`
+    glob pointing at toybox python files.
+    """
+    toybox_dir = Path(toybox_dir).resolve()
+    if interpreter_name == "python":
+        kit = build_eval_kit(toybox_dir)
+        return ExecutionContext(kit=kit, base_dir=toybox_dir)
+    code_glob = str(toybox_dir / "**" / "*.py")
+    return ExecutionContext(base_dir=toybox_dir, config={"code": code_glob})
+
+
+def run_execution(
+    intent: Intent,
+    sanitized_program: str,
+    toybox_dir: Path,
+) -> InterpreterExecutionResult:
+    """Execute the sanitized program via the matching lackpy interpreter.
+
+    Returns the full InterpreterExecutionResult. Safe to call from a
+    sync context — wraps the interpreter's async execute() in asyncio.run.
+    """
+    factory = _INTERPRETER_FACTORIES[intent.interpreter]
+    interp = factory()
+    ctx = _build_context(intent.interpreter, toybox_dir)
+    return asyncio.run(run_interpreter(interp, sanitized_program, ctx))
+
+
+def score_cell(
+    intent: Intent,
+    raw_generation: str,
+    toybox_dir: Path,
+) -> CellScore:
+    """End-to-end cell scoring: gate → execute → assert → score 0/1/2.
+
+    - Score 0: gate fail (program not worth executing).
+    - Score 1: gate pass, but execution raised / returned failure / the
+      assertion callable raised / assertion returned False.
+    - Score 2: gate pass, execution succeeded, assertion passed.
+    """
+    sanitized, gate = run_gate(intent, raw_generation)
+    cs = CellScore(
+        raw_generation=raw_generation,
+        sanitized_program=sanitized,
+        gate=gate,
+    )
+    if not gate.passed:
+        cs.score = 0
+        return cs
+
+    start = time.perf_counter()
+    try:
+        exec_result = run_execution(intent, sanitized, toybox_dir)
+    except Exception as e:
+        cs.executed = True
+        cs.exec_error = f"{type(e).__name__}: {e}"
+        cs.score = 1
+        cs.duration_ms_execution = (time.perf_counter() - start) * 1000
+        return cs
+    cs.duration_ms_execution = (time.perf_counter() - start) * 1000
+    cs.executed = True
+    cs.exec_output = exec_result.output
+    cs.exec_error = exec_result.error
+    cs.interpreter_metadata = dict(exec_result.metadata or {})
+
+    if not exec_result.success:
+        cs.score = 1
+        return cs
+
+    try:
+        passed = bool(intent.exec_assertion(exec_result.output))
+    except Exception as e:
+        cs.assertion_passed = False
+        cs.exec_error = f"assertion raised: {type(e).__name__}: {e}"
+        cs.score = 1
+        return cs
+
+    cs.assertion_passed = passed
+    cs.score = 2 if passed else 1
+    return cs
