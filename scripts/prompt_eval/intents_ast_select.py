@@ -29,7 +29,12 @@ def _ast_select_gate(program: str) -> GateResult:
             passed=False,
             errors=[f"expected a single-line selector, got {len(lines)} lines"],
         )
-    # Must start with a class selector (pluckit uses .fn, .cls, .call, etc.)
+    # Permissive leading-char check: accepts `. # * [` as plausible selector
+    # starts. `#` and `*` alone are not valid pluckit selector heads (pluckit
+    # kinds lead with `.`, and `#id` is only valid as a suffix), but we let
+    # them through here so the execution stage decides — the gate is
+    # deliberately loose to avoid penalizing near-miss selectors before pluckit
+    # even sees them.
     if not stripped.lstrip().startswith((".", "#", "*", "[")):
         return GateResult(
             passed=False,
@@ -106,31 +111,31 @@ AST_SELECT_INTENTS: list[Intent] = [
         id="as.core.05",
         interpreter="ast-select",
         difficulty="core",
-        text="Show every function decorated with @deprecated as a view.",
+        text="Show the function named login as a view.",
         return_shape="markdown",
         structural_gate=_ast_select_gate,
-        exec_assertion=_markdown_nonempty,
-        notes="Pluckit-grammar-contingent (decorator match). The assertion accepts any non-empty output because models may use variant syntax.",
+        exec_assertion=_markdown_contains(["login"]),
+        notes=".fn#login — targets a known symbol in app.py.",
     ),
     Intent(
         id="as.core.06",
         interpreter="ast-select",
         difficulty="core",
-        text="Show every async function in the codebase as a view.",
+        text="Show the class named Session as a view.",
         return_shape="markdown",
         structural_gate=_ast_select_gate,
-        exec_assertion=_markdown_nonempty,
-        notes="The toybox has no async functions by design; an empty match set renders to '' which fails _markdown_nonempty. Accept any non-empty output as a sign the selector was understood; a true zero-match successful run is indistinguishable from an execution failure. Revisit if async functions land in toybox v2.",
+        exec_assertion=_markdown_contains(["Session"]),
+        notes=".cls#Session — targets a known class in models.py.",
     ),
     Intent(
         id="as.core.07",
         interpreter="ast-select",
         difficulty="core",
-        text="Show every function decorated with @route as a view.",
+        text="Show every class defined in the codebase as a view.",
         return_shape="markdown",
         structural_gate=_ast_select_gate,
-        exec_assertion=_markdown_nonempty,
-        notes="Pluckit-grammar-contingent. Should match 4 routes in app.py.",
+        exec_assertion=_markdown_count_at_least(3),
+        notes=".cls — toybox has User, Session, AuditLog, AuthError, ValidationError, DatabaseError plus _Conn/_Tx, so count >= 3 is a safe lower bound.",
     ),
     Intent(
         id="as.core.08",

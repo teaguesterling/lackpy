@@ -1,5 +1,7 @@
 """Tests for the ast-select corpus."""
 
+import pytest
+
 from scripts.prompt_eval.intents_ast_select import AST_SELECT_INTENTS
 
 
@@ -45,8 +47,15 @@ def test_gate_rejects_multiline():
         assert not gr.passed
 
 
-def test_gate_rejects_invalid_start():
-    bad = "validate_token"
+@pytest.mark.parametrize("bad", [
+    "validate_token",    # bare identifier
+    "fn.validate_token", # kind prefix without leading dot
+    "(.fn)",             # parenthesized
+    "/fn",               # leading slash
+    " ",                 # whitespace-only
+])
+def test_gate_rejects_invalid_start(bad: str):
+    from scripts.prompt_eval.intents_ast_select import AST_SELECT_INTENTS
     for i in AST_SELECT_INTENTS:
         gr = i.structural_gate(bad)
-        assert not gr.passed
+        assert not gr.passed, f"{i.id} accepted invalid program {bad!r}"
