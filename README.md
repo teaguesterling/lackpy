@@ -9,7 +9,7 @@
 ## What it does
 
 ```bash
-$ lackpy delegate "read file main.py and count its lines" --kit read,glob
+$ lackpy delegate "read file main.py and count its lines" --kit read_file,find_files
 ```
 
 lackpy takes an intent, generates a restricted Python program using a local 1.5B model, validates it against a strict AST whitelist, and runs it with traced tool calls. One MCP call replaces N tool round-trips.
@@ -26,7 +26,7 @@ pip install lackpy[full]      # + all optional features
 
 ```bash
 lackpy init --ollama-url http://localhost:11434
-lackpy delegate "find all python files" --kit read,glob
+lackpy delegate "find all python files" --kit read_file,find_files
 ```
 
 ```python
@@ -35,7 +35,7 @@ import asyncio
 
 async def main():
     svc = LackpyService()
-    result = await svc.delegate("read file README.md", kit=["read"])
+    result = await svc.delegate("read file README.md", kit=["read_file"])
     print(result["output"])
 
 asyncio.run(main())

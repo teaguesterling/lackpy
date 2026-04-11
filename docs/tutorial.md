@@ -81,19 +81,19 @@ The validator checks programs before they run. It operates entirely on the AST �
 
 ```bash
 cat > check.py << 'EOF'
-files = glob("**/*.py")
+files = find_files("**/*.py")
 count = len(files)
 count
 EOF
 
-lackpy validate check.py --kit glob
+lackpy validate check.py --kit find_files
 ```
 
 ```json
 {
   "valid": true,
   "errors": [],
-  "calls": ["glob", "len"]
+  "calls": ["find_files", "len"]
 }
 ```
 
@@ -107,7 +107,7 @@ import sys
 sys.version
 EOF
 
-lackpy validate bad.py --kit glob
+lackpy validate bad.py --kit find_files
 ```
 
 ```json
@@ -141,8 +141,8 @@ from lackpy import LackpyService
 
 svc = LackpyService()
 result = svc.validate(
-    'files = glob("**/*.py")\nlen(files)',
-    kit=["glob"],
+    'files = find_files("**/*.py")\nlen(files)',
+    kit=["find_files"],
 )
 print(result.valid)     # True
 print(result.errors)    # []
@@ -164,7 +164,7 @@ lackpy toolbox list
 ### Use a comma-separated kit
 
 ```bash
-lackpy delegate "read the file README.md" --kit read,glob
+lackpy delegate "read the file README.md" --kit read_file,find_files
 ```
 
 ### Create a named kit
@@ -200,12 +200,12 @@ lackpy kit info filesystem
 ```json
 {
   "tools": {
-    "read": {"description": "", "grade_w": 3, "effects_ceiling": 3},
-    "glob": {"description": "", "grade_w": 3, "effects_ceiling": 3},
-    "write": {"description": "", "grade_w": 3, "effects_ceiling": 3}
+    "read_file": {"description": "", "grade_w": 3, "effects_ceiling": 3},
+    "find_files": {"description": "", "grade_w": 3, "effects_ceiling": 3},
+    "write_file": {"description": "", "grade_w": 3, "effects_ceiling": 3}
   },
   "grade": {"w": 3, "d": 3},
-  "description": "  read(path) -> Any: \n  glob(pattern) -> Any: \n  write(path, content) -> Any: "
+  "description": "  read_file(path) -> Any: \n  find_files(pattern) -> Any: \n  write_file(path, content) -> Any: "
 }
 ```
 
@@ -218,12 +218,12 @@ svc = LackpyService()
 result = await svc.delegate("find all Python files", kit="filesystem")
 
 # List of tool names
-result = await svc.delegate("find all Python files", kit=["glob"])
+result = await svc.delegate("find all Python files", kit=["find_files"])
 
 # Dict with aliases
 result = await svc.delegate(
     "find all Python files",
-    kit={"find_files": "glob"},  # calls are `find_files(...)` in the program
+    kit={"ls": "find_files"},  # calls are `ls(...)` in the program
 )
 ```
 
@@ -234,11 +234,11 @@ result = await svc.delegate(
 `generate` runs the inference pipeline without executing the result:
 
 ```bash
-lackpy generate "find all Python files" --kit glob
+lackpy generate "find all Python files" --kit find_files
 ```
 
 ```python
-files = glob('**/*.py')
+files = find_files('**/*.py')
 files
 ```
 
@@ -249,8 +249,8 @@ files
     Templates are matched first. If a template pattern matches the intent, the stored program is returned — no LLM required.
 
     ```bash
-    lackpy generate "read the file config.toml" --kit read
-    # → matched by rules tier: content = read('config.toml')
+    lackpy generate "read the file config.toml" --kit read_file
+    # → matched by rules tier: content = read_file('config.toml')
     ```
 
 === "Tier 1: Rules"
@@ -281,7 +281,7 @@ files
 ### Python API
 
 ```python
-result = await svc.generate("find all Python files", kit=["glob"])
+result = await svc.generate("find all Python files", kit=["find_files"])
 print(result.program)          # the generated program
 print(result.provider_name)    # which tier produced it
 print(result.generation_time_ms)
@@ -295,11 +295,11 @@ Use `run` when you already have a program file:
 
 ```bash
 cat > list_py.py << 'EOF'
-files = glob("**/*.py")
+files = find_files("**/*.py")
 files
 EOF
 
-lackpy run list_py.py --kit glob
+lackpy run list_py.py --kit find_files
 ```
 
 ```json
@@ -316,8 +316,8 @@ The program is validated before execution. If validation fails, the runner retur
 
 ```python
 result = await svc.run_program(
-    'files = glob("**/*.py")\nfiles',
-    kit=["glob"],
+    'files = find_files("**/*.py")\nfiles',
+    kit=["find_files"],
 )
 print(result.success)
 print(result.output)
@@ -333,7 +333,7 @@ Parameters let you pass values into programs without interpolating them into the
 ```python
 result = await svc.delegate(
     intent="read the target file",
-    kit=["read"],
+    kit=["read_file"],
     params={
         "target_file": {
             "value": "README.md",
@@ -348,7 +348,7 @@ Inside the program, `target_file` is available as a pre-set variable:
 
 ```python
 # generated program
-content = read(target_file)
+content = read_file(target_file)
 content
 ```
 
@@ -363,14 +363,14 @@ Once you have a working program, save it as a template to make future matching d
 
 ```bash
 cat > read_file.py << 'EOF'
-content = read('{path}')
+content = read_file('{path}')
 content
 EOF
 
 lackpy create read_file.py \
   --name read-file \
   --pattern "read the file {path}" \
-  --kit read
+  --kit read_file
 ```
 
 This creates `.lackpy/templates/read-file.tmpl`:
@@ -382,7 +382,7 @@ pattern: "read the file {path}"
 success_count: 0
 fail_count: 0
 ---
-content = read('{path}')
+content = read_file('{path}')
 content
 ```
 
@@ -392,8 +392,8 @@ Now `lackpy delegate "read the file README.md"` matches at tier 0, with `{path}`
 
 ```python
 result = await svc.create(
-    program="content = read('{path}')\ncontent",
-    kit=["read"],
+    program="content = read_file('{path}')\ncontent",
+    kit=["read_file"],
     name="read-file",
     pattern="read the file {path}",
 )
@@ -412,14 +412,14 @@ from lackpy.lang.rules import no_loops, max_calls, max_depth, no_nested_calls
 # Use in validate
 result = svc.validate(
     program,
-    kit=["glob"],
+    kit=["find_files"],
     rules=[no_loops, max_calls(5)],
 )
 
 # Use in delegate (enforced on the generated program)
 result = await svc.delegate(
     "find all Python files",
-    kit=["glob"],
+    kit=["find_files"],
     rules=[no_loops, max_depth(2)],
 )
 ```
@@ -443,8 +443,8 @@ Every program run produces a `Trace` with an entry for each tool call:
 
 ```python
 result = await svc.run_program(
-    'files = glob("**/*.py")\ncount = len(files)\ncount',
-    kit=["glob"],
+    'files = find_files("**/*.py")\ncount = len(files)\ncount',
+    kit=["find_files"],
 )
 
 for entry in result.trace.entries:
@@ -455,7 +455,7 @@ for entry in result.trace.entries:
 ```
 
 ```
-Step 0: glob({'pattern': '**/*.py'}) -> ['src/lackpy/__init__.py', ...] (1.3ms)
+Step 0: find_files({'pattern': '**/*.py'}) -> ['src/lackpy/__init__.py', ...] (1.3ms)
 ```
 
 `len` is a builtin, not a tool, so it doesn't appear in the trace. Only kit tools are traced.

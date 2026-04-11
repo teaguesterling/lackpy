@@ -25,13 +25,13 @@ intent → restricted Python → validation → traced execution → result
 lackpy init
 
 # Generate and run a program from natural language
-lackpy delegate "read the file README.md" --kit read,glob
+lackpy delegate "read the file README.md" --kit read_file,find_files
 
 # Just generate — don't run
-lackpy generate "find all Python files" --kit glob
+lackpy generate "find all Python files" --kit find_files
 
 # Validate a hand-written program
-lackpy validate my_program.py --kit read,glob
+lackpy validate my_program.py --kit read_file,find_files
 ```
 
 ## Quick start — Python API
@@ -46,7 +46,7 @@ async def main():
     # Generate and run in one call
     result = await svc.delegate(
         intent="read the file pyproject.toml",
-        kit=["read"],
+        kit=["read_file"],
     )
     print(result["output"])
     print(result["trace"])  # every tool call recorded
@@ -61,7 +61,7 @@ asyncio.run(main())
 The "rigged suite" is the property that lackpy's inference pipeline can be made deterministic for any intent that has been seen before. Save a validated program as a template:
 
 ```bash
-lackpy create my_program.py --name read-file --pattern "read the file {path}" --kit read
+lackpy create my_program.py --name read-file --pattern "read the file {path}" --kit read_file
 ```
 
 On the next `delegate` call with a matching intent, the template tier fires at tier 0 — before any LLM is consulted. The program is guaranteed valid because it was validated when it was saved.

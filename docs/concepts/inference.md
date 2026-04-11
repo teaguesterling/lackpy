@@ -24,7 +24,7 @@ pattern: "read the file {path}"
 success_count: 12
 fail_count: 0
 ---
-content = read('{path}')
+content = read_file('{path}')
 content
 ```
 
@@ -38,11 +38,11 @@ Templates are checked in sorted filename order. The first match wins.
 
 The rules tier uses direct regex matching for common intents. It handles:
 
-- `read (the )? file <path>` → `content = read('<path>')\ncontent`
+- `read (the )? file <path>` → `content = read_file('<path>')\ncontent`
 - `find (the )? definition(s)? (of|for) <name>` → `results = find_definitions('<name>')\nresults`
 - `find (all)? callers|usages|references (of|for) <name>` → `results = find_callers('<name>')\nresults`
-- `(find|list) all <ext> files` → `files = glob('**/*.<ext>')\nfiles`
-- `glob <pattern>` → `files = glob('<pattern>')\nfiles`
+- `(find|list) all <ext> files` → `files = find_files('**/*.<ext>')\nfiles`
+- `glob <pattern>` → `files = find_files('<pattern>')\nfiles`
 
 Rules are only applied if the corresponding tool name appears in the namespace description. The rules tier always returns `available() = True`.
 
@@ -129,17 +129,17 @@ Over time, the template library grows and LLM calls become less frequent. The te
 
 ```bash
 # Step 1: first run (rules tier)
-lackpy delegate "read the file pyproject.toml" --kit read
+lackpy delegate "read the file pyproject.toml" --kit read_file
 
 # Step 2: save as template
 cat > read_pyproject.py << 'EOF'
-content = read('pyproject.toml')
+content = read_file('pyproject.toml')
 content
 EOF
-lackpy create read_pyproject.py --name read-pyproject --kit read
+lackpy create read_pyproject.py --name read-pyproject --kit read_file
 
 # Step 3: future runs hit tier 0
-lackpy delegate "read the file pyproject.toml" --kit read
+lackpy delegate "read the file pyproject.toml" --kit read_file
 # generation_tier: "templates"
 ```
 

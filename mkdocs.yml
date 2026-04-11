@@ -67,6 +67,7 @@ nav:
     - Language Spec: concepts/language-spec.md
     - Kits & Toolbox: concepts/kits.md
     - Inference Pipeline: concepts/inference.md
+    - Interpreter Plugins: concepts/interpreters.md
   - Extending:
     - Tool Providers: extending/tool-providers.md
     - Inference Providers: extending/inference-providers.md

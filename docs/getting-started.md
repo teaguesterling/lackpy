@@ -115,7 +115,7 @@ lackpy toolbox list
 Generate and run a program:
 
 ```bash
-lackpy delegate "read the file README.md" --kit read
+lackpy delegate "read the file README.md" --kit read_file
 ```
 
 The output is JSON with the generated program, trace, and result:
@@ -123,14 +123,14 @@ The output is JSON with the generated program, trace, and result:
 ```json
 {
   "success": true,
-  "program": "content = read('README.md')\ncontent",
+  "program": "content = read_file('README.md')\ncontent",
   "grade": {"w": 1, "d": 1},
   "generation_tier": "rules",
   "generation_time_ms": 0.4,
   "execution_time_ms": 1.2,
   "total_time_ms": 1.6,
   "trace": [
-    {"step": 0, "tool": "read", "args": {"path": "README.md"}, "result": "...", "duration_ms": 1.1, "success": true, "error": null}
+    {"step": 0, "tool": "read_file", "args": {"path": "README.md"}, "result": "...", "duration_ms": 1.1, "success": true, "error": null}
   ],
   "output": "# My Project\n...",
   "error": null
@@ -153,8 +153,8 @@ async def main():
 
     # Validate a program manually
     result = svc.validate(
-        'content = read("pyproject.toml")\ncontent',
-        kit=["read"],
+        'content = read_file("pyproject.toml")\ncontent',
+        kit=["read_file"],
     )
     print(result.valid)   # True
     print(result.errors)  # []
@@ -162,7 +162,7 @@ async def main():
     # Generate and run
     result = await svc.delegate(
         intent="read the file pyproject.toml",
-        kit=["read"],
+        kit=["read_file"],
     )
     print(result["output"])
 
