@@ -11,6 +11,7 @@ from scripts.prompt_eval.harness import (
     make_row,
     run_harness,
     toybox_hash,
+    _read_meta_hash,
 )
 from scripts.prompt_eval.intents import GateResult, Intent
 from scripts.prompt_eval.runner import GenerationRecord
@@ -105,7 +106,7 @@ def test_make_row_contains_expected_keys():
     )
     row = make_row(
         model="m1", interpreter="python", variant_id="baseline",
-        intent=intent, gen=gen, score=None, toybox_dir=TOYBOX,
+        intent=intent, gen=gen, score=None,
     )
     for key in ("model", "interpreter", "variant_id", "intent_id",
                 "raw_generation", "duration_ms_generation",
@@ -182,3 +183,86 @@ def test_run_harness_writes_meta_row_on_new_file(tmp_path: Path):
     first = json.loads(lines[0])
     assert "_meta" in first
     assert first["_meta"]["toybox_hash"] == toybox_hash(TOYBOX)
+
+
+def test_run_harness_refuses_resume_on_hash_mismatch(tmp_path: Path):
+    """Resuming a JSONL written against a different toybox should raise."""
+    import pytest
+
+    intents = [_trivial_intent("py.a")]
+    cfg = HarnessConfig(
+        output_path=tmp_path / "mismatch.jsonl",
+        models=["m1"],
+        interpreters=["python"],
+        variant_ids=["baseline"],
+        intents=intents,
+        toybox_dir=TOYBOX,
+        ollama_host="http://unused",
+        temperature=0.1,
+        timeout=10,
+    )
+    # Seed the output with a meta row whose hash is wrong
+    cfg.output_path.write_text(
+        json.dumps({"_meta": {"toybox_hash": "deadbeef" * 8}}) + "\n"
+    )
+    with patch("scripts.prompt_eval.harness.make_ollama_client", return_value=MagicMock()), \
+         patch("scripts.prompt_eval.harness.generate_once") as gen:
+        with pytest.raises(RuntimeError, match="toybox hash mismatch"):
+            run_harness(cfg)
+        gen.assert_not_called()
+
+
+def test_run_harness_refuses_resume_on_missing_meta_hash(tmp_path: Path):
+    """A JSONL whose _meta has no toybox_hash should fail to resume."""
+    import pytest
+
+    intents = [_trivial_intent("py.a")]
+    cfg = HarnessConfig(
+        output_path=tmp_path / "no_meta.jsonl",
+        models=["m1"],
+        interpreters=["python"],
+        variant_ids=["baseline"],
+        intents=intents,
+        toybox_dir=TOYBOX,
+        ollama_host="http://unused",
+        temperature=0.1,
+        timeout=10,
+    )
+    cfg.output_path.write_text(
+        json.dumps({"_meta": {"note": "no hash here"}}) + "\n"
+    )
+    with patch("scripts.prompt_eval.harness.make_ollama_client", return_value=MagicMock()), \
+         patch("scripts.prompt_eval.harness.generate_once") as gen:
+        with pytest.raises(RuntimeError, match="no toybox_hash"):
+            run_harness(cfg)
+
+
+def test_run_harness_allows_resume_when_hash_matches(tmp_path: Path):
+    """The happy path: existing JSONL's meta hash matches current toybox."""
+    intents = [_trivial_intent("py.a")]
+    cfg = HarnessConfig(
+        output_path=tmp_path / "ok.jsonl",
+        models=["m1"],
+        interpreters=["python"],
+        variant_ids=["baseline"],
+        intents=intents,
+        toybox_dir=TOYBOX,
+        ollama_host="http://unused",
+        temperature=0.1,
+        timeout=10,
+    )
+    cfg.output_path.write_text(
+        json.dumps({"_meta": {"toybox_hash": toybox_hash(TOYBOX)}}) + "\n"
+    )
+    def fake_generate(*args, **kwargs):
+        return GenerationRecord(
+            model="m1", raw="42", tokens_eval=1, tokens_prompt=1,
+            duration_ms=1.0, error=None,
+        )
+    with patch("scripts.prompt_eval.harness.generate_once", side_effect=fake_generate), \
+         patch("scripts.prompt_eval.harness.make_ollama_client", return_value=MagicMock()):
+        run_harness(cfg)
+    assert cfg.output_path.exists()
+    # Should have seeded meta + 1 row
+    lines = cfg.output_path.read_text().strip().splitlines()
+    assert len(lines) == 2

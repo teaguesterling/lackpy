@@ -157,7 +157,6 @@ def make_row(
     intent: Intent,
     gen: GenerationRecord,
     score: CellScore | None,
-    toybox_dir: Path,
 ) -> dict[str, Any]:
     """Compose one JSONL row. Safe for both successful and error cells."""
     row: dict[str, Any] = {
@@ -199,6 +198,24 @@ def make_row(
             "score": 0,
         })
     return row
+
+
+def _read_meta_hash(output_path: Path) -> str | None:
+    """Read the first line of a JSONL and return _meta.toybox_hash if present."""
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        return None
+    with output_path.open() as f:
+        first_line = f.readline().strip()
+    if not first_line:
+        return None
+    try:
+        row = json.loads(first_line)
+    except json.JSONDecodeError:
+        return None
+    meta = row.get("_meta")
+    if not isinstance(meta, dict):
+        return None
+    return meta.get("toybox_hash")
 
 
 def _write_meta(output_path: Path, cfg: HarnessConfig) -> None:
@@ -248,6 +265,20 @@ def run_harness(cfg: HarnessConfig) -> None:
     global _interrupt_received
     _interrupt_received = False
     _install_sigint_handler()
+
+    current_hash = toybox_hash(cfg.toybox_dir)
+    if cfg.output_path.exists() and cfg.output_path.stat().st_size > 0:
+        stored = _read_meta_hash(cfg.output_path)
+        if stored is None:
+            raise RuntimeError(
+                "refusing to resume: existing JSONL has no toybox_hash in _meta"
+            )
+        if stored != current_hash:
+            raise RuntimeError(
+                f"refusing to resume: toybox hash mismatch. "
+                f"Stored={stored[:16]}… Current={current_hash[:16]}… "
+                f"Delete the output file or revert the toybox to resume."
+            )
 
     _write_meta(cfg.output_path, cfg)
     completed = load_completed_keys(cfg.output_path)
@@ -303,7 +334,6 @@ def run_harness(cfg: HarnessConfig) -> None:
                 row = make_row(
                     model=model, interpreter=interp, variant_id=variant_id,
                     intent=intent, gen=gen, score=score,
-                    toybox_dir=cfg.toybox_dir,
                 )
                 out_f.write(json.dumps(row, default=str) + "\n")
                 out_f.flush()
