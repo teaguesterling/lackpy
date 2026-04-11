@@ -12,7 +12,7 @@ from ..toolbox import ArgSpec, ToolSpec
 PLUCKIT_TOOLS: list[ToolSpec] = [
     # --- Entry points ---
     ToolSpec(
-        name="select", provider="mock",
+        name="select_code", provider="mock",
         description="Select AST nodes with CSS selectors",
         args=[ArgSpec(name="selector", type="str", description="CSS selector over AST nodes")],
         returns="list[dict]", grade_w=0, effects_ceiling=0,
@@ -32,7 +32,7 @@ PLUCKIT_TOOLS: list[ToolSpec] = [
         returns="list[dict]", grade_w=0, effects_ceiling=0,
     ),
     ToolSpec(
-        name="filter", provider="mock",
+        name="filter_code", provider="mock",
         description="Filter selection by a predicate",
         args=[ArgSpec(name="selection", type="Any"), ArgSpec(name="predicate", type="str", description="Filter condition")],
         returns="list[dict]", grade_w=0, effects_ceiling=0,

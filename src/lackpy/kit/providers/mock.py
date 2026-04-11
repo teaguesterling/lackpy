@@ -50,12 +50,12 @@ class MockProvider:
     def resolve(self, tool_spec: ToolSpec) -> Callable[..., Any]:
         implementations = {
             # Selection operations
-            "select": _mock_select,
+            "select_code": _mock_select,
             "source": _mock_source_fn,
 
             # Query operations
             "find": _mock_find,
-            "filter": _mock_filter,
+            "filter_code": _mock_filter,
             "callers": _mock_callers,
             "callees": _mock_callees,
             "references": _mock_references,
