@@ -34,8 +34,12 @@ def build_eval_kit(base_dir: Path) -> ResolvedKit:
 
     def _read(path: str) -> str:
         p = Path(path)
-        if not p.is_absolute():
-            p = base_dir / p
+        p = p if p.is_absolute() else (base_dir / p)
+        p = p.resolve()
+        if not p.is_relative_to(base_dir):
+            raise PermissionError(
+                f"Path {path!r} escapes the eval kit's base_dir"
+            )
         return p.read_text()
 
     def _glob(pattern: str) -> list[str]:
@@ -58,7 +62,7 @@ def build_eval_kit(base_dir: Path) -> ResolvedKit:
     def _find_refs(name: str) -> list[dict]:
         """Return rows for every `<name>(` call site (excluding its own def/class line)."""
         call_re = re.compile(rf"\b{re.escape(name)}\s*\(")
-        def_re = re.compile(rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(name)}\b")
+        def_re = re.compile(rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(name)}\s*\(")
         rows: list[dict] = []
         for pyfile in sorted(base_dir.rglob("*.py")):
             for i, line in enumerate(pyfile.read_text().splitlines(), start=1):

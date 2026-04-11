@@ -35,3 +35,19 @@ def test_find_refs_returns_matching_file(toybox_tmp: Path):
     assert isinstance(rows, list)
     # b.py calls foo()
     assert any("b.py" in r["file"] for r in rows)
+    # a.py only defines foo, it doesn't call it
+    assert not any("a.py" in r["file"] for r in rows)
+
+
+def test_find_refs_does_not_confuse_similar_names(tmp_path: Path):
+    """find_refs('foo') should not skip a line that defines foobar() while calling foo()."""
+    (tmp_path / "c.py").write_text(
+        "def foo():\n    return 1\n"
+        "def foobar():\n    return foo() + 1\n"
+    )
+    kit = build_eval_kit(tmp_path)
+    rows = kit.callables["find_refs"]("foo")
+    # The body of foobar calls foo() and should be reported
+    assert any("foobar" in r["text"] or r["line"] == 4 for r in rows), (
+        f"expected find_refs('foo') to include the call inside foobar; got {rows}"
+    )
