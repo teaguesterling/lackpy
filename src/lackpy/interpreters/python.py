@@ -1,0 +1,117 @@
+"""Restricted Python interpreter plugin.
+
+Wraps the original lackpy execution path — AST validation against the
+allowed grammar, then restricted exec via :class:`RestrictedRunner`.
+This is the first concrete ``Interpreter`` implementation and the one
+lackpy has been built around since the beginning.
+
+The validation and execution logic is unchanged from
+:meth:`LackpyService.run_program`; this plugin just adapts that path
+into the new plugin protocol so other interpreters can sit alongside it.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from typing import Any
+
+from ..lang.validator import validate
+from ..run.runner import RestrictedRunner
+from .base import (
+    ExecutionContext,
+    Interpreter,
+    InterpreterExecutionResult,
+    InterpreterValidationResult,
+)
+
+
+class PythonInterpreter:
+    """Restricted-Python interpreter.
+
+    The program is a lackpy program — a subset of Python 3 with imports,
+    function definitions, and dangerous builtins removed. It is validated
+    against the kit's allowed names and then executed with tool callables
+    injected into the namespace.
+
+    Output shape: whatever the program's last expression evaluated to.
+    The ``output_format`` is ``"python"`` because the value may be any
+    Python type. Consumers that want a string representation should
+    format it themselves.
+    """
+
+    name = "python"
+    description = "Restricted Python with tool callables from the kit"
+
+    def __init__(self) -> None:
+        self._runner = RestrictedRunner()
+
+    def validate(
+        self,
+        program: str,
+        context: ExecutionContext,
+    ) -> InterpreterValidationResult:
+        """Validate against the kit's allowed names and any extra rules.
+
+        Allowed names are the union of the kit's tool names and any
+        parameter names injected into the context. This matches the
+        original :meth:`LackpyService.run_program` behavior.
+        """
+        if context.kit is None:
+            return InterpreterValidationResult(
+                valid=False,
+                errors=["PythonInterpreter requires a resolved kit in the execution context"],
+            )
+        allowed = set(context.kit.tools.keys())
+        if context.params:
+            allowed |= set(context.params.keys())
+        result = validate(program, allowed_names=allowed, extra_rules=context.extra_rules)
+        return InterpreterValidationResult(
+            valid=result.valid,
+            errors=list(result.errors),
+        )
+
+    async def execute(
+        self,
+        program: str,
+        context: ExecutionContext,
+    ) -> InterpreterExecutionResult:
+        """Execute a validated lackpy program under the restricted runner.
+
+        Runs the program with its working directory set to
+        ``context.base_dir`` (restored on exit). Tool callables come from
+        the resolved kit; parameter values come from the context.
+        """
+        start = time.perf_counter()
+        validation = self.validate(program, context)
+        if not validation.valid:
+            return InterpreterExecutionResult(
+                success=False,
+                error="Validation failed: " + "; ".join(validation.errors),
+                output_format="none",
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(context.base_dir)
+            exec_result = self._runner.run(
+                program,
+                context.kit.callables,
+                params=context.params or None,
+            )
+        finally:
+            os.chdir(prev_cwd)
+
+        elapsed = (time.perf_counter() - start) * 1000
+        return InterpreterExecutionResult(
+            success=exec_result.success,
+            output=exec_result.output,
+            output_format="python",
+            error=exec_result.error,
+            duration_ms=elapsed,
+            metadata={
+                "trace": exec_result.trace,
+                "variables": exec_result.variables,
+            },
+        )
