@@ -8,7 +8,10 @@ originally built around is now one plugin among several:
   Python over the kit's callables (the original execution path)
 - :class:`~lackpy.interpreters.ast_select.AstSelectInterpreter` — a
   single CSS selector evaluated against source code via pluckit,
-  rendered as markdown
+  rendered as markdown with the selector as the heading identifier
+- :class:`~lackpy.interpreters.pss.PssInterpreter` — multi-rule
+  selector sheets (selector + declaration blocks) rendered as markdown
+  via pluckit's ``AstViewer`` plugin
 
 Interpreters are registered in :data:`INTERPRETERS` and selected by name
 via ``--interpreter`` on the CLI or the ``interpreter=`` parameter on
@@ -33,12 +36,14 @@ from .base import (
 from .registry import INTERPRETERS, get_interpreter, list_interpreters, register_interpreter
 from .python import PythonInterpreter
 from .ast_select import AstSelectInterpreter
+from .pss import PssInterpreter
 
 # Register the bundled interpreters at import time. Other interpreters
-# (e.g. claude-code, pss, pluckit-chain) register themselves when their
-# modules are imported.
+# (e.g. claude-code, plucker) register themselves when their modules
+# are imported.
 register_interpreter(PythonInterpreter)
 register_interpreter(AstSelectInterpreter)
+register_interpreter(PssInterpreter)
 
 __all__ = [
     "ExecutionContext",
@@ -52,4 +57,5 @@ __all__ = [
     "run_interpreter",
     "PythonInterpreter",
     "AstSelectInterpreter",
+    "PssInterpreter",
 ]
