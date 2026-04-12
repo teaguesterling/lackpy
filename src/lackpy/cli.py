@@ -213,8 +213,10 @@ def main(argv: list[str] | None = None) -> int:
     first_positional = next(
         (a for a in raw_args if not a.startswith("-")), None
     )
-    if first_positional and (first_positional.endswith(".py") or "/" in first_positional or first_positional.startswith(".")):
-        # Looks like a file path — use the file entrypoint
+    if "-c" not in raw_args and first_positional and (first_positional.endswith(".py") or "/" in first_positional or first_positional.startswith(".")):
+        # Looks like a file path — use the file entrypoint.
+        # Skip when -c is present: -c explicitly declares an intent, which
+        # may contain file paths as part of the natural language (issue #3).
         return _file_entrypoint(raw_args)
 
     # Also detect stdin piping (non-tty stdin with no other args)

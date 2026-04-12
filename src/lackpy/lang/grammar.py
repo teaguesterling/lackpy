@@ -53,6 +53,8 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "memoryview", "bytearray", "bytes",
     "map", "filter", "reduce",
     "input",
+    # stdlib modules that models reach for instead of using kit tools (issue #4)
+    "os", "sys", "pathlib", "subprocess", "shutil",
 })
 
 ALLOWED_BUILTINS: frozenset[str] = frozenset({
