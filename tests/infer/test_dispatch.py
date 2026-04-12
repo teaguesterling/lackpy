@@ -18,7 +18,7 @@ class FakeProvider:
     def available(self) -> bool:
         return self._available
 
-    async def generate(self, intent, namespace_desc, config=None, error_feedback=None):
+    async def generate(self, intent, namespace_desc, config=None, error_feedback=None, **kwargs):
         return self._result
 
 

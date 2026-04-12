@@ -15,7 +15,8 @@ class RulesProvider:
 
     async def generate(self, intent: str, namespace_desc: str,
                        config: dict | None = None, error_feedback: list[str] | None = None,
-                       system_prompt_override: str | None = None) -> str | None:
+                       system_prompt_override: str | None = None,
+                       interpreter: object | None = None) -> str | None:
         lower = intent.lower().strip()
         original = intent.strip()
 

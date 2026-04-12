@@ -17,7 +17,7 @@ class FakeProvider:
     def available(self):
         return True
 
-    async def generate(self, intent, namespace_desc, config=None, error_feedback=None):
+    async def generate(self, intent, namespace_desc, config=None, error_feedback=None, **kwargs):
         return self._responses.pop(0) if self._responses else None
 
     async def _chat(self, messages, temperature=None):

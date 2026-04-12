@@ -192,7 +192,7 @@ class LackpyService:
 
     async def generate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None,
-                       mode: str | None = None) -> GenerationResult:
+                       mode: str | None = None, interpreter: Any = None) -> GenerationResult:
         """Generate a lackpy program from a natural language intent.
 
         Args:
@@ -201,6 +201,10 @@ class LackpyService:
             params: Named input values available to the generated program.
             rules: Additional validation rules the generated program must satisfy.
             mode: Inference strategy mode (e.g. '1-shot', 'spm'). Defaults to config or '1-shot'.
+            interpreter: An interpreter instance whose ``system_prompt_hint()``
+                is forwarded to the prompt builder. When present, the inference
+                prompt uses interpreter-specialized framing instead of the
+                generic Jupyter-cell template.
 
         Returns:
             A GenerationResult with the generated program and provider metadata.
@@ -254,6 +258,7 @@ class LackpyService:
         return await dispatcher.generate(
             intent=intent, namespace_desc=resolved.description,
             allowed_names=allowed, params_desc=params_desc, extra_rules=rules,
+            interpreter=interpreter,
         )
 
     async def run_program(self, program: str, kit: str | list[str] | dict | None = None,
@@ -291,7 +296,8 @@ class LackpyService:
                        params: dict[str, Any] | None = None, sandbox: Any = None,
                        rules: list | None = None,
                        _program_override: str | None = None,
-                       mode: str | None = None) -> dict[str, Any]:
+                       mode: str | None = None,
+                       interpreter: Any = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
 
         Combines generate and run_program: generates a program from intent, then
@@ -303,6 +309,9 @@ class LackpyService:
             params: Named input values available to the program.
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules for generation and execution.
+            interpreter: An interpreter instance whose ``system_prompt_hint()``
+                is forwarded to the prompt builder for interpreter-specialized
+                framing. When omitted, the default Jupyter-cell prompt is used.
 
         Returns:
             A dict with keys: success, program, grade, generation_tier,
@@ -332,7 +341,8 @@ class LackpyService:
                 generation_time_ms=0.0,
             )
         else:
-            gen_result = await self.generate(intent, kit, params, rules, mode=mode)
+            gen_result = await self.generate(intent, kit, params, rules, mode=mode,
+                                            interpreter=interpreter)
 
         # Kibitzer: validate planned calls before execution
         kibitzer_suggestions: list[str] = []

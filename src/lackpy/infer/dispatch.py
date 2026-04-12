@@ -61,7 +61,8 @@ class InferenceDispatcher:
         return [p for p in self._providers if p.available()]
 
     async def generate(self, intent: str, namespace_desc: str, allowed_names: set[str],
-                       params_desc: str | None = None, extra_rules: list | None = None) -> GenerationResult:
+                       params_desc: str | None = None, extra_rules: list | None = None,
+                       interpreter: Any = None) -> GenerationResult:
         """Generate a valid lackpy program from a natural language intent.
 
         Tries each available provider in priority order, validating the output
@@ -75,6 +76,9 @@ class InferenceDispatcher:
             allowed_names: Set of allowed callable names for validation.
             params_desc: Optional description of pre-set parameter variables.
             extra_rules: Additional validation rules beyond the core checks.
+            interpreter: An interpreter instance whose ``system_prompt_hint()``
+                is forwarded to ``build_system_prompt()``. When present, the
+                prompt uses interpreter-specialized framing.
 
         Returns:
             A GenerationResult from the first provider that produces valid output.
@@ -89,7 +93,7 @@ class InferenceDispatcher:
             if not provider.available():
                 continue
 
-            raw = await provider.generate(intent, namespace_desc)
+            raw = await provider.generate(intent, namespace_desc, interpreter=interpreter)
             if raw is None:
                 continue
 

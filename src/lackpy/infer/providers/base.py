@@ -13,6 +13,7 @@ class InferenceProvider(Protocol):
         self, intent: str, namespace_desc: str,
         config: dict | None = None, error_feedback: list[str] | None = None,
         system_prompt_override: str | None = None,
+        interpreter: object | None = None,
     ) -> str | None:
         """Generate a program from intent.
 
@@ -25,5 +26,8 @@ class InferenceProvider(Protocol):
                 the system prompt instead of building one from namespace_desc.
                 Used by steps that need retrieval-augmented or otherwise
                 pre-built prompts.
+            interpreter: An interpreter instance whose system_prompt_hint()
+                is forwarded to build_system_prompt(). Providers that build
+                their own prompt should pass this through.
         """
         ...
