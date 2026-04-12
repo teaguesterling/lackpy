@@ -128,16 +128,15 @@ class TestExecution:
         assert result.output > 0
 
     @pytest.mark.asyncio
-    async def test_view_returns_markdown_string(self, interp, fixture_file):
+    async def test_view_returns_renderable(self, interp, fixture_file):
         program = (
             f'source("{fixture_file}").view'
             '(".fn#greet { show: signature; }")'
         )
         result = await run_interpreter(interp, program, ExecutionContext())
         assert result.success
-        assert isinstance(result.output, str)
-        # Pluckit's view output has code fences
-        assert "```" in result.output
+        rendered = str(result.output)
+        assert "```" in rendered
 
     @pytest.mark.asyncio
     async def test_default_code_from_context(self, interp, plucker_ctx):

@@ -62,8 +62,8 @@ lackpy delegate <intent> [--kit KIT] [--sandbox PROFILE]
 **Examples:**
 
 ```bash
-lackpy delegate "read the file README.md" --kit read
-lackpy delegate "find all Python files" --kit read,glob
+lackpy delegate "read the file README.md" --kit read_file
+lackpy delegate "find all Python files" --kit read_file,find_files
 ```
 
 ---
@@ -90,7 +90,7 @@ lackpy generate <intent> [--kit KIT]
 **Example:**
 
 ```bash
-lackpy generate "find all Python files" --kit glob
+lackpy generate "find all Python files" --kit find_files
 ```
 
 ---
@@ -117,7 +117,7 @@ lackpy run <file> [--kit KIT]
 **Example:**
 
 ```bash
-lackpy run my_program.py --kit read,glob
+lackpy run my_program.py --kit read_file,find_files
 ```
 
 ---
@@ -144,7 +144,7 @@ lackpy validate <file> [--kit KIT]
 **Example:**
 
 ```bash
-lackpy validate my_program.py --kit read
+lackpy validate my_program.py --kit read_file
 ```
 
 ---
@@ -173,7 +173,7 @@ lackpy create <file> --name NAME [--kit KIT] [--pattern PATTERN]
 **Example:**
 
 ```bash
-lackpy create read_file.py --name read-file --pattern "read the file {path}" --kit read
+lackpy create read_file.py --name read-file --pattern "read the file {path}" --kit read_file
 ```
 
 ---
@@ -258,7 +258,7 @@ lackpy kit create <name> --tools TOOL [TOOL ...] [--description TEXT]
 **Example:**
 
 ```bash
-lackpy kit create readonly --tools read glob --description "Read-only filesystem tools"
+lackpy kit create readonly --tools read_file find_files --description "Read-only filesystem tools"
 ```
 
 ---
@@ -326,5 +326,5 @@ Any command that accepts `--kit` supports three forms:
 | Form | Example | Resolved as |
 |------|---------|-------------|
 | Named kit | `--kit filesystem` | Loads `.lackpy/kits/filesystem.kit` |
-| Comma-separated | `--kit read,glob,write` | Ad-hoc list of tool names |
-| Single tool | `--kit read` | Single-tool kit |
+| Comma-separated | `--kit read_file,find_files,write_file` | Ad-hoc list of tool names |
+| Single tool | `--kit read_file` | Single-tool kit |

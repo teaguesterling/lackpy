@@ -109,7 +109,7 @@ async def main():
     svc._inference_providers.insert(2, cache)
 
     intent = "find all Python files"
-    kit = ["glob"]
+    kit = ["find_files"]
 
     result = await svc.delegate(intent, kit=kit)
     if result["success"]:

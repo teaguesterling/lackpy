@@ -146,7 +146,7 @@ result = svc.validate(
 )
 print(result.valid)     # True
 print(result.errors)    # []
-print(result.calls)     # ['glob', 'len']
+print(result.calls)     # ['find_files', 'len']
 ```
 
 ---

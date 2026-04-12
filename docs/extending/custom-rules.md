@@ -29,7 +29,7 @@ Rejects any `for` loop. Use this when you want programs to be purely functional 
 ```python
 from lackpy.lang.rules import no_loops
 
-result = svc.validate('for f in glob("*.py"): print(f)', kit=["glob"], rules=[no_loops])
+result = svc.validate('for f in find_files("*.py"): print(f)', kit=["find_files"], rules=[no_loops])
 # ValidationResult(valid=False, errors=["For-loop forbidden (line 1)"])
 ```
 
@@ -45,17 +45,17 @@ rule = max_depth(1)
 # Valid — one level deep
 program = """
 if condition:
-    result = read(path)
+    result = read_file(path)
 """
-result = svc.validate(program, kit=["read"], rules=[rule])
+result = svc.validate(program, kit=["read_file"], rules=[rule])
 
 # Invalid — two levels deep
 program2 = """
 if condition:
     if other:
-        result = read(path)
+        result = read_file(path)
 """
-result2 = svc.validate(program2, kit=["read"], rules=[rule])
+result2 = svc.validate(program2, kit=["read_file"], rules=[rule])
 # errors: ["Nesting depth 2 exceeds limit 1 (line 3)"]
 ```
 
@@ -67,8 +67,8 @@ Limits the total number of function calls in the program (kit tools + builtins):
 from lackpy.lang.rules import max_calls
 
 result = svc.validate(
-    'a = read("a")\nb = read("b")\nc = read("c")',
-    kit=["read"],
+    'a = read_file("a")\nb = read_file("b")\nc = read_file("c")',
+    kit=["read_file"],
     rules=[max_calls(2)],
 )
 # errors: ["Too many calls: 3 exceeds limit 2"]
@@ -83,16 +83,16 @@ from lackpy.lang.rules import no_nested_calls
 
 # Invalid
 result = svc.validate(
-    'lines = read(find_path("config"))',
-    kit=["read", "find_path"],
+    'lines = read_file(find_path("config"))',
+    kit=["read_file", "find_path"],
     rules=[no_nested_calls],
 )
 # errors: ["Nested call at line 1: assign inner call to a variable first"]
 
 # Valid equivalent
 result2 = svc.validate(
-    'path = find_path("config")\nlines = read(path)',
-    kit=["read", "find_path"],
+    'path = find_path("config")\nlines = read_file(path)',
+    kit=["read_file", "find_path"],
     rules=[no_nested_calls],
 )
 ```
@@ -181,8 +181,8 @@ Use it:
 ```python
 result = await svc.delegate(
     "find all Python files and count them",
-    kit=["glob"],
-    rules=[only_tools({"glob"})],
+    kit=["find_files"],
+    rules=[only_tools({"find_files"})],
 )
 ```
 

@@ -128,10 +128,10 @@ Implements four filesystem primitives. The tool name must match exactly:
 
 | Tool name | Signature | Description |
 |-----------|-----------|-------------|
-| `read` | `read(path: str) -> str` | Read file contents |
-| `glob` | `glob(pattern: str) -> list[str]` | Glob from current directory |
-| `write` | `write(path: str, content: str) -> bool` | Write file (creates if missing) |
-| `edit` | `edit(path: str, old_str: str, new_str: str) -> bool` | Replace first occurrence |
+| `read_file` | `read_file(path: str) -> str` | Read file contents |
+| `find_files` | `find_files(pattern: str) -> list[str]` | Glob from current directory |
+| `write_file` | `write_file(path: str, content: str) -> bool` | Write file (creates if missing) |
+| `edit_file` | `edit_file(path: str, old_str: str, new_str: str) -> bool` | Replace first occurrence |
 
 ### `PythonProvider` (name: `"python"`)
 

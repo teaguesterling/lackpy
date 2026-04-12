@@ -49,7 +49,7 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpy spec`) | `lang.grammar` |
 | `lackpy.kit.toolbox` | `Toolbox` — provider registry + tool resolution | none |
 | `lackpy.kit.registry` | `resolve_kit()` — name/list/dict → `ResolvedKit` | `kit.toolbox`, `lang.grader` |
-| `lackpy.kit.providers.builtin` | Built-in tools: `read`, `glob`, `write`, `edit` | `pathlib` |
+| `lackpy.kit.providers.builtin` | Built-in tools: `read_file`, `find_files`, `write_file`, `edit_file` | `pathlib` |
 | `lackpy.kit.providers.python` | Wrap any importable function as a tool | `importlib` |
 | `lackpy.run.trace` | `Trace`, `TraceEntry`, `make_traced()` | `inspect`, `time` |
 | `lackpy.run.base` | `ExecutionResult`, `Executor` protocol | `run.trace` |

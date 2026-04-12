@@ -64,7 +64,7 @@ The `python` provider is always registered. It resolves tools by importing the n
 
 | Provider | Name | How it resolves tools |
 |----------|------|----------------------|
-| `BuiltinProvider` | `"builtin"` | Hardcoded implementations for `read`, `glob`, `write`, `edit` |
+| `BuiltinProvider` | `"builtin"` | Hardcoded implementations for `read_file`, `find_files`, `write_file`, `edit_file` |
 | `PythonProvider` | `"python"` | `importlib.import_module(module)` then `getattr(module, function)` |
 | Custom | any string | Implement the provider protocol (see [Tool Providers](../extending/tool-providers.md)) |
 
@@ -77,11 +77,11 @@ The `python` provider is always registered. It resolves tools by importing the n
 | Form | Type | Example | Behaviour |
 |------|------|---------|-----------|
 | Named kit | `str` | `"filesystem"` | Loads `.lackpy/kits/filesystem.kit` |
-| Tool list | `list[str]` | `["read", "glob"]` | Uses tool names directly as aliases |
-| Tool mapping | `dict` | `{"find": "glob"}` | Alias → actual tool name |
-| Nested dict | `dict` | `{"r": {"tool": "read"}}` | Dict entry with `"tool"` key |
+| Tool list | `list[str]` | `["read_file", "find_files"]` | Uses tool names directly as aliases |
+| Tool mapping | `dict` | `{"find": "find_files"}` | Alias → actual tool name |
+| Nested dict | `dict` | `{"r": {"tool": "read_file"}}` | Dict entry with `"tool"` key |
 
-With the tool mapping form, the program sees `find(...)` but the toolbox resolves it to the `glob` implementation.
+With the tool mapping form, the program sees `find(...)` but the toolbox resolves it to the `find_files` implementation.
 
 ---
 
@@ -94,10 +94,10 @@ Named kits are stored as `.kit` files in `.lackpy/kits/`:
 name: filesystem
 description: Read, write, and search files
 ---
-read
-glob
-write
-edit
+read_file
+find_files
+write_file
+edit_file
 ```
 
 - The YAML-like frontmatter between `---` lines is metadata.
@@ -117,10 +117,10 @@ lackpy kit list
 lackpy kit info filesystem
 
 # Show tools and grade for an ad-hoc list
-lackpy kit info read,glob,write
+lackpy kit info read_file,find_files,write_file
 
 # Create a new kit
-lackpy kit create mykit --tools read glob --description "Read-only tools"
+lackpy kit create mykit --tools read_file find_files --description "Read-only tools"
 ```
 
 ---
@@ -133,8 +133,8 @@ lackpy kit create mykit --tools read glob --description "Read-only tools"
 from lackpy import compute_grade
 
 grade = compute_grade({
-    "read":  {"grade_w": 1, "effects_ceiling": 0},
-    "write": {"grade_w": 3, "effects_ceiling": 3},
+    "read_file":  {"grade_w": 1, "effects_ceiling": 0},
+    "write_file": {"grade_w": 3, "effects_ceiling": 3},
 })
 # Grade(w=3, d=3)
 ```
