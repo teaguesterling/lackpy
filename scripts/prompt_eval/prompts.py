@@ -50,6 +50,8 @@ Output ONLY the program body — no markdown, no code fences, no prose.
 Available tools:
 {namespace_desc}
 
+Do NOT use open(). Use read_file() for ALL file reading.
+
 Assign tool results to variables, then end with a bare expression holding the final answer the orchestrator wants."""
 
 
