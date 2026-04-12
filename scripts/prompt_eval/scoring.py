@@ -125,13 +125,40 @@ def run_execution(
 ) -> InterpreterExecutionResult:
     """Execute the sanitized program via the matching lackpy interpreter.
 
+    Redirects stdout during execution so print() calls from generated
+    programs don't leak into the harness's terminal output. The
+    captured stdout is stored in the result's metadata under the key
+    'captured_stdout'.
+
     Returns the full InterpreterExecutionResult. Safe to call from a
     sync context — wraps the interpreter's async execute() in asyncio.run.
     """
+    import io
+    import sys
+
     factory = _INTERPRETER_FACTORIES[intent.interpreter]
     interp = factory()
     ctx = _build_context(intent.interpreter, toybox_dir)
-    return asyncio.run(run_interpreter(interp, sanitized_program, ctx))
+
+    old_stdout = sys.stdout
+    sys.stdout = captured = io.StringIO()
+    try:
+        result = asyncio.run(run_interpreter(interp, sanitized_program, ctx))
+    finally:
+        sys.stdout = old_stdout
+
+    stdout_text = captured.getvalue()
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["captured_stdout"] = stdout_text
+
+    # If the program's output is None but stdout captured something,
+    # the model likely used print() as the terminal statement. Use the
+    # captured stdout as the output so assertions can still match.
+    if result.success and result.output is None and stdout_text.strip():
+        result.output = stdout_text.strip()
+
+    return result
 
 
 def score_cell(
