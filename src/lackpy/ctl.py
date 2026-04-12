@@ -110,6 +110,16 @@ def build_parser() -> argparse.ArgumentParser:
     provider_show_p = provider_sub.add_parser("show", help="Show provider details")
     provider_show_p.add_argument("name", help="Provider name")
 
+    # mcp
+    mcp_p = subparsers.add_parser("mcp", help="MCP server management")
+    mcp_sub = mcp_p.add_subparsers(dest="mcp_command")
+
+    mcp_sub.add_parser("serve", help="Start the MCP server (stdio transport)")
+
+    mcp_init_p = mcp_sub.add_parser("init", help="Add lackpy to .mcp.json")
+    mcp_init_p.add_argument("--name", default="lackpy", help="Server name in .mcp.json (default: lackpy)")
+    mcp_init_p.add_argument("--force", action="store_true", default=False, help="Overwrite existing entry")
+
     return parser
 
 
@@ -132,20 +142,26 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(get_spec(), indent=2))
         return 0
 
+    if args.command == "mcp":
+        from .mcp.cli import mcp_init, mcp_serve
+        if args.mcp_command == "serve":
+            return mcp_serve(workspace)
+        elif args.mcp_command == "init":
+            return mcp_init(
+                workspace=workspace,
+                name=args.name,
+                force=args.force,
+            )
+        else:
+            print("Usage: lackpyctl mcp {serve|init}", file=sys.stderr)
+            return 1
+
     from .service import LackpyService
     svc = LackpyService(workspace=workspace)
 
     if args.command == "status":
-        config = svc._config
-        info = {
-            "workspace": str(workspace),
-            "config_dir": str(config.config_dir),
-            "inference_order": config.inference_order,
-            "kit_default": config.kit_default,
-            "sandbox_enabled": config.sandbox_enabled,
-            "tools": len(svc.toolbox.tools),
-        }
-        print(json.dumps(info, indent=2))
+        config = svc.get_config()
+        print(json.dumps(config, indent=2))
         return 0
 
     if args.command == "toolbox":

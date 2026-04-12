@@ -34,3 +34,29 @@ def test_parser_spec():
     parser = build_parser()
     args = parser.parse_args(["spec"])
     assert args.command == "spec"
+
+
+def test_parser_mcp_serve():
+    parser = build_parser()
+    args = parser.parse_args(["mcp", "serve"])
+    assert args.command == "mcp"
+    assert args.mcp_command == "serve"
+
+
+def test_parser_mcp_init():
+    parser = build_parser()
+    args = parser.parse_args(["mcp", "init"])
+    assert args.command == "mcp"
+    assert args.mcp_command == "init"
+
+
+def test_parser_mcp_init_force():
+    parser = build_parser()
+    args = parser.parse_args(["mcp", "init", "--force"])
+    assert args.force is True
+
+
+def test_parser_mcp_init_name():
+    parser = build_parser()
+    args = parser.parse_args(["mcp", "init", "--name", "my-lackpy"])
+    assert args.name == "my-lackpy"
