@@ -21,3 +21,13 @@ def format_spec() -> str:
     for name in sorted(ALLOWED_BUILTINS):
         lines.append(f"  - {name}")
     return "\n".join(lines)
+
+
+def get_spec() -> dict:
+    """Return the language spec as structured data."""
+    return {
+        "allowed_nodes": sorted(n.__name__ for n in ALLOWED_NODES),
+        "forbidden_nodes": sorted(n.__name__ for n in FORBIDDEN_NODES),
+        "forbidden_names": sorted(FORBIDDEN_NAMES),
+        "allowed_builtins": sorted(ALLOWED_BUILTINS),
+    }
