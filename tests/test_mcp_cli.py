@@ -66,3 +66,15 @@ class TestMcpInit:
         data = json.loads((tmp_path / ".mcp.json").read_text())
         assert "my-lackpy" in data["mcpServers"]
         assert "lackpy" not in data["mcpServers"]
+
+    def test_rejects_invalid_json(self, tmp_path):
+        mcp_file = tmp_path / ".mcp.json"
+        mcp_file.write_text("not valid json {{{")
+        result = mcp_init(workspace=tmp_path)
+        assert result == 1
+
+    def test_rejects_non_object_json(self, tmp_path):
+        mcp_file = tmp_path / ".mcp.json"
+        mcp_file.write_text("[]")
+        result = mcp_init(workspace=tmp_path)
+        assert result == 1

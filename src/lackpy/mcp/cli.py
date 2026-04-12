@@ -18,7 +18,14 @@ def mcp_init(
     """
     mcp_file = workspace / ".mcp.json"
     if mcp_file.exists():
-        data = json.loads(mcp_file.read_text())
+        try:
+            data = json.loads(mcp_file.read_text())
+        except json.JSONDecodeError as e:
+            print(f"lackpyctl: {mcp_file} contains invalid JSON: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(data, dict):
+            print(f"lackpyctl: {mcp_file} is not a JSON object", file=sys.stderr)
+            return 1
     else:
         data = {"mcpServers": {}}
 
@@ -33,13 +40,14 @@ def mcp_init(
         )
         return 1
 
+    existed = name in servers
     servers[name] = {
         "command": "lackpyctl",
         "args": ["mcp", "serve", "--workspace", str(workspace.resolve())],
     }
 
     mcp_file.write_text(json.dumps(data, indent=2) + "\n")
-    print(f"{'Updated' if force else 'Added'} '{name}' in {mcp_file}")
+    print(f"{'Updated' if existed else 'Added'} '{name}' in {mcp_file}")
     return 0
 
 
