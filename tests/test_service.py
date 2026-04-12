@@ -76,3 +76,56 @@ class TestKitInfo:
         info = service.kit_info(["read_file"])
         assert "read_file" in info["tools"]
         assert info["grade"]["w"] == 1
+
+
+class TestGetConfig:
+    def test_returns_dict(self, service):
+        config = service.get_config()
+        assert isinstance(config, dict)
+
+    def test_has_required_keys(self, service):
+        config = service.get_config()
+        assert "inference_order" in config
+        assert "kit_default" in config
+        assert "sandbox_enabled" in config
+        assert "config_dir" in config
+
+    def test_config_dir_is_string(self, service):
+        config = service.get_config()
+        assert isinstance(config["config_dir"], str)
+
+
+class TestProviderList:
+    def test_returns_list(self, service):
+        providers = service.provider_list()
+        assert isinstance(providers, list)
+
+    def test_providers_have_required_keys(self, service):
+        providers = service.provider_list()
+        # At minimum templates and rules are always present
+        assert len(providers) >= 2
+        for p in providers:
+            assert "name" in p
+            assert "plugin" in p
+            assert "available" in p
+
+    def test_templates_provider_present(self, service):
+        providers = service.provider_list()
+        names = [p["name"] for p in providers]
+        assert "templates" in names
+
+    def test_rules_provider_present(self, service):
+        providers = service.provider_list()
+        names = [p["name"] for p in providers]
+        assert "rules" in names
+
+
+class TestLanguageSpec:
+    def test_returns_dict(self, service):
+        spec = service.language_spec()
+        assert isinstance(spec, dict)
+
+    def test_has_spec_keys(self, service):
+        spec = service.language_spec()
+        assert "allowed_nodes" in spec
+        assert "allowed_builtins" in spec

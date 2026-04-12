@@ -615,3 +615,42 @@ class LackpyService:
         return [{"name": s.name, "provider": s.provider, "description": s.description,
                  "grade_w": s.grade_w, "effects_ceiling": s.effects_ceiling}
                 for s in self.toolbox.list_tools()]
+
+    def get_config(self) -> dict[str, Any]:
+        """Return a serializable snapshot of the workspace configuration."""
+        return {
+            "workspace": str(self._workspace),
+            "config_dir": str(self._config.config_dir),
+            "inference_order": self._config.inference_order,
+            "inference_mode": self._config.inference_mode,
+            "kit_default": self._config.kit_default,
+            "sandbox_enabled": self._config.sandbox_enabled,
+            "sandbox_timeout": self._config.sandbox_timeout,
+            "sandbox_memory_mb": self._config.sandbox_memory_mb,
+            "tools": len(self.toolbox.tools),
+        }
+
+    def provider_list(self) -> list[dict[str, Any]]:
+        """List configured inference providers with availability status."""
+        result = []
+        for provider in self._inference_providers:
+            entry: dict[str, Any] = {
+                "name": provider.name,
+                "available": provider.available(),
+            }
+            # Add config details for providers that have them
+            provider_cfg = self._config.inference_providers.get(provider.name, {})
+            entry["plugin"] = provider_cfg.get("plugin", provider.name)
+            if "model" in provider_cfg:
+                entry["model"] = provider_cfg["model"]
+            if "host" in provider_cfg:
+                entry["host"] = provider_cfg["host"]
+            if "temperature" in provider_cfg:
+                entry["temperature"] = provider_cfg["temperature"]
+            result.append(entry)
+        return result
+
+    def language_spec(self) -> dict[str, Any]:
+        """Return the lackpy language specification as structured data."""
+        from .lang.spec import get_spec
+        return get_spec()
