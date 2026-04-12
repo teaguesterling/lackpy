@@ -114,8 +114,10 @@ def _build_context(interpreter_name: str, toybox_dir: Path) -> ExecutionContext:
     if interpreter_name == "python":
         kit = build_eval_kit(toybox_dir)
         return ExecutionContext(kit=kit, base_dir=toybox_dir)
-    code_glob = str(toybox_dir / "**" / "*.py")
-    return ExecutionContext(base_dir=toybox_dir, config={"code": code_glob})
+    # Use the resolved absolute directory path — pluckit handles recursive
+    # file discovery internally. The ** glob pattern caused IO errors in the
+    # plucker interpreter's Plucker(code=...) constructor.
+    return ExecutionContext(base_dir=toybox_dir, config={"code": str(toybox_dir)})
 
 
 def run_execution(
