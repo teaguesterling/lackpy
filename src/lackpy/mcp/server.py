@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -10,12 +11,20 @@ from ..service import LackpyService
 
 mcp = FastMCP("lackpy")
 _service: LackpyService | None = None
+_workspace: Path | None = None
+
+
+def set_workspace(workspace: Path) -> None:
+    """Set the workspace directory and reset the service singleton."""
+    global _workspace, _service
+    _workspace = workspace
+    _service = None
 
 
 def _get_service() -> LackpyService:
     global _service
     if _service is None:
-        _service = LackpyService()
+        _service = LackpyService(workspace=_workspace)
     return _service
 
 
@@ -83,3 +92,23 @@ def kit_create(name: str, tools: list[str], description: str | None = None) -> d
 def toolbox_list() -> list[dict]:
     """List all registered tools with metadata."""
     return _get_service().toolbox_list()
+
+
+# --- Configuration & introspection tools ---
+
+@mcp.tool()
+def config() -> dict:
+    """Return the current workspace configuration: inference order, providers, kit default, sandbox settings."""
+    return _get_service().get_config()
+
+
+@mcp.tool()
+def provider_list() -> list[dict]:
+    """List configured inference providers with plugin type, model, and availability status."""
+    return _get_service().provider_list()
+
+
+@mcp.tool()
+def language_spec() -> dict:
+    """Return the lackpy language specification: allowed AST nodes, builtins, and forbidden names."""
+    return _get_service().language_spec()
