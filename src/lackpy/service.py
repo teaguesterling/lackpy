@@ -150,18 +150,21 @@ class LackpyService:
         except Exception:
             self._kibitzer = None
 
-    def _apply_kibitzer_hints(self, namespace_desc: str) -> str:
+    def _apply_kibitzer_hints(self, namespace_desc: str, model: str | None = None) -> str:
         """Query kibitzer for prompt hints and append them to namespace_desc.
 
-        Called before generation when kibitzer is available. If
-        get_prompt_hints() is not implemented (older kibitzer version),
-        falls back gracefully to the unmodified namespace_desc.
+        Called before generation when kibitzer is available. When a model
+        name is provided, hints are filtered to patterns observed for that
+        specific model — giving model-specific constraints.
+
+        Falls back gracefully if get_prompt_hints() is not implemented
+        (older kibitzer version) or returns empty.
         """
         get_hints = getattr(self._kibitzer, "get_prompt_hints", None)
         if get_hints is None:
             return namespace_desc
         try:
-            hints = get_hints()
+            hints = get_hints(model=model)
         except Exception:
             return namespace_desc
         if not hints:
@@ -284,15 +287,22 @@ class LackpyService:
         dispatcher = InferenceDispatcher(providers=self._inference_providers)
         allowed = set(resolved.tools.keys()) | param_names
 
-        # Kibitzer: get prompt hints from failure pattern tracker
+        # Kibitzer: get model-specific prompt hints from failure pattern tracker
         namespace_desc = resolved.description
         if self._kibitzer:
-            namespace_desc = self._apply_kibitzer_hints(namespace_desc)
+            # Find the model name from the first available LLM provider
+            model_name = None
+            for p in dispatcher.get_providers():
+                m = getattr(p, "_model", None)
+                if m:
+                    model_name = m
+                    break
+            namespace_desc = self._apply_kibitzer_hints(namespace_desc, model=model_name)
 
         return await dispatcher.generate(
             intent=intent, namespace_desc=namespace_desc,
             allowed_names=allowed, params_desc=params_desc, extra_rules=rules,
-            interpreter=interpreter,
+            interpreter=interpreter, kibitzer_session=self._kibitzer,
         )
 
     async def run_program(self, program: str, kit: str | list[str] | dict | None = None,
@@ -426,10 +436,17 @@ class LackpyService:
                 )
             # Report generation outcome with extended fields
             interp_name = getattr(interpreter, "name", None) if interpreter else None
+            # Extract model name from the provider that produced the result
+            model_name = None
+            for p in self._inference_providers:
+                if p.name == gen_result.provider_name:
+                    model_name = getattr(p, "_model", None)
+                    break
             self._kibitzer.report_generation({
                 "intent": intent,
                 "program": gen_result.program,
                 "provider": gen_result.provider_name,
+                "model": model_name,
                 "correction_attempts": gen_result.correction_attempts,
                 "correction_strategy": gen_result.correction_strategy,
                 "success": exec_result.success,

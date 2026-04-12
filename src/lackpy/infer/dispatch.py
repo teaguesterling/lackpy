@@ -62,7 +62,7 @@ class InferenceDispatcher:
 
     async def generate(self, intent: str, namespace_desc: str, allowed_names: set[str],
                        params_desc: str | None = None, extra_rules: list | None = None,
-                       interpreter: Any = None) -> GenerationResult:
+                       interpreter: Any = None, kibitzer_session: Any = None) -> GenerationResult:
         """Generate a valid lackpy program from a natural language intent.
 
         Tries each available provider in priority order, validating the output
@@ -115,6 +115,7 @@ class InferenceDispatcher:
                 allowed_names=allowed_names,
                 provider=provider,
                 extra_rules=extra_rules,
+                kibitzer_session=kibitzer_session,
             )
             if correction is not None:
                 elapsed = (time.perf_counter() - start) * 1000

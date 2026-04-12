@@ -101,6 +101,7 @@ class CorrectionChain:
         allowed_names: set[str],
         provider=None,
         extra_rules: list | None = None,
+        kibitzer_session=None,
     ) -> CorrectionResult | None:
         """Attempt to correct an invalid program using three strategies in order.
 
@@ -112,6 +113,9 @@ class CorrectionChain:
             allowed_names: Set of allowed callable names for validation.
             provider: Inference provider instance (required for few-shot and fixer).
             extra_rules: Additional validation rules.
+            kibitzer_session: Optional KibitzerSession for correction hints.
+                When present, get_correction_hints() is called to inform
+                error enrichment with model-specific signal.
 
         Returns:
             A CorrectionResult if any strategy succeeds, or None if all fail.
@@ -136,6 +140,40 @@ class CorrectionChain:
         # Strategy 2: Few-shot correction via provider.generate() with error feedback
         if provider is not None:
             enriched = enrich_errors(validation.errors, namespace_desc)
+
+            # Kibitzer: get correction hints to strengthen enrichment
+            if kibitzer_session is not None:
+                get_hints = getattr(kibitzer_session, "get_correction_hints", None)
+                if get_hints is not None:
+                    try:
+                        from .failure_modes import classify_failure
+                        failure_mode = classify_failure(
+                            gate_passed=False,
+                            gate_errors=validation.errors,
+                            exec_error=None,
+                            sanitized_program=cleaned,
+                        )
+                        model_name = getattr(provider, "_model", None)
+                        signal = get_hints(
+                            failure_mode=failure_mode,
+                            model=model_name,
+                            attempt=len(self.attempts),
+                        )
+                        # If kibitzer has seen this pattern before, strengthen hints
+                        if isinstance(signal, dict):
+                            history_count = signal.get("history", 0)
+                            if history_count >= 3:
+                                # This model repeatedly fails this way — be blunt
+                                enriched.append(
+                                    f"IMPORTANT: This model has failed this way "
+                                    f"{history_count} times before. Follow the "
+                                    f"suggestions above exactly."
+                                )
+                            known_fix = signal.get("fix")
+                            if known_fix:
+                                enriched.append(known_fix)
+                    except Exception:
+                        pass  # kibitzer errors must not break correction
             raw = await provider.generate(
                 intent, namespace_desc, error_feedback=enriched
             )
