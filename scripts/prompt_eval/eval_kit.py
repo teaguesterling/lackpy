@@ -117,10 +117,12 @@ def build_eval_kit(base_dir: Path) -> ResolvedKit:
 
     description_lines = [
         "Available tools (call by name):",
-        "  read_file(path: str) -> str — read a file",
-        "  find_files(pattern: str) -> list[str] — glob files",
-        "  find_def(name: str) -> list[dict] — find definitions (function or class)",
-        "  find_refs(name: str) -> list[dict] — find call sites",
+        "  read_file(path: str) -> str — read a file; path is relative to workspace root",
+        "  find_files(pattern: str) -> list[str] — glob files; returns relative paths",
+        "  find_def(name: str) -> list[dict] — find definitions; each dict has keys: file, line, text",
+        "  find_refs(name: str) -> list[dict] — find call sites; each dict has keys: file, line, text",
+        "",
+        "All paths are relative to the workspace root (use 'app.py', not 'toybox/app.py').",
     ]
     return ResolvedKit(
         tools=tools,
