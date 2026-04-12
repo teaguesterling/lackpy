@@ -74,7 +74,7 @@ Examples:
   User: Find all callers of hash_password and return the list of filenames they live in.
   Program:
     rows = find_refs('hash_password')
-    files = sorted(set(r['file'] for r in rows))
+    files = sorted(set([r['file'] for r in rows]))
     files
 """
 
