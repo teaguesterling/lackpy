@@ -104,6 +104,52 @@ def generate_once(
     )
 
 
+_CONNECTION_ERRORS = (
+    "ConnectError",
+    "ConnectionRefusedError",
+    "RemoteProtocolError",
+    "ConnectionError",
+    "ServerDisconnectedError",
+)
+
+
+def is_connection_error(error: str | None) -> bool:
+    """Check if an error string indicates ollama is down, not a model issue."""
+    if not error:
+        return False
+    return any(e in error for e in _CONNECTION_ERRORS)
+
+
+def check_ollama_health(client, timeout: float = 5.0) -> str | None:
+    """Ping ollama to verify it's responsive.
+
+    Returns None if healthy, or an error string if unreachable.
+    """
+    try:
+        client.list()
+        return None
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+
+
+def wait_for_ollama(client, max_wait: int = 30, poll_interval: int = 5) -> str | None:
+    """Wait for ollama to become responsive after a crash.
+
+    Returns None once healthy, or the last error string if it doesn't
+    recover within max_wait seconds.
+    """
+    import time as _time
+
+    deadline = _time.time() + max_wait
+    last_error = None
+    while _time.time() < deadline:
+        last_error = check_ollama_health(client)
+        if last_error is None:
+            return None
+        _time.sleep(poll_interval)
+    return last_error
+
+
 def make_ollama_client(host: str = "http://localhost:11435"):
     """Construct an ollama.Client. Lazy-imports ollama so tests can mock.
 

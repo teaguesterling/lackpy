@@ -28,7 +28,14 @@ from lackpy.kit.registry import ResolvedKit
 from .eval_kit import build_eval_kit
 from .intents import Intent
 from .prompts import get_prompt
-from .runner import GenerationRecord, generate_once, make_ollama_client
+from .runner import (
+    GenerationRecord,
+    check_ollama_health,
+    generate_once,
+    is_connection_error,
+    make_ollama_client,
+    wait_for_ollama,
+)
 from .scoring import CellScore, score_cell
 
 
@@ -300,12 +307,44 @@ def run_harness(cfg: HarnessConfig) -> None:
 
     client = make_ollama_client(host=cfg.ollama_host)
 
+    # Verify ollama is up before starting
+    health_err = check_ollama_health(client)
+    if health_err:
+        raise RuntimeError(
+            f"Ollama is not reachable at {cfg.ollama_host}: {health_err}"
+        )
+
+    last_model: str | None = None
+    consecutive_connection_errors = 0
+
     with cfg.output_path.open("a") as out_f:
         with tqdm(total=total, initial=done_count, desc="eval", unit="cell") as bar:
             for model, interp, variant_id, intent in pending:
                 if _interrupt_received:
                     print("[harness] interrupted — exiting.", file=sys.stderr)
                     break
+
+                # Health check on model switch
+                if model != last_model:
+                    health_err = check_ollama_health(client)
+                    if health_err:
+                        print(
+                            f"\n[harness] ollama down on model switch to {model}. "
+                            f"Waiting up to 30s...",
+                            file=sys.stderr,
+                        )
+                        recovery_err = wait_for_ollama(client, max_wait=30)
+                        if recovery_err:
+                            print(
+                                f"[harness] ollama did not recover: {recovery_err}. "
+                                f"Stopping run — resume later.",
+                                file=sys.stderr,
+                            )
+                            break
+                        print("[harness] ollama recovered.", file=sys.stderr)
+                    last_model = model
+                    consecutive_connection_errors = 0
+
                 bar.set_description(
                     f"{model[:20]} / {interp[:10]} / {variant_id[:15]} / {intent.id}"
                 )
@@ -320,6 +359,49 @@ def run_harness(cfg: HarnessConfig) -> None:
                     timeout=cfg.timeout,
                     keep_alive=cfg.keep_alive,
                 )
+
+                # Detect ollama crash mid-run and retry once after recovery
+                if is_connection_error(gen.error):
+                    consecutive_connection_errors += 1
+                    if consecutive_connection_errors >= 3:
+                        print(
+                            f"\n[harness] {consecutive_connection_errors} consecutive "
+                            f"connection errors. Ollama appears down. Stopping.",
+                            file=sys.stderr,
+                        )
+                        break
+                    print(
+                        f"\n[harness] connection error on {intent.id}. "
+                        f"Waiting for ollama to recover...",
+                        file=sys.stderr,
+                    )
+                    recovery_err = wait_for_ollama(client, max_wait=30)
+                    if recovery_err:
+                        print(
+                            f"[harness] ollama did not recover. Stopping.",
+                            file=sys.stderr,
+                        )
+                        break
+                    # Retry this cell once
+                    gen = generate_once(
+                        client=client,
+                        model=model,
+                        system_prompt=system_prompt,
+                        user_message=intent.text,
+                        temperature=cfg.temperature,
+                        timeout=cfg.timeout,
+                        keep_alive=cfg.keep_alive,
+                    )
+                    if is_connection_error(gen.error):
+                        print(
+                            f"[harness] retry also failed. Stopping.",
+                            file=sys.stderr,
+                        )
+                        break
+                    consecutive_connection_errors = 0
+                else:
+                    consecutive_connection_errors = 0
+
                 score: CellScore | None = None
                 if gen.error is None and gen.raw:
                     try:
