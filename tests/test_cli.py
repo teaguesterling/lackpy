@@ -1,72 +1,61 @@
-"""Tests for the CLI."""
+"""Tests for the lackpy CLI."""
 
 from lackpy.cli import build_parser
 
 
-def test_parser_delegate():
-    parser = build_parser()
-    args = parser.parse_args(["delegate", "find callers of foo", "--kit", "debug"])
-    assert args.command == "delegate"
-    assert args.intent == "find callers of foo"
-    assert args.kit == "debug"
+class TestParserFlags:
+    """Test the flag-based interface (the kept functionality)."""
+
+    def test_intent_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "read file main.py"])
+        assert args.intent == "read file main.py"
+
+    def test_create_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--kit", "read,glob"])
+        assert args.intent == "find python files"
+        assert args.create is True
+        assert args.name == "FindPy"
+
+    def test_generate_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read_file"])
+        assert args.intent == "read file main.py"
+        assert args.generate is True
+
+    def test_param_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "read file test.txt", "--param", "x=1", "--param", "y=2"])
+        assert args.param == ["x=1", "y=2"]
+
+    def test_validate_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--validate", "-c", "x = 1"])
+        assert args.validate is True
+        assert args.intent == "x = 1"
+
+    def test_mode_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "read file", "--mode", "spm"])
+        assert args.mode == "spm"
+
+    def test_workspace_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--workspace", "/tmp/test", "-c", "hello"])
+        assert str(args.workspace) == "/tmp/test"
 
 
-def test_parser_generate():
-    parser = build_parser()
-    args = parser.parse_args(["generate", "read file main.py", "--kit", "debug"])
-    assert args.command == "generate"
-    assert args.intent == "read file main.py"
+class TestNoDeprecatedSubcommands:
+    """Verify all deprecated subcommands are removed."""
 
+    def test_no_subcommands_in_parser(self):
+        parser = build_parser()
+        # Parser should have no subparsers at all
+        args = parser.parse_args([])
+        assert not hasattr(args, "command") or getattr(args, "command", None) is None
 
-def test_parser_validate():
-    parser = build_parser()
-    args = parser.parse_args(["validate", "program.py", "--kit", "debug"])
-    assert args.command == "validate"
-    assert args.file == "program.py"
-
-
-def test_parser_kit_list():
-    parser = build_parser()
-    args = parser.parse_args(["kit", "list"])
-    assert args.command == "kit"
-    assert args.kit_command == "list"
-
-
-def test_parser_spec():
-    parser = build_parser()
-    args = parser.parse_args(["spec"])
-    assert args.command == "spec"
-
-
-def test_parser_status():
-    parser = build_parser()
-    args = parser.parse_args(["status"])
-    assert args.command == "status"
-
-
-def test_parser_create_flag():
-    parser = build_parser()
-    args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--kit", "read,glob"])
-    assert args.intent == "find python files"
-    assert args.create is True
-    assert args.name == "FindPy"
-
-
-def test_parser_generate_flag():
-    parser = build_parser()
-    args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read_file"])
-    assert args.intent == "read file main.py"
-    assert args.generate is True
-
-
-def test_parser_param_flag():
-    parser = build_parser()
-    args = parser.parse_args(["-c", "read file test.txt", "--param", "x=1", "--param", "y=2"])
-    assert args.param == ["x=1", "y=2"]
-
-
-def test_parser_validate_flag():
-    parser = build_parser()
-    args = parser.parse_args(["--validate", "-c", "x = 1"])
-    assert args.validate is True
-    assert args.intent == "x = 1"
+    def test_help_mentions_lackpyctl(self):
+        parser = build_parser()
+        help_text = parser.format_help()
+        assert "lackpyctl" in help_text
