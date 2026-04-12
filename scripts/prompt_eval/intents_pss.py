@@ -10,18 +10,32 @@ from .intents import GateResult, Intent
 def _pss_gate(program: str) -> GateResult:
     """Structural gate for selector sheets.
 
-    Rules: non-empty, balanced braces. A sheet with no braces at all
-    (bare selector) is accepted — pss degrades gracefully to
-    single-selector rendering.
+    Rules: non-empty, balanced braces, and must look like a selector
+    sheet (contains a CSS-style selector token like .fn, .cls, .call).
+    Rejects Python code that happens to have balanced braces.
     """
     if not program or not program.strip():
         return GateResult(passed=False, errors=["empty program"])
-    open_count = program.count("{")
-    close_count = program.count("}")
+    stripped = program.strip()
+    open_count = stripped.count("{")
+    close_count = stripped.count("}")
     if open_count != close_count:
         return GateResult(
             passed=False,
             errors=[f"unbalanced braces: {open_count} opening, {close_count} closing"],
+        )
+    # Must contain at least one selector-like token. CSS selectors in
+    # pluckit start with . (e.g. .fn, .cls, .call). Without this check,
+    # Python code with balanced braces passes the gate.
+    import re
+    has_selector = bool(re.search(r'\.(fn|cls|call|decorator|raise)\b', stripped))
+    if not has_selector:
+        # Also accept bare # selectors (e.g. #validate_token)
+        has_selector = bool(re.search(r'#\w+', stripped))
+    if not has_selector:
+        return GateResult(
+            passed=False,
+            errors=["program does not contain a CSS-style selector (.fn, .cls, etc.)"],
         )
     return GateResult(passed=True)
 

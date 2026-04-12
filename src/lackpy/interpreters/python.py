@@ -51,8 +51,19 @@ class PythonInterpreter:
 
         Emphasizes orchestration over implementation — the primary failure
         mode observed in evaluation is models writing ``def foo(): ...``
-        instead of calling pre-loaded tool functions.
+        instead of calling pre-loaded tool functions. Includes
+        FORBIDDEN_NAMES so models know what NOT to reference.
         """
+        from ..lang.grammar import FORBIDDEN_NAMES
+        # Select the most commonly-attempted forbidden names for the prompt.
+        # The full list is too long; these are the ones models actually reach for.
+        key_forbidden = sorted(
+            n for n in FORBIDDEN_NAMES
+            if n in ("open", "os", "sys", "pathlib", "subprocess", "shutil",
+                     "map", "filter", "reduce", "getattr", "setattr",
+                     "type", "super", "input")
+        )
+        forbidden_str = ", ".join(key_forbidden)
         return (
             "You are a program generator. Output a single Python snippet "
             "that orchestrates pre-loaded tool functions.\n"
@@ -61,6 +72,7 @@ class PythonInterpreter:
             "  - CALL the pre-loaded tools. Do NOT re-implement them.\n"
             "  - Do NOT use open(). Use read_file() for ALL file reading.\n"
             "  - Do NOT define functions, classes, or use import.\n"
+            f"  - FORBIDDEN names (will be rejected): {forbidden_str}\n"
             "\n"
             "Output ONLY the program — no markdown, no code fences, no prose.\n"
             "Assign tool results to variables, then end with a bare expression "

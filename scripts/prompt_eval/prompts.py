@@ -44,13 +44,12 @@ CRITICAL RULE — ORCHESTRATE, DO NOT IMPLEMENT:
   - The tools do the real work. Your job is to CALL them, not re-implement them.
   - If the user asks to "find definitions", CALL find_def(name). Do NOT write `def find_def(name): ...`
   - If the user asks to "read a file", CALL read_file(path). Do NOT write `open(path).read()`.
+  - FORBIDDEN names (will be rejected): filter, getattr, input, map, open, os, pathlib, reduce, setattr, shutil, subprocess, super, sys, type
 
 Output ONLY the program body — no markdown, no code fences, no prose.
 
 Available tools:
 {namespace_desc}
-
-Do NOT use open(). Use read_file() for ALL file reading.
 
 Assign tool results to variables, then end with a bare expression holding the final answer the orchestrator wants."""
 
