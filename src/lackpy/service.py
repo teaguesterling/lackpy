@@ -150,6 +150,34 @@ class LackpyService:
         except Exception:
             self._kibitzer = None
 
+    def _apply_kibitzer_hints(self, namespace_desc: str) -> str:
+        """Query kibitzer for prompt hints and append them to namespace_desc.
+
+        Called before generation when kibitzer is available. If
+        get_prompt_hints() is not implemented (older kibitzer version),
+        falls back gracefully to the unmodified namespace_desc.
+        """
+        get_hints = getattr(self._kibitzer, "get_prompt_hints", None)
+        if get_hints is None:
+            return namespace_desc
+        try:
+            hints = get_hints()
+        except Exception:
+            return namespace_desc
+        if not hints:
+            return namespace_desc
+        hint_lines = ["\nDynamic constraints (from observed failure patterns):"]
+        for hint in hints:
+            if isinstance(hint, dict):
+                content = hint.get("content", "")
+                if content:
+                    hint_lines.append(f"  - {content}")
+            elif isinstance(hint, str):
+                hint_lines.append(f"  - {hint}")
+        if len(hint_lines) > 1:
+            return namespace_desc + "\n".join(hint_lines)
+        return namespace_desc
+
     def _resolve_kit(self, kit: str | list[str] | dict | None) -> ResolvedKit:
         if kit is None:
             kit = self._config.kit_default
@@ -255,8 +283,14 @@ class LackpyService:
         # Default: legacy dispatcher path
         dispatcher = InferenceDispatcher(providers=self._inference_providers)
         allowed = set(resolved.tools.keys()) | param_names
+
+        # Kibitzer: get prompt hints from failure pattern tracker
+        namespace_desc = resolved.description
+        if self._kibitzer:
+            namespace_desc = self._apply_kibitzer_hints(namespace_desc)
+
         return await dispatcher.generate(
-            intent=intent, namespace_desc=resolved.description,
+            intent=intent, namespace_desc=namespace_desc,
             allowed_names=allowed, params_desc=params_desc, extra_rules=rules,
             interpreter=interpreter,
         )
@@ -376,7 +410,22 @@ class LackpyService:
         # Kibitzer: get coaching suggestions after execution
         if self._kibitzer:
             kibitzer_suggestions = self._kibitzer.get_suggestions()
-            # Report generation outcome
+            # Classify failure mode for kibitzer's pattern tracker
+            failure_mode = None
+            if not exec_result.success:
+                from .infer.failure_modes import classify_failure
+                validation_result = validate(
+                    gen_result.program,
+                    allowed_names=set(resolved.tools.keys()) | param_names,
+                )
+                failure_mode = classify_failure(
+                    gate_passed=validation_result.valid,
+                    gate_errors=list(validation_result.errors),
+                    exec_error=exec_result.error,
+                    sanitized_program=gen_result.program,
+                )
+            # Report generation outcome with extended fields
+            interp_name = getattr(interpreter, "name", None) if interpreter else None
             self._kibitzer.report_generation({
                 "intent": intent,
                 "program": gen_result.program,
@@ -384,6 +433,9 @@ class LackpyService:
                 "correction_attempts": gen_result.correction_attempts,
                 "correction_strategy": gen_result.correction_strategy,
                 "success": exec_result.success,
+                "interpreter": interp_name,
+                "prompt_specialized": interp_name is not None,
+                "failure_mode": failure_mode,
             })
             self._kibitzer.save()
 
