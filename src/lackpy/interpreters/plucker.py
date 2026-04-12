@@ -81,6 +81,31 @@ class PluckerInterpreter:
         "Fluent chain expressions over pluckit's Plucker/Selection classes"
     )
 
+    def system_prompt_hint(self) -> str:
+        """Interpreter-specialized prompt fragment for plucker."""
+        return (
+            "You generate a single pluckit fluent chain expression.\n"
+            "\n"
+            "Shape: source().find(selector).terminal()\n"
+            "\n"
+            "Entry:\n"
+            "  source()              — use the default code source\n"
+            '  source("path.py")     — override the source\n'
+            "\n"
+            "Chain methods:\n"
+            "  .find(selector)       — narrow to matching descendants\n"
+            "  .callers()            — functions that call this\n"
+            "  .filter(predicate)    — filter by condition\n"
+            "\n"
+            "Terminal operations:\n"
+            "  .count()              — return int\n"
+            "  .names()              — return list[str]\n"
+            "  .view()               — return markdown\n"
+            "  .materialize()        — return list[dict]\n"
+            "\n"
+            "Output ONLY the chain — no code fences, no surrounding Python, no prose."
+        )
+
     def __init__(self) -> None:
         self._python = PythonInterpreter()
 

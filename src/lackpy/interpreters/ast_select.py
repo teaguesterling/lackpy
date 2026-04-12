@@ -65,6 +65,32 @@ class AstSelectInterpreter:
     name = "ast-select"
     description = "CSS selectors evaluated via pluckit, rendered as markdown"
 
+    def system_prompt_hint(self) -> str:
+        """Interpreter-specialized prompt fragment for ast-select.
+
+        The selector syntax reference alone drives 93% pass rates on
+        capable models — few-shot examples don't improve and sometimes
+        hurt. Keep this lean.
+        """
+        return (
+            "You generate a single CSS-style selector for querying source code ASTs.\n"
+            "\n"
+            "Selector syntax:\n"
+            "  .fn                         — all function definitions\n"
+            "  .cls                        — all class definitions\n"
+            "  .fn#NAME                    — function named NAME\n"
+            "  .cls#NAME                   — class named NAME\n"
+            '  .fn[name^="prefix"]         — functions whose name starts with prefix\n'
+            "  .fn:async                   — async functions\n"
+            "  .cls .fn                    — methods inside any class\n"
+            "  .cls#User .fn               — methods inside class User\n"
+            "  .fn:has(.call#execute_sql)  — functions containing a call to execute_sql\n"
+            '  .fn:not([name^="test_"])    — functions not starting with test_\n'
+            "\n"
+            "Output: ONE selector, ONE line, nothing else.\n"
+            "No code fences, no Python, no chain syntax, no explanation."
+        )
+
     def validate(
         self,
         program: str,

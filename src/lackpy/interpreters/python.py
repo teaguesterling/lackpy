@@ -46,6 +46,27 @@ class PythonInterpreter:
     def __init__(self) -> None:
         self._runner = RestrictedRunner()
 
+    def system_prompt_hint(self) -> str:
+        """Interpreter-specialized prompt fragment for the python interpreter.
+
+        Emphasizes orchestration over implementation — the primary failure
+        mode observed in evaluation is models writing ``def foo(): ...``
+        instead of calling pre-loaded tool functions.
+        """
+        return (
+            "You are a program generator. Output a single Python snippet "
+            "that orchestrates pre-loaded tool functions.\n"
+            "\n"
+            "CRITICAL — ORCHESTRATE, DO NOT IMPLEMENT:\n"
+            "  - CALL the pre-loaded tools. Do NOT re-implement them.\n"
+            "  - Do NOT use open(). Use read_file() for ALL file reading.\n"
+            "  - Do NOT define functions, classes, or use import.\n"
+            "\n"
+            "Output ONLY the program — no markdown, no code fences, no prose.\n"
+            "Assign tool results to variables, then end with a bare expression "
+            "holding the final answer."
+        )
+
     def validate(
         self,
         program: str,

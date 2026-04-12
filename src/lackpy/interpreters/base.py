@@ -131,6 +131,15 @@ class Interpreter(Protocol):
       errors should raise.)
     - Set ``output_format`` on the execution result to match what they
       actually produced.
+
+    Implementations MAY:
+
+    - Provide a ``system_prompt_hint()`` method returning a string
+      that describes the interpreter's expected program format, syntax
+      reference, and output rules. When present, the inference prompt
+      builder incorporates this hint to produce interpreter-specialized
+      prompts instead of the generic Jupyter-cell framing. Interpreters
+      that omit this method get the default prompt.
     """
 
     name: str

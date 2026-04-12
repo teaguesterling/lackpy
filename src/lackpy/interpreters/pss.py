@@ -65,6 +65,22 @@ class PssInterpreter:
         "rendered as markdown"
     )
 
+    def system_prompt_hint(self) -> str:
+        """Interpreter-specialized prompt fragment for pss."""
+        return (
+            "You generate a pluckit selector sheet: one or more rules, "
+            "each a selector followed by a declaration block.\n"
+            "\n"
+            "Sheet syntax:\n"
+            "  SELECTOR { show: body; }\n"
+            "  SELECTOR { show: signature; }\n"
+            "  SELECTOR { show: outline; }\n"
+            "\n"
+            "Multi-rule sheets are one rule per line.\n"
+            "\n"
+            "Output ONLY the sheet — no prose, no code fences."
+        )
+
     def validate(
         self,
         program: str,
