@@ -60,8 +60,15 @@ def _markdown_count_at_least(n: int):
     def check(output: Any) -> bool:
         if not isinstance(output, str):
             return False
-        # Count per-match H2 headings: the renderer uses "## " for each match
-        return output.count("\n## ") + (1 if output.startswith("## ") else 0) >= n
+        # Count code blocks — pluckit v0.7+ renders each match as a
+        # `# path:line` heading + fenced code block. Count ``` pairs
+        # as the most reliable match indicator across format versions.
+        fence_count = output.count("```") // 2  # opening + closing = 1 match
+        if fence_count >= n:
+            return True
+        # Fallback: count H1 headings (# path:line format)
+        h1_count = output.count("\n# ") + (1 if output.startswith("# ") else 0)
+        return h1_count >= n
     return check
 
 
