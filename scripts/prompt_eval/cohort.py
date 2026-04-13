@@ -55,12 +55,15 @@ def pick_phase1b_cohort(
     Returns:
         A list of model ids ordered best-first.
     """
-    by_model: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        "total_score": 0,
-        "total_rows": 0,
-        "gate_passes": 0,
-        "latencies": [],
-    })
+    # Accumulate per-model per-variant stats so we can rank by the
+    # model's BEST variant, not aggregate. This prevents models that
+    # need examples (coder models) from being penalized when the
+    # qualifier also tests baseline.
+    by_model_variant: dict[str, dict[str, dict[str, Any]]] = defaultdict(
+        lambda: defaultdict(lambda: {
+            "score": 0, "rows": 0, "gate_passes": 0, "latencies": [],
+        })
+    )
     with phase1a_jsonl.open() as f:
         for line in f:
             line = line.strip()
@@ -73,24 +76,33 @@ def pick_phase1b_cohort(
             if "_meta" in row:
                 continue
             model = row.get("model")
+            variant = row.get("variant_id", "baseline")
             if not model:
                 continue
-            b = by_model[model]
-            b["total_rows"] += 1
-            b["total_score"] += int(row.get("score", 0))
+            b = by_model_variant[model][variant]
+            b["rows"] += 1
+            b["score"] += int(row.get("score", 0))
             if row.get("gate_passed"):
                 b["gate_passes"] += 1
             b["latencies"].append(float(row.get("duration_ms_generation", 0.0)))
 
     survivors: list[tuple[str, int, float]] = []
-    for model, b in by_model.items():
-        if b["total_rows"] == 0:
+    for model, variants in by_model_variant.items():
+        # Pick the model's best variant by score
+        best_score = 0
+        best_gate_rate = 0.0
+        all_latencies: list[float] = []
+        for _variant, b in variants.items():
+            if b["rows"] == 0:
+                continue
+            best_score = max(best_score, b["score"])
+            gate_rate = b["gate_passes"] / b["rows"]
+            best_gate_rate = max(best_gate_rate, gate_rate)
+            all_latencies.extend(b["latencies"])
+        if best_gate_rate < gate_floor:
             continue
-        gate_rate = b["gate_passes"] / b["total_rows"]
-        if gate_rate < gate_floor:
-            continue
-        median_latency = statistics.median(b["latencies"]) if b["latencies"] else 0.0
-        survivors.append((model, b["total_score"], median_latency))
+        median_latency = statistics.median(all_latencies) if all_latencies else 0.0
+        survivors.append((model, best_score, median_latency))
 
     survivors.sort(key=lambda t: (-t[1], t[2]))
     return [m for m, _s, _l in survivors[:top_n]]

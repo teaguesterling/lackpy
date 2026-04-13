@@ -32,11 +32,14 @@ def main() -> None:
     args = parser.parse_args()
 
     core_intents = [i for i in PYTHON_INTENTS if i.difficulty == "core"]
+    # Test both baseline AND specialized_fewshot so models that need
+    # examples (like qwen2.5-coder) aren't penalized. The cohort
+    # selection picks each model's BEST variant score.
     cfg = HarnessConfig(
         output_path=args.output,
         models=PHASE1A_MODELS,
         interpreters=["python"],
-        variant_ids=["baseline"],
+        variant_ids=["baseline", "specialized_fewshot"],
         intents=core_intents,
         toybox_dir=args.toybox,
         ollama_host=args.host,
