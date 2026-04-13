@@ -62,13 +62,24 @@ def generate_once(
         A GenerationRecord capturing the raw output, token counts,
         duration, and any error string.
     """
+    import concurrent.futures
+    import threading
+
     start = time.time()
     chunks: list[str] = []
     eval_count = 0
     prompt_eval_count = 0
     error: str | None = None
-    try:
-        stream = client.chat(
+
+    # Run the streaming chat in a thread so we can enforce a hard
+    # timeout on the initial connection + model load, not just
+    # between chunks. Without this, client.chat() blocks indefinitely
+    # while ollama loads a large model.
+    stream_iter = None
+    cancel = threading.Event()
+
+    def _start_stream():
+        return client.chat(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -78,19 +89,30 @@ def generate_once(
             stream=True,
             keep_alive=keep_alive,
         )
-        for chunk in stream:
-            elapsed = time.time() - start
-            if elapsed > timeout:
-                error = f"timeout: exceeded {timeout}s"
-                break
-            token = chunk.message.content or ""
-            chunks.append(token)
-            ec = getattr(chunk, "eval_count", None)
-            if ec:
-                eval_count = ec
-            pec = getattr(chunk, "prompt_eval_count", None)
-            if pec:
-                prompt_eval_count = pec
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_start_stream)
+            try:
+                stream_iter = future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                error = f"timeout: model load/prompt eval exceeded {timeout}s"
+                cancel.set()
+
+        if stream_iter is not None and not cancel.is_set():
+            for chunk in stream_iter:
+                elapsed = time.time() - start
+                if elapsed > timeout:
+                    error = f"timeout: exceeded {timeout}s"
+                    break
+                token = chunk.message.content or ""
+                chunks.append(token)
+                ec = getattr(chunk, "eval_count", None)
+                if ec:
+                    eval_count = ec
+                pec = getattr(chunk, "prompt_eval_count", None)
+                if pec:
+                    prompt_eval_count = pec
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     duration_ms = (time.time() - start) * 1000
