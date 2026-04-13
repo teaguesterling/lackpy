@@ -62,24 +62,13 @@ def generate_once(
         A GenerationRecord capturing the raw output, token counts,
         duration, and any error string.
     """
-    import concurrent.futures
-    import threading
-
     start = time.time()
     chunks: list[str] = []
     eval_count = 0
     prompt_eval_count = 0
     error: str | None = None
-
-    # Run the streaming chat in a thread so we can enforce a hard
-    # timeout on the initial connection + model load, not just
-    # between chunks. Without this, client.chat() blocks indefinitely
-    # while ollama loads a large model.
-    stream_iter = None
-    cancel = threading.Event()
-
-    def _start_stream():
-        return client.chat(
+    try:
+        stream = client.chat(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -89,30 +78,19 @@ def generate_once(
             stream=True,
             keep_alive=keep_alive,
         )
-
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_start_stream)
-            try:
-                stream_iter = future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                error = f"timeout: model load/prompt eval exceeded {timeout}s"
-                cancel.set()
-
-        if stream_iter is not None and not cancel.is_set():
-            for chunk in stream_iter:
-                elapsed = time.time() - start
-                if elapsed > timeout:
-                    error = f"timeout: exceeded {timeout}s"
-                    break
-                token = chunk.message.content or ""
-                chunks.append(token)
-                ec = getattr(chunk, "eval_count", None)
-                if ec:
-                    eval_count = ec
-                pec = getattr(chunk, "prompt_eval_count", None)
-                if pec:
-                    prompt_eval_count = pec
+        for chunk in stream:
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                error = f"timeout: exceeded {timeout}s"
+                break
+            token = chunk.message.content or ""
+            chunks.append(token)
+            ec = getattr(chunk, "eval_count", None)
+            if ec:
+                eval_count = ec
+            pec = getattr(chunk, "prompt_eval_count", None)
+            if pec:
+                prompt_eval_count = pec
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     duration_ms = (time.time() - start) * 1000
@@ -172,12 +150,20 @@ def wait_for_ollama(client, max_wait: int = 30, poll_interval: int = 5) -> str |
     return last_error
 
 
-def make_ollama_client(host: str = "http://localhost:11435"):
-    """Construct an ollama.Client. Lazy-imports ollama so tests can mock.
+def make_ollama_client(host: str = "http://localhost:11435", timeout: int = 120):
+    """Construct an ollama.Client with an explicit httpx timeout.
 
-    Returns an ollama.Client instance targeting `host`. Raises
-    ImportError at call time if the ollama package is not installed —
-    the harness only calls this when an actual sweep is about to run.
+    The default ollama client has ``Timeout(timeout=None)`` — no timeout
+    at all. This means model loading and prompt evaluation can block
+    forever. We set a generous but finite timeout so hung models get
+    killed cleanly.
+
+    The timeout covers the full request lifecycle including model load
+    and prompt evaluation (which happen before the first streaming
+    chunk arrives). Set higher than the per-cell timeout since model
+    loading is a one-time cost that can legitimately take 30-60s for
+    large models.
     """
+    import httpx
     import ollama
-    return ollama.Client(host=host)
+    return ollama.Client(host=host, timeout=httpx.Timeout(float(timeout)))
