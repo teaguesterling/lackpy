@@ -41,6 +41,11 @@ def main() -> None:
             "Run phase1a_qualifier first."
         )
     cohort = pick_phase1b_cohort(args.qualifier, top_n=6, gate_floor=0.5)
+    # Always include qwen2.5-coder:7b — our prior top python performer.
+    # It narrowly misses the auto-selection due to latency tiebreak but
+    # is the strongest model with the right prompt variant.
+    if "qwen2.5-coder:7b" not in cohort:
+        cohort.append("qwen2.5-coder:7b")
     if not cohort:
         raise SystemExit("no models passed the qualifier floor.")
     print(f"Phase 1b cohort: {cohort}")
