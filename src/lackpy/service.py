@@ -129,6 +129,12 @@ class LackpyService:
                 self._inference_providers.append(AnthropicProvider(
                     model=provider_cfg.get("model", "claude-haiku-4-5-20251001"),
                 ))
+            elif plugin == "cascade" and name not in ("templates", "rules"):
+                from .infer.providers.cascade import CascadeProvider
+                self._inference_providers.append(CascadeProvider(
+                    host=provider_cfg.get("host", "http://localhost:11434"),
+                    tiers=provider_cfg.get("tiers"),
+                ))
 
     def _init_kibitzer(self) -> None:
         """Initialize Kibitzer session if available."""
