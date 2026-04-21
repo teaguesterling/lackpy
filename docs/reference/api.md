@@ -14,6 +14,8 @@
         - kit_list
         - kit_create
         - toolbox_list
+        - docs_index
+        - resolve_doc
 
 ---
 
@@ -53,6 +55,8 @@
         - register_provider
         - register_tool
         - resolve
+        - resolve_docs
+        - docs_index
         - list_tools
         - format_description
 

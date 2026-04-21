@@ -73,10 +73,22 @@ result = find_names(source, selector)
 result"""
 
 
-def _build_completion_prompt(intent: str, examples: str | None = None) -> str:
-    """Build a completion-style prompt the model just finishes."""
-    ex = examples or _DEFAULT_EXAMPLES
-    return f"{ex}\n{intent} ->"
+def _build_completion_prompt(intent: str, examples: str | None = None,
+                             context: str | None = None) -> str:
+    """Build a completion-style prompt the model just finishes.
+
+    If *context* is provided (typically namespace_desc from the kit),
+    it is prepended as reference material the model can consult.
+    This is the integration point for tool documentation (e.g. selector
+    syntax, parameter descriptions) and Kibitzer hints.
+    """
+    parts = []
+    if context:
+        parts.append(context.strip())
+        parts.append("")
+    parts.append(examples or _DEFAULT_EXAMPLES)
+    parts.append(f"{intent} ->")
+    return "\n".join(parts)
 
 
 def _extract_code(raw: str) -> str:
@@ -202,7 +214,7 @@ class CascadeProvider:
             if m:
                 allowed.add(m.group(1))
 
-        prompt = _build_completion_prompt(intent, self._examples)
+        prompt = _build_completion_prompt(intent, self._examples, context=namespace_desc)
         self._last_attempts = []
 
         for tier in self._tiers:

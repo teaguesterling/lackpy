@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 # Names that will confuse small language models if used as tool names.
@@ -46,6 +47,9 @@ class ToolSpec:
             example is a dict with keys: ``intent``, ``code``, ``tags``.
             At inference time, relevant examples are selected from the
             pool of all kit tool examples and injected into the prompt.
+        docs: Path to a markdown documentation file, relative to the
+            provider's package root. Resolved lazily at query time via
+            the provider's ``resolve_docs`` method.
     """
 
     name: str
@@ -57,6 +61,7 @@ class ToolSpec:
     grade_w: int = 3
     effects_ceiling: int = 3
     examples: list[dict] = field(default_factory=list)
+    docs: str | None = None
 
 
 class Toolbox:
@@ -120,6 +125,25 @@ class Toolbox:
         if provider is None:
             raise KeyError(f"No provider '{spec.provider}' registered for tool '{name}'")
         return provider.resolve(spec)
+
+    def resolve_docs(self, name: str, docs_root: Path) -> Path | None:
+        """Return the absolute path to a tool's documentation file, or None.
+
+        Args:
+            name: Tool name to look up.
+            docs_root: Root directory to resolve relative ``docs`` paths against.
+        """
+        if name not in self.tools:
+            return None
+        spec = self.tools[name]
+        if not spec.docs:
+            return None
+        resolved = docs_root / spec.docs
+        return resolved if resolved.exists() else None
+
+    def docs_index(self) -> dict[str, str | None]:
+        """Return a mapping of tool name to docs relative path for all tools."""
+        return {name: spec.docs for name, spec in self.tools.items()}
 
     def list_tools(self) -> list[ToolSpec]:
         """Return all registered tool specs.

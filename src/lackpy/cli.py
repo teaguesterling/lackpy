@@ -20,6 +20,11 @@ def _parse_kit(kit_str: str) -> list[str]:
     return [k.strip() for k in kit_str.split(",")]
 
 
+def _parse_tools(tools_str: str) -> list[str]:
+    """Parse --tools argument as a comma-separated list of tool names."""
+    return [t.strip() for t in tools_str.split(",") if t.strip()]
+
+
 def _parse_params(param_list: list[str] | None) -> dict[str, str]:
     """Parse --param key=value flags into a dict."""
     if not param_list:
@@ -51,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generate", action="store_true", default=False, help="Generate without running")
     parser.add_argument("--name", default=None, help="Class name for --create")
     parser.add_argument("--kit", default=None, help="Kit name, comma-separated list, or @file")
+    parser.add_argument("--tools", default=None, help="Extra tool names (comma-separated) to add to the kit")
     parser.add_argument("--param", action="append", default=None, help="Parameter: key=value (repeatable)")
     parser.add_argument("--validate", action="store_true", default=False, help="Validate without running")
     parser.add_argument("--mode", default=None, help="Inference mode: 1-shot, spm (default: from config or legacy)")
@@ -58,16 +64,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _run_file(svc: Any, path: Path, kit: list[str] | None, params: dict[str, str], sandbox: Any) -> dict[str, Any]:
-    """Run a file — Lackey file or plain program (with --kit)."""
+async def _run_file(svc: Any, path: Path, kit: list[str] | None, params: dict[str, str], sandbox: Any,
+                    extra_tools: list[str] | None = None) -> dict[str, Any]:
+    """Run a file — Lackey file or plain program (with --kit or --tools)."""
     content = path.read_text()
     if "Lackey" in content and "def run" in content:
         return await svc.run_lackey(path, params=params, sandbox=sandbox)
-    elif kit:
-        exec_result = await svc.run_program(content, kit=kit, params=params)
+    elif kit or extra_tools:
+        exec_result = await svc.run_program(content, kit=kit, params=params, extra_tools=extra_tools)
         return {"success": exec_result.success, "output": exec_result.output, "error": exec_result.error}
     else:
-        return {"success": False, "error": "Specify --kit for plain program files, or use a Lackey file."}
+        return {"success": False, "error": "Specify --kit or --tools for plain program files, or use a Lackey file."}
 
 
 def _file_entrypoint(raw_args: list[str]) -> int:
@@ -75,6 +82,7 @@ def _file_entrypoint(raw_args: list[str]) -> int:
     ep = argparse.ArgumentParser(prog="lackpy", add_help=False)
     ep.add_argument("file")
     ep.add_argument("--kit", default=None)
+    ep.add_argument("--tools", default=None)
     ep.add_argument("--param", action="append", default=None)
     ep.add_argument("--validate", action="store_true", default=False)
     ep.add_argument("--workspace", type=Path, default=None)
@@ -88,6 +96,7 @@ def _file_entrypoint(raw_args: list[str]) -> int:
 
     workspace = args.workspace or Path.cwd()
     kit = _parse_kit(args.kit) if args.kit else None
+    extra_tools = _parse_tools(args.tools) if args.tools else None
     params = _parse_params(args.param)
 
     from .service import LackpyService
@@ -95,12 +104,12 @@ def _file_entrypoint(raw_args: list[str]) -> int:
 
     if args.validate:
         program = path.read_text()
-        result = svc.validate(program, kit=kit)
+        result = svc.validate(program, kit=kit, extra_tools=extra_tools)
         out: dict[str, Any] = {"valid": result.valid, "errors": result.errors, "calls": list(result.calls)}
         print(json.dumps(out, indent=2))
         return 0 if result.valid else 1
 
-    result_dict = asyncio.run(_run_file(svc, path, kit, params, args.sandbox))
+    result_dict = asyncio.run(_run_file(svc, path, kit, params, args.sandbox, extra_tools=extra_tools))
     print(json.dumps(result_dict, indent=2, default=str))
     return 0 if result_dict.get("success") else 1
 
@@ -123,12 +132,14 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = args.workspace or Path.cwd()
 
+    extra_tools = _parse_tools(args.tools) if args.tools else None
+
     # --validate + -c → validate the code string
     if args.validate and args.intent:
         from .service import LackpyService
         svc = LackpyService(workspace=workspace)
         kit = _parse_kit(args.kit) if args.kit else None
-        result = svc.validate(args.intent, kit=kit)
+        result = svc.validate(args.intent, kit=kit, extra_tools=extra_tools)
         out: dict[str, Any] = {"valid": result.valid, "errors": result.errors, "calls": list(result.calls)}
         print(json.dumps(out, indent=2))
         return 0 if result.valid else 1
@@ -141,8 +152,10 @@ def main(argv: list[str] | None = None) -> int:
         mode = getattr(args, 'mode', None)
 
         if args.create:
-            gen = asyncio.run(svc.generate(args.intent, kit=kit, mode=mode))
+            gen = asyncio.run(svc.generate(args.intent, kit=kit, mode=mode, extra_tools=extra_tools))
             tools = kit if isinstance(kit, list) else []
+            if extra_tools:
+                tools = tools + extra_tools
             path = asyncio.run(svc.create_lackey(
                 program=gen.program, name=args.name or "Generated",
                 tools=tools,
@@ -156,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.generate:
             try:
-                gen = asyncio.run(svc.generate(args.intent, kit=kit, mode=mode))
+                gen = asyncio.run(svc.generate(args.intent, kit=kit, mode=mode, extra_tools=extra_tools))
             except RuntimeError as e:
                 print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
                 return 1
@@ -165,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Default: delegate (generate + run)
         try:
-            result = asyncio.run(svc.delegate(args.intent, kit=kit, mode=mode))
+            result = asyncio.run(svc.delegate(args.intent, kit=kit, mode=mode, extra_tools=extra_tools))
         except RuntimeError as e:
             print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
             return 1
@@ -179,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             from .service import LackpyService
             svc = LackpyService(workspace=workspace)
             kit = _parse_kit(args.kit) if args.kit else None
-            exec_result = asyncio.run(svc.run_program(program, kit=kit))
+            exec_result = asyncio.run(svc.run_program(program, kit=kit, extra_tools=extra_tools))
             out_dict = {"success": exec_result.success, "output": exec_result.output, "error": exec_result.error}
             print(json.dumps(out_dict, indent=2, default=str))
             return 0 if exec_result.success else 1

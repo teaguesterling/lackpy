@@ -62,6 +62,43 @@ class TestResolvedKitDescription:
         assert len(kit.description) > 0
 
 
+class TestExtraTools:
+    def test_extra_tools_merged_into_list_kit(self, toolbox):
+        kit = resolve_kit(["read_file"], toolbox, extra_tools=["edit_file"])
+        assert "read_file" in kit.tools
+        assert "edit_file" in kit.tools
+        assert kit.grade.w == 3
+
+    def test_extra_tools_merged_into_named_kit(self, toolbox, tmp_path):
+        kit_file = tmp_path / "readonly.kit"
+        kit_file.write_text("---\nname: readonly\n---\nread_file\n")
+        kit = resolve_kit("readonly", toolbox, kits_dir=tmp_path, extra_tools=["edit_file"])
+        assert "read_file" in kit.tools
+        assert "edit_file" in kit.tools
+
+    def test_extra_tools_duplicate_ignored(self, toolbox):
+        kit = resolve_kit(["read_file", "find_files"], toolbox, extra_tools=["read_file"])
+        assert len(kit.tools) == 2
+
+    def test_extra_tools_standalone_with_none_kit(self, toolbox):
+        kit = resolve_kit(None, toolbox, extra_tools=["read_file"])
+        assert "read_file" in kit.tools
+        assert len(kit.tools) == 1
+
+    def test_extra_tools_unknown_raises(self, toolbox):
+        with pytest.raises(KeyError):
+            resolve_kit(["read_file"], toolbox, extra_tools=["nonexistent"])
+
+    def test_none_kit_string_resolves_empty(self, toolbox):
+        kit = resolve_kit("none", toolbox)
+        assert len(kit.tools) == 0
+
+    def test_none_kit_string_with_extra_tools(self, toolbox):
+        kit = resolve_kit("none", toolbox, extra_tools=["read_file"])
+        assert "read_file" in kit.tools
+        assert len(kit.tools) == 1
+
+
 class TestQuartermaster:
     def test_none_raises_not_implemented(self, toolbox):
         with pytest.raises(NotImplementedError):
