@@ -15,10 +15,9 @@ next attempt.
 
 from __future__ import annotations
 
-import time
 from typing import Any, Callable, Protocol
 
-from .context import ProgramState, StepContext, StepTrace
+from .context import StepContext
 
 
 class Step(Protocol):
@@ -76,7 +75,8 @@ class InterpreterCheck:
         self._interpreter = interpreter
 
     def check(self, program: str, ctx: StepContext) -> tuple[bool, list[str]]:
-        result = self._interpreter.validate(program, None)
+        from ..interpreters.base import ExecutionContext
+        result = self._interpreter.validate(program, ExecutionContext())
         return result.valid, result.errors if not result.valid else []
 
 
@@ -157,13 +157,19 @@ class RetryWithFeedback:
 
 
 def _normalize_checks(checks: list) -> list:
-    """Convert mixed check types to a uniform list of Check-protocol objects."""
+    """Convert mixed check types to a uniform list of Check-protocol objects.
+
+    Dispatch order matters: interpreters (have ``validate``) are tested
+    before the generic ``check`` fallback so they always get the
+    InterpreterCheck adapter even if they also have a ``check`` method.
+    Objects with ``check`` (like InterpretStep) are used as-is.
+    """
     normalized = []
     for c in checks:
-        if hasattr(c, "check"):
-            normalized.append(c)
-        elif hasattr(c, "validate"):
+        if hasattr(c, "validate"):
             normalized.append(InterpreterCheck(c))
+        elif hasattr(c, "check"):
+            normalized.append(c)
         elif callable(c):
             normalized.append(CallableCheck(c))
         else:

@@ -17,11 +17,17 @@ with near-100% execution rates, like CSS selectors).
 
 from __future__ import annotations
 
+import concurrent.futures
 import time
 from typing import Any
 
 from ..context import ProgramState, StepContext, StepTrace
-from ...interpreters.base import ExecutionContext
+from ...interpreters.base import ExecutionContext, InterpreterExecutionResult
+
+
+# Shared pool for sync-from-async bridge in check(). Avoids creating and
+# tearing down a ThreadPoolExecutor on every retry attempt.
+_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
 class InterpretStep:
@@ -42,33 +48,40 @@ class InterpretStep:
         self._interpreter = interpreter
         self._config = config or {}
         self._base_dir = base_dir
-        self._cached_result = None
-        self._cached_program = None
+        self._cached_result: InterpreterExecutionResult | None = None
+        self._cached_program: str | None = None
 
-    def check(self, program: str, ctx: StepContext) -> tuple[bool, list[str]]:
-        """Check protocol: execute and cache result, return pass/fail."""
-        import asyncio
-        exec_ctx = ExecutionContext(
+    def _make_exec_ctx(self, ctx: StepContext) -> ExecutionContext:
+        return ExecutionContext(
             kit=ctx.kit,
             config=self._config,
             base_dir=self._base_dir,
         )
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
 
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = pool.submit(
+    def check(self, program: str, ctx: StepContext) -> tuple[bool, list[str]]:
+        """Check protocol: execute and cache result, return pass/fail."""
+        import asyncio
+        exec_ctx = self._make_exec_ctx(ctx)
+
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                result = _THREAD_POOL.submit(
                     asyncio.run,
                     self._interpreter.execute(program, exec_ctx)
                 ).result()
-        else:
-            result = asyncio.run(
-                self._interpreter.execute(program, exec_ctx)
-            )
+            else:
+                result = asyncio.run(
+                    self._interpreter.execute(program, exec_ctx)
+                )
+        except Exception as e:
+            self._cached_result = None
+            self._cached_program = None
+            return False, [f"execution error: {type(e).__name__}: {e}"]
 
         self._cached_result = result
         self._cached_program = program
@@ -101,17 +114,18 @@ class InterpretStep:
 
         program = ctx.current.program
 
-        if self._cached_result and self._cached_program == program:
+        if (self._cached_result is not None
+                and self._cached_program == program):
             result = self._cached_result
             self._cached_result = None
             self._cached_program = None
         else:
-            exec_ctx = ExecutionContext(
-                kit=ctx.kit,
-                config=self._config,
-                base_dir=self._base_dir,
-            )
-            result = await self._interpreter.execute(program, exec_ctx)
+            # No cached result — either used as a standalone step (not
+            # inside retry) or the program changed since the last check.
+            self._cached_result = None
+            self._cached_program = None
+            result = await self._interpreter.execute(
+                program, self._make_exec_ctx(ctx))
 
         elapsed = (time.perf_counter() - start) * 1000
         output_text = str(result.output) if result.output else ""

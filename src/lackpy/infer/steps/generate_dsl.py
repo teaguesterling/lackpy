@@ -87,9 +87,12 @@ def _clean_dsl_output(raw: str | None) -> str:
     if raw is None:
         return ""
     program = sanitize_output(raw).strip()
-    for fence in ("```css", "```", "`"):
-        program = program.strip(fence)
-    program = program.strip()
+    for fence in ("```css", "```"):
+        if program.startswith(fence):
+            program = program[len(fence):]
+        if program.endswith("```"):
+            program = program[:-3]
+    program = program.strip("`").strip()
     lines = program.split("\n")
     clean = []
     for line in lines:
