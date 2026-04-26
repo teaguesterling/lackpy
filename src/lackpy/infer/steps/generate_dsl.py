@@ -97,8 +97,13 @@ def _clean_dsl_output(raw: str | None) -> str:
     clean = []
     for line in lines:
         s = line.strip()
-        if s and not s.startswith(("Output", "Note", "This", "Here", "The ", "I ")):
-            clean.append(s)
-        elif clean:
-            break
+        if not s or all(c in "` " for c in s):
+            if clean:
+                break
+            continue
+        if s.startswith(("Output", "Note", "This", "Here", "The ", "I ", "To ")):
+            if clean:
+                break
+            continue
+        clean.append(s)
     return "\n".join(clean) if clean else program
