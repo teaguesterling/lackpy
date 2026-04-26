@@ -17,6 +17,8 @@ from .kit.providers.python import PythonProvider
 from .kit.registry import ResolvedKit, resolve_kit
 from .kit.toolbox import ArgSpec, Toolbox, ToolSpec
 from .lang.grammar import ALLOWED_BUILTINS
+from .policy.layer import PolicyLayer
+from .policy.sources.kit import KitPolicySource
 
 _BUILTIN_TOOLS = [
     ToolSpec(
@@ -110,6 +112,8 @@ class LackpyService:
             self.toolbox.register_tool(spec)
         self._inference_providers: list = []
         self._init_inference_providers()
+        self._policy = PolicyLayer()
+        self._policy.add_source(KitPolicySource(self.toolbox))
         self._kibitzer: Any = None
         self._init_kibitzer()
 
@@ -157,6 +161,8 @@ class LackpyService:
                 for spec in self.toolbox.list_tools()
             ])
             self._register_kibitzer_docs()
+            from .policy.sources.kibitzer import KibitzerPolicySource
+            self._policy.add_source(KibitzerPolicySource(self._kibitzer))
         except Exception:
             self._kibitzer = None
 
@@ -317,17 +323,19 @@ class LackpyService:
         dispatcher = InferenceDispatcher(providers=self._inference_providers)
         allowed = set(resolved.tools.keys()) | param_names
 
-        # Kibitzer: get model-specific prompt hints from failure pattern tracker
-        namespace_desc = resolved.description
-        if self._kibitzer:
-            # Find the model name from the first available LLM provider
-            model_name = None
-            for p in dispatcher.get_providers():
-                m = getattr(p, "_model", None)
-                if m:
-                    model_name = m
-                    break
-            namespace_desc = self._apply_kibitzer_hints(namespace_desc, model=model_name)
+        # Resolve policy — kit baseline + optional kibitzer hints + optional umwelt
+        from .policy.types import PolicyContext, ModelSpec
+        model_name = None
+        for p in dispatcher.get_providers():
+            m = getattr(p, "_model", None)
+            if m:
+                model_name = m
+                break
+        policy_context: PolicyContext = {"kit": resolved}
+        if model_name:
+            policy_context["model"] = ModelSpec(name=model_name)
+        policy = self._policy.resolve(policy_context)
+        namespace_desc = policy.namespace_desc or resolved.description
 
         return await dispatcher.generate(
             intent=intent, namespace_desc=namespace_desc,
