@@ -11,6 +11,7 @@ from .kit.registry import resolve_kit, ResolvedKit
 from .run.runner import RestrictedRunner
 from .run.base import ExecutionResult
 from .run.trace import Trace, TraceEntry
+from .policy import PolicyLayer, PolicyResult, PolicyContext
 from .lackey import Lackey, Tool, Log, System, User, Assistant
 from .lackey.parser import parse_lackey, LackeyInfo
 from .lackey.creator import create_lackey_source, save_lackey
@@ -24,6 +25,7 @@ __all__ = [
     "resolve_kit", "ResolvedKit",
     "RestrictedRunner", "ExecutionResult",
     "Trace", "TraceEntry",
+    "PolicyLayer", "PolicyResult", "PolicyContext",
     "Lackey", "Tool", "Log", "System", "User", "Assistant",
     "parse_lackey", "LackeyInfo",
     "create_lackey_source", "save_lackey",
