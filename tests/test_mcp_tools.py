@@ -3,6 +3,8 @@
 import pytest
 from pathlib import Path
 
+pytest.importorskip("mcp", reason="mcp required for MCP server tests")
+
 from lackpy.mcp import server
 
 

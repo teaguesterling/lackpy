@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+pytest.importorskip("tqdm", reason="tqdm required for eval harness tests")
+
 from scripts.prompt_eval.harness import (
     HarnessConfig,
     compute_cells,

@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 import pytest
 
+pytest.importorskip("tqdm", reason="tqdm required for eval harness tests")
+
 from scripts.prompt_eval.harness import HarnessConfig, run_harness
 from scripts.prompt_eval.intents_ast_select import AST_SELECT_INTENTS
 from scripts.prompt_eval.intents_plucker import PLUCKER_INTENTS
