@@ -124,6 +124,50 @@
 
 ---
 
+## Policy
+
+::: lackpy.policy.layer.PolicyLayer
+    options:
+      members:
+        - add_source
+        - resolve
+
+::: lackpy.policy.layer.PolicySource
+
+::: lackpy.policy.types.PolicyResult
+    options:
+      members:
+        - replace
+
+::: lackpy.policy.types.PolicyContext
+
+::: lackpy.policy.types.ToolConstraints
+
+::: lackpy.policy.types.Principal
+
+::: lackpy.policy.types.ModelSpec
+
+---
+
+## Policy sources
+
+::: lackpy.policy.sources.kit.KitPolicySource
+    options:
+      members:
+        - resolve
+
+::: lackpy.policy.sources.kibitzer.KibitzerPolicySource
+    options:
+      members:
+        - resolve
+
+::: lackpy.policy.sources.umwelt.UmweltPolicySource
+    options:
+      members:
+        - resolve
+
+---
+
 ## Configuration
 
 ::: lackpy.config.LackpyConfig

@@ -68,9 +68,11 @@ nav:
     - Kits & Toolbox: concepts/kits.md
     - Inference Pipeline: concepts/inference.md
     - Interpreter Plugins: concepts/interpreters.md
+    - Policy Layer: concepts/policy-layer.md
   - Extending:
     - Tool Providers: extending/tool-providers.md
     - Inference Providers: extending/inference-providers.md
+    - Policy Sources: extending/policy-sources.md
     - Custom Rules: extending/custom-rules.md
   - Reference:
     - Python API: reference/api.md
