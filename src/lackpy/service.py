@@ -183,37 +183,6 @@ class LackpyService:
         except Exception:
             pass
 
-    def _apply_kibitzer_hints(self, namespace_desc: str, model: str | None = None) -> str:
-        """Query kibitzer for prompt hints and append them to namespace_desc.
-
-        Called before generation when kibitzer is available. When a model
-        name is provided, hints are filtered to patterns observed for that
-        specific model — giving model-specific constraints.
-
-        Falls back gracefully if get_prompt_hints() is not implemented
-        (older kibitzer version) or returns empty.
-        """
-        get_hints = getattr(self._kibitzer, "get_prompt_hints", None)
-        if get_hints is None:
-            return namespace_desc
-        try:
-            hints = get_hints(model=model)
-        except Exception:
-            return namespace_desc
-        if not hints:
-            return namespace_desc
-        hint_lines = ["\nDynamic constraints (from observed failure patterns):"]
-        for hint in hints:
-            if isinstance(hint, dict):
-                content = hint.get("content", "")
-                if content:
-                    hint_lines.append(f"  - {content}")
-            elif isinstance(hint, str):
-                hint_lines.append(f"  - {hint}")
-        if len(hint_lines) > 1:
-            return namespace_desc + "\n".join(hint_lines)
-        return namespace_desc
-
     def _resolve_kit(self, kit: str | list[str] | dict | None,
                      extra_tools: list[str] | None = None) -> ResolvedKit:
         if kit is None:
