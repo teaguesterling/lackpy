@@ -10,6 +10,31 @@ from .fixer import build_fixer_messages
 from .hints import enrich_errors
 from .sanitize import sanitize_output
 
+_STDLIB_TO_TOOL: dict[str, str] = {
+    "open": "read_file",
+    "glob": "find_files",
+    "os": "find_files",
+    "pathlib": "find_files",
+}
+
+
+def _infer_relevant_tool(
+    failure_mode: str | None,
+    errors: list[str],
+    allowed_names: set[str],
+) -> str | None:
+    """Guess which kit tool is relevant to a failure, for doc lookup."""
+    error_text = " ".join(errors).lower()
+    if failure_mode in ("stdlib_leak", "implement_not_orchestrate"):
+        for stdlib_name, tool_name in _STDLIB_TO_TOOL.items():
+            if stdlib_name in error_text and tool_name in allowed_names:
+                return tool_name
+    # Fall back to first allowed name that looks like a tool
+    for name in allowed_names:
+        if "_" in name:
+            return name
+    return None
+
 
 @dataclass
 class CorrectionAttempt:
@@ -154,24 +179,30 @@ class CorrectionChain:
                             sanitized_program=cleaned,
                         )
                         model_name = getattr(provider, "_model", None)
+                        failed_tool = _infer_relevant_tool(
+                            failure_mode, validation.errors, allowed_names,
+                        )
                         signal = get_hints(
                             failure_mode=failure_mode,
                             model=model_name,
                             attempt=len(self.attempts),
+                            tool=failed_tool,
                         )
-                        # If kibitzer has seen this pattern before, strengthen hints
                         if isinstance(signal, dict):
-                            history_count = signal.get("history", 0)
-                            if history_count >= 3:
-                                # This model repeatedly fails this way — be blunt
+                            doc_context = signal.get("doc_context")
+                            if doc_context:
+                                enriched.append("--- From tool documentation ---")
+                                for section in doc_context:
+                                    enriched.append(
+                                        f"{section['title']}: {section['content']}"
+                                    )
+                            history = signal.get("history")
+                            if isinstance(history, dict) and history.get("count", 0) >= 3:
                                 enriched.append(
                                     f"IMPORTANT: This model has failed this way "
-                                    f"{history_count} times before. Follow the "
+                                    f"{history['count']} times before. Follow the "
                                     f"suggestions above exactly."
                                 )
-                            known_fix = signal.get("fix")
-                            if known_fix:
-                                enriched.append(known_fix)
                     except Exception:
                         pass  # kibitzer errors must not break correction
             raw = await provider.generate(

@@ -23,21 +23,25 @@ _BUILTIN_TOOLS = [
         name="read_file", provider="builtin", description="Read file contents",
         args=[ArgSpec(name="path", type="str", description="File path")],
         returns="str", grade_w=1, effects_ceiling=1,
+        docs="docs/tools/read_file.md",
     ),
     ToolSpec(
         name="find_files", provider="builtin", description="Find files matching a glob pattern",
         args=[ArgSpec(name="pattern", type="str", description="Glob pattern")],
         returns="list[str]", grade_w=1, effects_ceiling=1,
+        docs="docs/tools/find_files.md",
     ),
     ToolSpec(
         name="write_file", provider="builtin", description="Write content to a file",
         args=[ArgSpec(name="path", type="str"), ArgSpec(name="content", type="str")],
         returns="bool", grade_w=3, effects_ceiling=3,
+        docs="docs/tools/write_file.md",
     ),
     ToolSpec(
         name="edit_file", provider="builtin", description="Replace text in a file",
         args=[ArgSpec(name="path", type="str"), ArgSpec(name="old_str", type="str"), ArgSpec(name="new_str", type="str")],
         returns="bool", grade_w=3, effects_ceiling=3,
+        docs="docs/tools/edit_file.md",
     ),
 ]
 from .lang.validator import ValidationResult, validate
@@ -129,6 +133,12 @@ class LackpyService:
                 self._inference_providers.append(AnthropicProvider(
                     model=provider_cfg.get("model", "claude-haiku-4-5-20251001"),
                 ))
+            elif plugin == "cascade" and name not in ("templates", "rules"):
+                from .infer.providers.cascade import CascadeProvider
+                self._inference_providers.append(CascadeProvider(
+                    host=provider_cfg.get("host", "http://localhost:11434"),
+                    tiers=provider_cfg.get("tiers"),
+                ))
 
     def _init_kibitzer(self) -> None:
         """Initialize Kibitzer session if available."""
@@ -137,7 +147,6 @@ class LackpyService:
         try:
             self._kibitzer = KibitzerSession(project_dir=self._workspace)
             self._kibitzer.load()
-            # Register our tools so Kibitzer can make grade-aware decisions
             self._kibitzer.register_tools([
                 {
                     "name": spec.name,
@@ -147,8 +156,26 @@ class LackpyService:
                 }
                 for spec in self.toolbox.list_tools()
             ])
+            self._register_kibitzer_docs()
         except Exception:
             self._kibitzer = None
+
+    def _register_kibitzer_docs(self) -> None:
+        """Register tool docs with Kibitzer for contextual retrieval."""
+        register = getattr(self._kibitzer, "register_docs", None)
+        if register is None:
+            return
+        try:
+            from kibitzer import DocRefinement
+            from .infer.distill import build_doc_refinement
+            docs = self.docs_index()
+            register(
+                docs["tool_docs"],
+                docs_root=str(self._workspace),
+                refinement=build_doc_refinement(),
+            )
+        except Exception:
+            pass
 
     def _apply_kibitzer_hints(self, namespace_desc: str, model: str | None = None) -> str:
         """Query kibitzer for prompt hints and append them to namespace_desc.
@@ -181,11 +208,12 @@ class LackpyService:
             return namespace_desc + "\n".join(hint_lines)
         return namespace_desc
 
-    def _resolve_kit(self, kit: str | list[str] | dict | None) -> ResolvedKit:
+    def _resolve_kit(self, kit: str | list[str] | dict | None,
+                     extra_tools: list[str] | None = None) -> ResolvedKit:
         if kit is None:
             kit = self._config.kit_default
         kits_dir = self._config.config_dir / "kits"
-        return resolve_kit(kit, self.toolbox, kits_dir=kits_dir)
+        return resolve_kit(kit, self.toolbox, kits_dir=kits_dir, extra_tools=extra_tools)
 
     def _resolve_params(self, params: dict[str, Any] | None, kit: ResolvedKit) -> tuple[dict[str, Any], str | None, set[str]]:
         if not params:
@@ -203,7 +231,8 @@ class LackpyService:
         return values, params_desc, set(values.keys())
 
     def validate(self, program: str, kit: str | list[str] | dict | None = None,
-                 rules: list | None = None, param_names: set[str] | None = None) -> ValidationResult:
+                 rules: list | None = None, param_names: set[str] | None = None,
+                 extra_tools: list[str] | None = None) -> ValidationResult:
         """Validate a lackpy program against a kit's allowed names.
 
         Args:
@@ -215,7 +244,7 @@ class LackpyService:
         Returns:
             A ValidationResult indicating whether the program is valid.
         """
-        resolved = self._resolve_kit(kit)
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
         allowed = set(resolved.tools.keys())
         if param_names:
             allowed |= param_names
@@ -223,7 +252,8 @@ class LackpyService:
 
     async def generate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None,
-                       mode: str | None = None, interpreter: Any = None) -> GenerationResult:
+                       mode: str | None = None, interpreter: Any = None,
+                       extra_tools: list[str] | None = None) -> GenerationResult:
         """Generate a lackpy program from a natural language intent.
 
         Args:
@@ -246,7 +276,7 @@ class LackpyService:
         from .infer.strategy import STRATEGIES
         from .infer.context import StepContext
 
-        resolved = self._resolve_kit(kit)
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
         _, params_desc, param_names = self._resolve_params(params, resolved)
 
         effective_mode = mode or self._config.inference_mode
@@ -307,7 +337,8 @@ class LackpyService:
 
     async def run_program(self, program: str, kit: str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
-                          rules: list | None = None) -> ExecutionResult:
+                          rules: list | None = None,
+                          extra_tools: list[str] | None = None) -> ExecutionResult:
         """Validate and execute a lackpy program.
 
         Validates the program before running it; returns a failed ExecutionResult
@@ -323,7 +354,7 @@ class LackpyService:
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
-        resolved = self._resolve_kit(kit)
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
         param_values, _, param_names = self._resolve_params(params, resolved)
         allowed = set(resolved.tools.keys()) | param_names
         validation = validate(program, allowed_names=allowed, extra_rules=rules)
@@ -341,7 +372,8 @@ class LackpyService:
                        rules: list | None = None,
                        _program_override: str | None = None,
                        mode: str | None = None,
-                       interpreter: Any = None) -> dict[str, Any]:
+                       interpreter: Any = None,
+                       extra_tools: list[str] | None = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
 
         Combines generate and run_program: generates a program from intent, then
@@ -366,7 +398,7 @@ class LackpyService:
             RuntimeError: If all inference providers fail to produce a valid program.
         """
         start = time.perf_counter()
-        resolved = self._resolve_kit(kit)
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
 
         # Kibitzer: register context for this delegation
@@ -386,7 +418,7 @@ class LackpyService:
             )
         else:
             gen_result = await self.generate(intent, kit, params, rules, mode=mode,
-                                            interpreter=interpreter)
+                                            interpreter=interpreter, extra_tools=extra_tools)
 
         # Kibitzer: validate planned calls before execution
         kibitzer_suggestions: list[str] = []
@@ -539,7 +571,8 @@ class LackpyService:
         )
 
     async def create(self, program: str, kit: str | list[str] | dict | None = None,
-                     name: str = "", pattern: str | None = None) -> dict[str, Any]:
+                     name: str = "", pattern: str | None = None,
+                     extra_tools: list[str] | None = None) -> dict[str, Any]:
         """Validate a program and save it as a named template.
 
         Args:
@@ -552,7 +585,7 @@ class LackpyService:
             A dict with keys: success (bool), path (str) on success,
             or errors (list) on validation failure.
         """
-        resolved = self._resolve_kit(kit)
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
         validation = validate(program, allowed_names=set(resolved.tools.keys()))
         if not validation.valid:
             return {"success": False, "errors": validation.errors}
@@ -566,7 +599,8 @@ class LackpyService:
         template_file.write_text(content)
         return {"success": True, "path": str(template_file)}
 
-    def kit_info(self, kit: str | list[str] | dict) -> dict[str, Any]:
+    def kit_info(self, kit: str | list[str] | dict,
+                 extra_tools: list[str] | None = None) -> dict[str, Any]:
         """Return metadata for a resolved kit.
 
         Args:
@@ -580,7 +614,7 @@ class LackpyService:
             KeyError: If the kit references an unknown tool.
             FileNotFoundError: If a named kit file does not exist.
         """
-        resolved = self._resolve_kit(kit)
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
         return {
             "tools": {name: {"description": spec.description, "grade_w": spec.grade_w,
                              "effects_ceiling": spec.effects_ceiling}
@@ -621,6 +655,32 @@ class LackpyService:
         content += "---\n" + "\n".join(tools) + "\n"
         kit_file.write_text(content)
         return {"name": name, "path": str(kit_file), "tools": tools}
+
+    def docs_index(self, kit: str | list[str] | dict | None = None,
+                   extra_tools: list[str] | None = None) -> dict[str, Any]:
+        """Return documentation references for a kit's tools.
+
+        Returns a dict with ``tool_docs`` (tool name → relative doc path)
+        and ``kit_docs`` (list of kit-level doc paths). Paths are relative
+        to the package/workspace root — callers resolve them on demand.
+        """
+        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        tool_docs = {name: spec.docs for name, spec in resolved.tools.items() if spec.docs}
+        return {
+            "tool_docs": tool_docs,
+            "kit_docs": resolved.docs,
+        }
+
+    def resolve_doc(self, doc_path: str) -> str | None:
+        """Read a documentation file by its relative path.
+
+        Resolves the path against the workspace root and returns the
+        content, or None if the file does not exist.
+        """
+        resolved = self._workspace / doc_path
+        if resolved.exists():
+            return resolved.read_text()
+        return None
 
     def toolbox_list(self) -> list[dict[str, Any]]:
         """List all registered tools across all providers.

@@ -321,10 +321,36 @@ lackpy template test <name>
 
 ## Kit argument format
 
-Any command that accepts `--kit` supports three forms:
+Any command that accepts `--kit` supports these forms:
 
 | Form | Example | Resolved as |
 |------|---------|-------------|
 | Named kit | `--kit filesystem` | Loads `.lackpy/kits/filesystem.kit` |
 | Comma-separated | `--kit read_file,find_files,write_file` | Ad-hoc list of tool names |
 | Single tool | `--kit read_file` | Single-tool kit |
+| Empty kit | `--kit none` | No base tools (use with `--tools`) |
+
+---
+
+## Extra tools (`--tools`)
+
+Any command that accepts `--kit` also accepts `--tools` to add individual tools on top of the kit:
+
+```bash
+# Add edit_file to a named kit
+lackpy -c "fix the typo" --kit debug --tools edit_file
+
+# Multiple extra tools
+lackpy -c "reorganize" --kit debug --tools edit_file,write_file
+
+# Standalone — no kit, just tools
+lackpy -c "read the README" --tools read_file
+
+# Explicit empty kit + tools
+lackpy -c "read the README" --kit none --tools read_file
+```
+
+**Behaviour:**
+- Extra tools are merged into the resolved kit. Duplicates are ignored.
+- The kit grade is recomputed after merging (e.g., adding `write_file` raises the grade).
+- `--tools` without `--kit` uses the config default kit as the base. Use `--kit none` for no base tools.

@@ -1,6 +1,6 @@
 """Tests for the lackpy CLI."""
 
-from lackpy.cli import build_parser
+from lackpy.cli import build_parser, _parse_tools
 
 
 class TestParserFlags:
@@ -44,6 +44,38 @@ class TestParserFlags:
         parser = build_parser()
         args = parser.parse_args(["--workspace", "/tmp/test", "-c", "hello"])
         assert str(args.workspace) == "/tmp/test"
+
+
+    def test_tools_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "do something", "--tools", "read_file,edit_file"])
+        assert args.tools == "read_file,edit_file"
+
+    def test_tools_flag_with_kit(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "do something", "--kit", "debug", "--tools", "edit_file"])
+        assert args.kit == "debug"
+        assert args.tools == "edit_file"
+
+    def test_tools_flag_without_kit(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "do something", "--tools", "read_file"])
+        assert args.kit is None
+        assert args.tools == "read_file"
+
+
+class TestParseTools:
+    def test_single_tool(self):
+        assert _parse_tools("read_file") == ["read_file"]
+
+    def test_multiple_tools(self):
+        assert _parse_tools("read_file,edit_file") == ["read_file", "edit_file"]
+
+    def test_strips_whitespace(self):
+        assert _parse_tools(" read_file , edit_file ") == ["read_file", "edit_file"]
+
+    def test_skips_empty(self):
+        assert _parse_tools("read_file,,edit_file") == ["read_file", "edit_file"]
 
 
 class TestNoDeprecatedSubcommands:
