@@ -22,11 +22,17 @@ class LackpyToolWrapper(BaseTool):
     _callable: Callable[..., Any] = PrivateAttr()
 
     @classmethod
-    def from_spec(cls, spec: ToolSpec, callable_fn: Callable[..., Any]) -> LackpyToolWrapper:
-        schema = args_schema_from_argspecs(spec.name, spec.args)
+    def from_spec(
+        cls,
+        spec: ToolSpec,
+        callable_fn: Callable[..., Any],
+        name_override: str | None = None,
+    ) -> LackpyToolWrapper:
+        tool_name = name_override or spec.name
+        schema = args_schema_from_argspecs(tool_name, spec.args)
         description = f"{spec.description} [provider={spec.provider}, grade_w={spec.grade_w}]"
         instance = cls(
-            name=spec.name,
+            name=tool_name,
             description=description,
             args_schema=schema,
             metadata={

@@ -53,9 +53,9 @@ class LackpyToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         tools: list[BaseTool] = []
-        for name, spec in self._resolved_kit.tools.items():
-            callable_fn = self._resolved_kit.callables[name]
-            tools.append(LackpyToolWrapper.from_spec(spec, callable_fn))
+        for alias, spec in self._resolved_kit.tools.items():
+            callable_fn = self._resolved_kit.callables[alias]
+            tools.append(LackpyToolWrapper.from_spec(spec, callable_fn, name_override=alias))
         return tools
 
     def as_delegate(
