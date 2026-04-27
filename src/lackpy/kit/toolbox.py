@@ -173,3 +173,22 @@ class Toolbox:
             args_str = ", ".join(a.name for a in spec.args)
             lines.append(f"  {spec.name}({args_str}) -> {spec.returns}: {spec.description}")
         return "\n".join(lines)
+
+
+ARGSPEC_TYPE_MAP: dict[str, type] = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "dict": dict,
+    "list": list,
+    "Any": Any,
+}
+
+
+def resolve_python_type(type_str: str) -> type:
+    """Map an ArgSpec type string to a Python type.
+
+    Returns ``Any`` for unrecognized type strings (e.g. ``"list[str]"``).
+    """
+    return ARGSPEC_TYPE_MAP.get(type_str, Any)
