@@ -74,6 +74,7 @@ nav:
     - Inference Providers: extending/inference-providers.md
     - Policy Sources: extending/policy-sources.md
     - Custom Rules: extending/custom-rules.md
+    - LangChain Integration: extending/langchain.md
   - Reference:
     - Python API: reference/api.md
     - CLI: reference/cli.md
