@@ -15,15 +15,15 @@ else:
     except ImportError:
         import tomli as tomllib  # type: ignore[no-redef]
 
+from lackpy.sandbox.config import SandboxBaseConfig
+
 
 @dataclass
 class LackpyConfig:
     inference_order: list[str] = field(default_factory=lambda: ["templates", "rules"])
     inference_providers: dict[str, dict[str, Any]] = field(default_factory=dict)
     kit_default: str = "debug"
-    sandbox_enabled: bool = False
-    sandbox_timeout: int = 120
-    sandbox_memory_mb: int = 512
+    sandbox: SandboxBaseConfig = field(default_factory=SandboxBaseConfig)
     inference_mode: str | None = None
     tool_providers: dict[str, dict[str, Any]] = field(default_factory=dict)
     config_dir: Path = field(default_factory=lambda: Path(".lackpy"))
@@ -50,9 +50,7 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
         inference_providers=providers,
         inference_mode=inference.get("mode"),
         kit_default=kit.get("default", "debug"),
-        sandbox_enabled=sandbox.get("enabled", False),
-        sandbox_timeout=sandbox.get("timeout_seconds", 120),
-        sandbox_memory_mb=sandbox.get("memory_mb", 512),
+        sandbox=SandboxBaseConfig.from_dict(sandbox),
         tool_providers=tool_providers,
         config_dir=config_dir,
     )

@@ -33,7 +33,7 @@ def test_load_config(config_dir):
     cfg = load_config(config_dir)
     assert cfg.inference_order == ["templates", "rules", "ollama-local"]
     assert cfg.kit_default == "debug"
-    assert cfg.sandbox_enabled is False
+    assert cfg.sandbox.enabled is False
 
 
 def test_load_config_defaults(tmp_path):
