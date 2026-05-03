@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +28,18 @@ class BuiltinProvider:
         if fn is None:
             raise KeyError(f"No builtin implementation for '{tool_spec.name}'")
         return fn
+
+    def get_source(self, tool_spec: ToolSpec) -> str | None:
+        implementations = {
+            "read_file": _builtin_read,
+            "find_files": _builtin_glob,
+            "write_file": _builtin_write,
+            "edit_file": _builtin_edit,
+        }
+        fn = implementations.get(tool_spec.name)
+        if fn is None:
+            return None
+        return inspect.getsource(fn)
 
 
 def _builtin_read(path: str) -> str:
