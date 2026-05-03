@@ -63,6 +63,10 @@ class PolicyResult:
     namespace_desc: str | None = None
     prompt_hints: tuple[str, ...] = ()
     docs: tuple[str, ...] = ()
+    sandbox_constraints: tuple[Any, ...] = ()
+    sandbox_backend_configs: MappingProxyType[str, Any] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     resolved: bool = False
 
     def replace(self, **changes: Any) -> PolicyResult:

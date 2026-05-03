@@ -105,3 +105,36 @@ class TestPolicyResult:
         assert r2.namespace_desc == "tools available"
         assert r2.prompt_hints == ("hint1",)
         assert r2.resolved is True
+
+
+class TestPolicyResultSandboxFields:
+    def test_sandbox_constraints_default_empty(self):
+        from lackpy.policy.types import PolicyResult
+        r = PolicyResult()
+        assert r.sandbox_constraints == ()
+
+    def test_sandbox_backend_configs_default_empty(self):
+        from lackpy.policy.types import PolicyResult
+        from types import MappingProxyType
+        r = PolicyResult()
+        assert isinstance(r.sandbox_backend_configs, MappingProxyType)
+        assert len(r.sandbox_backend_configs) == 0
+
+    def test_replace_sandbox_constraints(self):
+        from lackpy.policy.types import PolicyResult
+        from lackpy.sandbox.constraints import MemoryLimit, TimeLimit
+        r = PolicyResult()
+        r2 = r.replace(sandbox_constraints=(
+            MemoryLimit(amount=256, unit="MB"),
+            TimeLimit(seconds=60),
+        ))
+        assert len(r2.sandbox_constraints) == 2
+        assert r.sandbox_constraints == ()
+
+    def test_replace_sandbox_backend_configs(self):
+        from lackpy.policy.types import PolicyResult
+        from types import MappingProxyType
+        r = PolicyResult()
+        r2 = r.replace(sandbox_backend_configs=MappingProxyType({"nsjail": {"time_limit": 30}}))
+        assert "nsjail" in r2.sandbox_backend_configs
+        assert r.sandbox_backend_configs == MappingProxyType({})
