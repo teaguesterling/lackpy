@@ -22,7 +22,7 @@ from ..base import (
 )
 from .compiler import CONTINUE_SENTINEL, compile_cells
 from .parser import parse
-from .prompt import LITERATE_SYSTEM_PROMPT
+from .prompt import LITERATE_HINT
 from .tools import make_tool_namespace
 
 
@@ -39,7 +39,7 @@ class LiterateInterpreter:
     description = "Literate programming — markdown with embedded lackpy code blocks"
 
     def system_prompt_hint(self) -> str:
-        return LITERATE_SYSTEM_PROMPT
+        return LITERATE_HINT
 
     def validate(
         self,

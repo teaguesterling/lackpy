@@ -4,6 +4,7 @@
 Usage:
     python scripts/literate_agent.py "Analyze the files in src/"
     python scripts/literate_agent.py --model qwen3:8b "List Python files"
+    python scripts/literate_agent.py --persona analyst "Find all TODOs"
     python scripts/literate_agent.py --base-dir /some/path "Read README.md"
 """
 
@@ -11,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -21,8 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter
-from lackpy.interpreters.literate.prompt import LITERATE_SYSTEM_PROMPT
-from lackpy.interpreters.literate.prompts import PROMPTS, DEFAULT_PROMPT
+from lackpy.prompts import DEFAULT_PERSONA, PERSONAS, compose
 
 
 DEFAULT_MODEL = "qwen3:8b"
@@ -32,7 +31,7 @@ OLLAMA_URL = "http://localhost:11434"
 async def call_ollama(
     prompt: str,
     model: str = DEFAULT_MODEL,
-    system: str = LITERATE_SYSTEM_PROMPT,
+    system: str = "",
 ) -> str:
     """Call Ollama and return the response text."""
     async with httpx.AsyncClient(timeout=600.0) as client:
@@ -60,7 +59,7 @@ async def run_literate_agent(
     base_dir: str | None = None,
     max_iterations: int = 3,
     verbose: bool = False,
-    prompt_name: str = DEFAULT_PROMPT,
+    persona: str = DEFAULT_PERSONA,
 ) -> str:
     """Run the literate agent loop.
 
@@ -70,9 +69,13 @@ async def run_literate_agent(
     4. Repeat until no more @continue or max iterations
     """
     interpreter = LiterateInterpreter()
-    system_prompt = PROMPTS[prompt_name]
+    system_prompt = compose(persona, interpreter)
     work_dir = Path(base_dir) if base_dir else Path.cwd()
     context = ExecutionContext(base_dir=work_dir)
+
+    if verbose:
+        print(f"Persona: {persona}", file=sys.stderr)
+        print(f"System prompt: {len(system_prompt)} chars", file=sys.stderr)
 
     full_prompt = (
         f"Task: {user_prompt}\n\n"
@@ -127,9 +130,9 @@ def main():
     parser.add_argument("--base-dir", default=None, help="Working directory")
     parser.add_argument("--max-iterations", type=int, default=3, help="Max gather/continue iterations")
     parser.add_argument(
-        "--persona", default=DEFAULT_PROMPT,
-        choices=list(PROMPTS.keys()),
-        help=f"System prompt persona (default: {DEFAULT_PROMPT})",
+        "--persona", default=DEFAULT_PERSONA,
+        choices=sorted(PERSONAS),
+        help=f"System prompt persona (default: {DEFAULT_PERSONA})",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Show model responses on stderr")
     args = parser.parse_args()
@@ -140,7 +143,7 @@ def main():
         base_dir=args.base_dir,
         max_iterations=args.max_iterations,
         verbose=args.verbose,
-        prompt_name=args.persona,
+        persona=args.persona,
     ))
     print(output)
 
