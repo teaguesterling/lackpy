@@ -26,8 +26,16 @@ The result was: {result}
 
 ## Block Annotations
 
-Add annotations after ```lackpy to control behavior:
+Annotations go ON THE FENCE LINE, after the language tag. Example:
+```lackpy @hidden
+code here
+```
 
+CORRECT:   ```lackpy @hidden
+WRONG:     ```lackpy
+           @hidden
+
+Available annotations:
 - `@hidden` — silent execution (setup, intermediate computation)
 - `@gather` — batch exploration (executes but no visible output)
 - `@continue` — pause point (you'll see gathered results, then write more)
@@ -53,9 +61,9 @@ tests = run_tests("tests/")
 
 After @continue, you receive the results and write the narrative.
 
-## Available Tools
+## Available Tools and Builtins
 
-These functions are available in code blocks:
+Functions available in code blocks:
 - `read_file(path)` — read file contents
 - `write_file(path, content)` — write a file
 - `apply_diff(path, diff_text)` — apply unified diff
@@ -63,6 +71,13 @@ These functions are available in code blocks:
 - `run_command(cmd)` — run a shell command
 - `run_tests(path=".")` — run pytest
 
+Modules available: `re`, `json`, `os` (os.path, os.listdir, os.walk, os.getcwd)
+Builtins: `open()`, `print()`, `len()`, `str()`, `int()`, `float()`, \
+`list()`, `dict()`, `set()`, `tuple()`, `range()`, `enumerate()`, \
+`sorted()`, `reversed()`, `zip()`, `map()`, `filter()`, \
+`sum()`, `min()`, `max()`, `abs()`, `round()`, `type()`, `isinstance()`
+
+Do NOT use `import`. All available modules are pre-loaded.
 Plus any tools from the active kit.
 
 ## Key Rules
@@ -72,5 +87,6 @@ Plus any tools from the active kit.
 3. Use @hidden for setup code the reader doesn't need to see
 4. Use @gather + @continue for exploration before narration
 5. Use @write and @diff to modify files (not raw Python file I/O)
-6. Be concise — the document should read naturally
+6. Do NOT use `import` — modules (re, json, os) are already available
+7. Be concise — the document should read naturally
 """

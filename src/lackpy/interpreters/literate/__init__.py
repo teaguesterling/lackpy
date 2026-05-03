@@ -148,6 +148,7 @@ _INTERNAL_NAMES = frozenset({
     "sum", "min", "max", "abs", "round",
     "isinstance", "type", "hasattr", "getattr",
     "True", "False", "None",
+    "re", "json", "os", "open", "repr",
 })
 
 
@@ -189,7 +190,13 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
         "None": None,
         "locals": locals,
         "dir": dir,
+        "open": open,
+        "repr": repr,
     }
+
+    ns["re"] = __import__("re")
+    ns["json"] = __import__("json")
+    ns["os"] = _make_safe_os_module()
 
     if context.kit:
         for name, fn in context.kit.callables.items():
@@ -199,6 +206,19 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
         ns.update(context.params)
 
     return ns
+
+
+def _make_safe_os_module():
+    """Expose a subset of os that models commonly need."""
+    import os as _os
+    import types
+    safe = types.ModuleType("os")
+    safe.path = _os.path
+    safe.getcwd = _os.getcwd
+    safe.listdir = _os.listdir
+    safe.walk = _os.walk
+    safe.sep = _os.sep
+    return safe
 
 
 def _run_literate_code(compiled_code: object, namespace: dict) -> None:

@@ -34,7 +34,7 @@ async def call_ollama(
     system: str = LITERATE_SYSTEM_PROMPT,
 ) -> str:
     """Call Ollama and return the response text."""
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=600.0) as client:
         response = await client.post(
             f"{OLLAMA_URL}/api/generate",
             json={
