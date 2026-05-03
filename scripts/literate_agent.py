@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter
 from lackpy.interpreters.literate.prompt import LITERATE_SYSTEM_PROMPT
+from lackpy.interpreters.literate.prompts import PROMPTS, DEFAULT_PROMPT
 
 
 DEFAULT_MODEL = "qwen3:8b"
@@ -59,6 +60,7 @@ async def run_literate_agent(
     base_dir: str | None = None,
     max_iterations: int = 3,
     verbose: bool = False,
+    prompt_name: str = DEFAULT_PROMPT,
 ) -> str:
     """Run the literate agent loop.
 
@@ -68,6 +70,7 @@ async def run_literate_agent(
     4. Repeat until no more @continue or max iterations
     """
     interpreter = LiterateInterpreter()
+    system_prompt = PROMPTS[prompt_name]
     work_dir = Path(base_dir) if base_dir else Path.cwd()
     context = ExecutionContext(base_dir=work_dir)
 
@@ -83,7 +86,7 @@ async def run_literate_agent(
             print(f"Iteration {iteration + 1}/{max_iterations}", file=sys.stderr)
             print(f"{'='*60}", file=sys.stderr)
 
-        response = await call_ollama(full_prompt, model=model)
+        response = await call_ollama(full_prompt, model=model, system=system_prompt)
 
         if verbose:
             print(f"\n--- Model Response ---", file=sys.stderr)
@@ -123,6 +126,11 @@ def main():
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Ollama model (default: {DEFAULT_MODEL})")
     parser.add_argument("--base-dir", default=None, help="Working directory")
     parser.add_argument("--max-iterations", type=int, default=3, help="Max gather/continue iterations")
+    parser.add_argument(
+        "--persona", default=DEFAULT_PROMPT,
+        choices=list(PROMPTS.keys()),
+        help=f"System prompt persona (default: {DEFAULT_PROMPT})",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Show model responses on stderr")
     args = parser.parse_args()
 
@@ -132,6 +140,7 @@ def main():
         base_dir=args.base_dir,
         max_iterations=args.max_iterations,
         verbose=args.verbose,
+        prompt_name=args.persona,
     ))
     print(output)
 
