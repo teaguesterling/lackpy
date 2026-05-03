@@ -71,14 +71,12 @@ Functions available in code blocks:
 - `run_command(cmd)` — run a shell command
 - `run_tests(path=".")` — run pytest
 
-Modules available: `re`, `json`, `os` (os.path, os.listdir, os.walk, os.getcwd)
-Builtins: `open()`, `print()`, `len()`, `str()`, `int()`, `float()`, \
-`list()`, `dict()`, `set()`, `tuple()`, `range()`, `enumerate()`, \
-`sorted()`, `reversed()`, `zip()`, `map()`, `filter()`, \
-`sum()`, `min()`, `max()`, `abs()`, `round()`, `type()`, `isinstance()`
+All Python builtins are available: `open()`, `print()`, `len()`, `type()`, \
+`isinstance()`, `sorted()`, `enumerate()`, `range()`, `zip()`, `map()`, \
+`filter()`, `sum()`, `min()`, `max()`, `abs()`, `round()`, etc.
 
-Do NOT use `import`. All available modules are pre-loaded.
-Plus any tools from the active kit.
+Standard library modules can be imported normally (`import re`, `import json`, \
+`import os`, `import math`, etc.). Plus any tools from the active kit.
 
 ## Key Rules
 
@@ -87,6 +85,6 @@ Plus any tools from the active kit.
 3. Use @hidden for setup code the reader doesn't need to see
 4. Use @gather + @continue for exploration before narration
 5. Use @write and @diff to modify files (not raw Python file I/O)
-6. Do NOT use `import` — modules (re, json, os) are already available
+6. Standard library imports are allowed (`import re`, `import json`, etc.)
 7. Be concise — the document should read naturally
 """

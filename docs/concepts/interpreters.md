@@ -174,6 +174,41 @@ cls = get_interpreter("my-interp")  # → MyInterpreter
 instance = cls()
 ```
 
+### `literate` — markdown with embedded code blocks
+
+Executes a markdown document with `` ```lackpy `` fenced code blocks as a
+single Python program. Prose becomes `print()` calls with `{expr}` f-string
+interpolation, code blocks execute inline, and the captured stdout is the
+rendered document. Block annotations (`@hidden`, `@gather`, `@continue`,
+`@read`, `@write`, `@diff`, `@scratch`) control visibility, file I/O, and the
+gather-then-narrate agent pattern.
+
+```python
+from lackpy.interpreters import LiterateInterpreter, ExecutionContext, run_interpreter
+
+interp = LiterateInterpreter()
+ctx = ExecutionContext(base_dir="/path/to/project")
+
+doc = '''
+# Summary
+
+```lackpy @hidden
+lines = read_file("README.md").splitlines()
+```
+
+The file has {len(lines)} lines.
+'''
+
+result = await run_interpreter(interp, doc, ctx)
+print(result.output)        # "# Summary\nThe file has 42 lines.\n"
+print(result.output_format) # "markdown"
+```
+
+The literate interpreter is the complement of MCP prompts: prompts shape the
+request, literate documents shape the response. See [Literate
+Interpreter](literate.md) for the full architecture and document format
+reference.
+
 ## Output formats
 
 The `output_format` field on `InterpreterExecutionResult` identifies the shape
@@ -182,7 +217,7 @@ of the result so consumers can dispatch accordingly. Known values:
 | Format     | Produced by         | Shape                                 |
 |------------|---------------------|---------------------------------------|
 | `python`   | `python`, `plucker` | Arbitrary Python value                |
-| `markdown` | `ast-select`, `pss` | Markdown string                       |
+| `markdown` | `ast-select`, `pss`, `literate` | Markdown string               |
 | `text`     | any                 | Plain text string                     |
 | `json`     | any                 | JSON-serializable structure           |
 | `none`     | any                 | Failed execution or explicit no-op    |
