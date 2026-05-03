@@ -42,6 +42,7 @@ from .python import PythonInterpreter
 from .ast_select import AstSelectInterpreter
 from .pss import PssInterpreter
 from .plucker import PluckerInterpreter
+from .literate import LiterateInterpreter
 
 # Register the bundled interpreters at import time. Other interpreters
 # (e.g. claude-code) register themselves when their modules are imported.
@@ -49,6 +50,7 @@ register_interpreter(PythonInterpreter)
 register_interpreter(AstSelectInterpreter)
 register_interpreter(PssInterpreter)
 register_interpreter(PluckerInterpreter)
+register_interpreter(LiterateInterpreter)
 
 __all__ = [
     "ExecutionContext",
@@ -64,4 +66,5 @@ __all__ = [
     "AstSelectInterpreter",
     "PssInterpreter",
     "PluckerInterpreter",
+    "LiterateInterpreter",
 ]
