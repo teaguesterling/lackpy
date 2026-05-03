@@ -158,45 +158,8 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
 
     ns.update(make_tool_namespace(context.base_dir))
 
-    ns["__builtins__"] = {
-        "print": print,
-        "len": len,
-        "str": str,
-        "int": int,
-        "float": float,
-        "bool": bool,
-        "list": list,
-        "dict": dict,
-        "set": set,
-        "tuple": tuple,
-        "range": range,
-        "enumerate": enumerate,
-        "sorted": sorted,
-        "reversed": reversed,
-        "zip": zip,
-        "map": map,
-        "filter": filter,
-        "sum": sum,
-        "min": min,
-        "max": max,
-        "abs": abs,
-        "round": round,
-        "isinstance": isinstance,
-        "type": type,
-        "hasattr": hasattr,
-        "getattr": getattr,
-        "True": True,
-        "False": False,
-        "None": None,
-        "locals": locals,
-        "dir": dir,
-        "open": open,
-        "repr": repr,
-    }
-
-    ns["re"] = __import__("re")
-    ns["json"] = __import__("json")
-    ns["os"] = _make_safe_os_module()
+    import builtins as _builtins_mod
+    ns["__builtins__"] = _builtins_mod
 
     if context.kit:
         for name, fn in context.kit.callables.items():

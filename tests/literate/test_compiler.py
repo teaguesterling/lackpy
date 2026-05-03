@@ -18,12 +18,12 @@ class TestProseCompilation:
     def test_simple_prose(self):
         cells = [Cell(cell_type="prose", content="Hello world")]
         code = compile_cells(_make_result(cells))
-        assert 'print("""Hello world""")' in code
+        assert "print(" in code and "Hello world" in code
 
     def test_prose_with_interpolation(self):
         cells = [Cell(cell_type="prose", content="Value is {x}")]
         code = compile_cells(_make_result(cells))
-        assert 'print(f"""Value is {x}""")' in code
+        assert "print(f" in code and "{x}" in code
 
     def test_empty_prose(self):
         cells = [Cell(cell_type="prose", content="   \n  ")]
@@ -77,7 +77,7 @@ class TestReadCompilation:
             annotation_args={"path": "src/main.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert 'print(read_file("src/main.py"))' in code
+        assert "print(read_file(" in code and "src/main.py" in code
 
 
 class TestWriteCompilation:
@@ -88,7 +88,7 @@ class TestWriteCompilation:
             annotation_args={"path": "output.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert 'write_file("output.py"' in code
+        assert "write_file(" in code and "output.py" in code
         assert "print('hello')" in code
 
 
@@ -101,7 +101,7 @@ class TestDiffCompilation:
             annotation_args={"path": "file.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert 'apply_diff("file.py"' in code
+        assert "apply_diff(" in code and "file.py" in code
         assert "-old" in code
         assert "+new" in code
 

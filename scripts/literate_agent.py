@@ -44,7 +44,7 @@ async def call_ollama(
                 "stream": False,
                 "options": {
                     "temperature": 0.7,
-                    "num_predict": 4096,
+                    "num_predict": 8192,
                 },
             },
         )

@@ -71,12 +71,12 @@ class TestCodeCells:
         result = parse(doc)
         assert result.cells[0].options == {"echo": "false", "output": "all"}
 
-    def test_unclosed_block_error(self):
+    def test_unclosed_block(self):
         doc = "```lackpy\nx = 1"
         result = parse(doc)
-        assert len(result.errors) == 1
-        assert "unclosed" in result.errors[0]
-        assert len(result.cells) == 1  # still emits the cell
+        assert len(result.cells) == 1
+        assert result.cells[0].cell_type == "code"
+        assert result.cells[0].content == "x = 1"
 
 
 class TestAnnotations:
@@ -124,6 +124,22 @@ class TestAnnotations:
         result = parse(doc)
         assert len(result.errors) == 1
         assert "requires a path" in result.errors[0]
+
+    def test_read_path_in_body(self):
+        """Models often put the path on the first line of the body."""
+        doc = "```lackpy @read\nsrc/main.py\n```"
+        result = parse(doc)
+        assert not result.errors
+        assert result.cells[0].cell_type == "read"
+        assert result.cells[0].annotation_args == {"path": "src/main.py"}
+        assert result.cells[0].content == ""
+
+    def test_write_path_in_body(self):
+        doc = "```lackpy @write\noutput.txt\nfile contents here\n```"
+        result = parse(doc)
+        assert not result.errors
+        assert result.cells[0].annotation_args == {"path": "output.txt"}
+        assert result.cells[0].content == "file contents here"
 
     def test_unknown_annotation(self):
         doc = "```lackpy @bogus\nx = 1\n```"

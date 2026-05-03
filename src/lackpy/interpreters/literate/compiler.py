@@ -4,11 +4,11 @@ Each cell type has its own compilation rule:
 - prose → print(f"...") with {expr} interpolation
 - code → pass through
 - @hidden → pass through (no print wrapping)
-- @gather → pass through + set gather flag
+- @gather → pass through
 - @continue → emit sentinel that executor recognizes as pause point
-- @read(path) → print(read_file("path"))
-- @write(path) → write_file("path", '''content''')
-- @diff(path) → apply_diff("path", '''diff_text''')
+- @read(path) → print(read_file(path))
+- @write(path) → write_file(path, content)
+- @diff(path) → apply_diff(path, diff_text)
 - @scratch → capture new variables, emit summary
 """
 
@@ -24,20 +24,15 @@ CONTINUE_SENTINEL = "__literate_continue__()"
 _INTERPOLATION = re.compile(r"\{([^}]+)\}")
 
 
-def _escape_triple_quotes(text: str) -> str:
-    return text.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
-
-
 def _compile_prose(cell: Cell) -> str:
     content = cell.content
     if not content.strip():
         return "print()"
 
     has_interpolation = _INTERPOLATION.search(content)
-    escaped = _escape_triple_quotes(content)
     if has_interpolation:
-        return f'print(f"""{escaped}""")'
-    return f'print("""{escaped}""")'
+        return f"print(f{repr(content)})"
+    return f"print({repr(content)})"
 
 
 def _compile_code(cell: Cell) -> str:
@@ -58,19 +53,17 @@ def _compile_continue(cell: Cell) -> str:
 
 def _compile_read(cell: Cell) -> str:
     path = cell.annotation_args.get("path", "")
-    return f'print(read_file("{path}"))'
+    return f"print(read_file({repr(path)}))"
 
 
 def _compile_write(cell: Cell) -> str:
     path = cell.annotation_args.get("path", "")
-    escaped = _escape_triple_quotes(cell.content)
-    return f'write_file("{path}", """{escaped}""")'
+    return f"write_file({repr(path)}, {repr(cell.content)})"
 
 
 def _compile_diff(cell: Cell) -> str:
     path = cell.annotation_args.get("path", "")
-    escaped = _escape_triple_quotes(cell.content)
-    return f'apply_diff("{path}", """{escaped}""")'
+    return f"apply_diff({repr(path)}, {repr(cell.content)})"
 
 
 def _compile_scratch(cell: Cell) -> str:
