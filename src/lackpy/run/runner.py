@@ -6,7 +6,7 @@ import ast
 import builtins as _builtins_mod
 from typing import Any, Callable
 
-from ..lang.grammar import ALLOWED_BUILTINS
+from ..lang.grammar import ALLOWED_BUILTINS, ALLOWED_STDLIB
 from .base import ExecutionResult
 from .trace import Trace, make_traced
 
@@ -54,6 +54,10 @@ class RestrictedRunner:
                 traced_ns[name] = _sort_by
             else:
                 traced_ns[name] = getattr(_builtins_mod, name)
+
+        import importlib as _importlib
+        for name in ALLOWED_STDLIB:
+            traced_ns[name] = _importlib.import_module(name)
 
         if params:
             for name, value in params.items():

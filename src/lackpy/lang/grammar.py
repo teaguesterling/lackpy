@@ -6,10 +6,11 @@ ALLOWED_NODES: set[type] = {
     # Structural
     ast.Module, ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign,
     ast.For, ast.If, ast.With, ast.withitem,
+    ast.Break, ast.Continue, ast.Pass,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
     ast.List, ast.Dict, ast.Tuple, ast.Set,
-    ast.ListComp, ast.DictComp, ast.SetComp,
+    ast.ListComp, ast.DictComp, ast.SetComp, ast.GeneratorExp,
     ast.Compare, ast.BoolOp, ast.UnaryOp, ast.BinOp,
     ast.JoinedStr, ast.FormattedValue,
     ast.Constant, ast.Starred, ast.Slice,
@@ -51,16 +52,30 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "breakpoint", "exit", "quit",
     "type", "super", "classmethod", "staticmethod", "property",
     "memoryview", "bytearray", "bytes",
-    "map", "filter", "reduce",
+    "reduce",
     "input",
     # stdlib modules that models reach for instead of using kit tools (issue #4)
     "os", "sys", "pathlib", "subprocess", "shutil",
 })
 
 ALLOWED_BUILTINS: frozenset[str] = frozenset({
+    # Built-in functions
     "len", "sorted", "reversed", "enumerate", "zip", "range",
     "min", "max", "sum", "any", "all", "abs", "round",
     "str", "int", "float", "bool", "list", "dict", "set", "tuple",
-    "isinstance", "print",
+    "isinstance", "print", "repr", "hash", "id", "callable",
+    "map", "filter", "frozenset",
+    "ord", "chr", "hex", "oct", "bin",
+    "format", "ascii",
+    "ValueError", "TypeError", "KeyError", "IndexError", "RuntimeError",
+    "AttributeError", "StopIteration", "Exception",
     "sort_by",
+})
+
+ALLOWED_STDLIB: frozenset[str] = frozenset({
+    "re", "json", "math", "statistics", "collections",
+    "itertools", "functools", "operator", "string",
+    "copy", "textwrap", "difflib", "datetime",
+    "dataclasses", "enum", "typing",
+    "base64", "hashlib", "hmac",
 })

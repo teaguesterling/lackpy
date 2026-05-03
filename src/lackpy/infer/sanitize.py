@@ -31,4 +31,10 @@ def sanitize_output(raw: str) -> str:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         text = "\n".join(lines).strip()
+    # Dedent a trailing bare expression that the model accidentally indented.
+    # Common with qwen3.5 models that echo the few-shot formatting.
+    lines = text.split("\n")
+    if len(lines) >= 2 and lines[-1] != lines[-1].lstrip() and not lines[-2].rstrip().endswith(":"):
+        lines[-1] = lines[-1].lstrip()
+        text = "\n".join(lines)
     return text

@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
-from .grammar import ALLOWED_NODES, FORBIDDEN_NAMES, ALLOWED_BUILTINS
+from .grammar import ALLOWED_NODES, FORBIDDEN_NAMES, ALLOWED_BUILTINS, ALLOWED_STDLIB
 
 
 @dataclass
@@ -49,7 +49,7 @@ def validate(
     if allowed_names is None:
         allowed_names = set()
 
-    all_allowed_calls = ALLOWED_BUILTINS | allowed_names
+    all_allowed_calls = ALLOWED_BUILTINS | ALLOWED_STDLIB | allowed_names
     errors: list[str] = []
     calls: list[str] = []
     variables: list[str] = []

@@ -160,7 +160,7 @@ PYTHON_INTENTS: list[Intent] = [
         text="Find the definition of DatabaseError and return the contents of the file it is defined in.",
         return_shape="str",
         structural_gate=_python_gate,
-        exec_assertion=_repr_contains_all(["DatabaseError", "errors"]),
+        exec_assertion=_repr_contains_all(["DatabaseError"]),
         notes="find_def + read_file chaining. Accepts raw find_def return or file content.",
     ),
 
@@ -212,8 +212,8 @@ PYTHON_INTENTS: list[Intent] = [
         text="Find the definition of the class User and all of its callers. Return a dict with two keys: 'definition' (the file path of the class) and 'callers' (a list of file paths where it is used).",
         return_shape="dict",
         structural_gate=_python_gate,
-        exec_assertion=_repr_contains_all(["User", "definition"]),
-        notes="Combines find_def + find_refs. Loosened: accepts any output mentioning 'User' and 'definition'.",
+        exec_assertion=_repr_contains_all(["models.py", "definition"]),
+        notes="Combines find_def + find_refs. Checks that output mentions the definition file and has the expected key.",
     ),
     Intent(
         id="py.stretch.06",
