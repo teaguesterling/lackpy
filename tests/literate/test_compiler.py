@@ -35,6 +35,32 @@ class TestProseCompilation:
         code = compile_cells(_make_result(cells))
         assert "print(" in code
 
+    def test_prose_with_json_braces_not_interpolated(self):
+        cells = [Cell(cell_type="prose", content='Config: {"key": "value"}')]
+        code = compile_cells(_make_result(cells))
+        assert "print(f" not in code
+        assert "print(" in code
+
+    def test_prose_with_dict_comprehension_not_interpolated(self):
+        cells = [Cell(cell_type="prose", content="Example: {x: y for x in z}")]
+        code = compile_cells(_make_result(cells))
+        assert "print(f" not in code
+
+    def test_prose_with_attribute_interpolation(self):
+        cells = [Cell(cell_type="prose", content="Type: {obj.name}")]
+        code = compile_cells(_make_result(cells))
+        assert "print(f" in code
+
+    def test_prose_with_function_call_interpolation(self):
+        cells = [Cell(cell_type="prose", content="Count: {len(items)}")]
+        code = compile_cells(_make_result(cells))
+        assert "print(f" in code
+
+    def test_prose_with_subscript_interpolation(self):
+        cells = [Cell(cell_type="prose", content="First: {items[0]}")]
+        code = compile_cells(_make_result(cells))
+        assert "print(f" in code
+
 
 class TestCodeCompilation:
     def test_code_passthrough(self):

@@ -142,13 +142,6 @@ _INTERNAL_NAMES = frozenset({
     "read_file", "write_file", "apply_diff",
     "search_content", "run_command", "run_tests",
     "__literate_continue__", "__builtins__",
-    "print", "len", "str", "int", "float", "bool",
-    "list", "dict", "set", "tuple", "range", "enumerate",
-    "sorted", "reversed", "zip", "map", "filter",
-    "sum", "min", "max", "abs", "round",
-    "isinstance", "type", "hasattr", "getattr",
-    "True", "False", "None",
-    "re", "json", "os", "open", "repr",
 })
 
 
@@ -169,19 +162,6 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
         ns.update(context.params)
 
     return ns
-
-
-def _make_safe_os_module():
-    """Expose a subset of os that models commonly need."""
-    import os as _os
-    import types
-    safe = types.ModuleType("os")
-    safe.path = _os.path
-    safe.getcwd = _os.getcwd
-    safe.listdir = _os.listdir
-    safe.walk = _os.walk
-    safe.sep = _os.sep
-    return safe
 
 
 def _run_literate_code(compiled_code: object, namespace: dict) -> None:

@@ -15,13 +15,14 @@ Each cell type has its own compilation rule:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from textwrap import indent
 
 from .parser import Cell, ParseResult
 
 CONTINUE_SENTINEL = "__literate_continue__()"
 
-_INTERPOLATION = re.compile(r"\{([^}]+)\}")
+_INTERPOLATION = re.compile(r"\{([A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?(?:\[[^\]]*\])?)\}")
 
 
 def _compile_prose(cell: Cell) -> str:
@@ -82,7 +83,7 @@ def _compile_scratch(cell: Cell) -> str:
     )
 
 
-_COMPILERS: dict[str, callable] = {
+_COMPILERS: dict[str, Callable[[Cell], str]] = {
     "prose": _compile_prose,
     "code": _compile_code,
     "hidden": _compile_hidden,

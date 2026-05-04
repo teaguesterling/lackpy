@@ -43,60 +43,66 @@ def apply_diff(path: str, diff_text: str) -> str:
 
 
 def _apply_unified_diff(original: list[str], diff_text: str) -> list[str]:
-    """Parse and apply a unified diff to a list of lines."""
+    """Apply a unified diff to a list of lines.
+
+    Processes each hunk sequentially: walks the old-file cursor through
+    context and removal lines, inserting additions at the correct position.
+    """
     result = list(original)
     offset = 0
 
-    for hunk_start, hunk_old_start, hunk_old_count, removals, additions in _parse_hunks(diff_text):
-        pos = hunk_old_start - 1 + offset
+    for old_start, hunk_lines in _parse_hunks(diff_text):
+        pos = old_start - 1 + offset
+        cursor = pos
+        added = 0
+        removed = 0
 
-        for line_offset in sorted(removals, reverse=True):
-            idx = pos + line_offset
-            if 0 <= idx < len(result):
-                result.pop(idx)
+        for op, text in hunk_lines:
+            if op == " ":
+                cursor += 1
+            elif op == "-":
+                if 0 <= cursor < len(result):
+                    result.pop(cursor)
+                removed += 1
+            elif op == "+":
+                result.insert(cursor, text + "\n")
+                cursor += 1
+                added += 1
 
-        insert_pos = pos + (min(removals) if removals else 0)
-        for i, line in enumerate(additions):
-            result.insert(insert_pos + i, line)
-
-        offset += len(additions) - len(removals)
+        offset += added - removed
 
     return result
 
 
 def _parse_hunks(diff_text: str):
-    """Yield (hunk_index, old_start, old_count, removal_offsets, addition_lines) from unified diff."""
+    """Yield (old_start, hunk_lines) from unified diff.
+
+    hunk_lines is a list of (op, text) tuples where op is ' ', '-', or '+'.
+    """
     lines = diff_text.splitlines()
-    hunk_idx = 0
     i = 0
     while i < len(lines):
         line = lines[i]
         if line.startswith("@@"):
             parts = line.split()
-            old_range = parts[1]  # -start,count
+            old_range = parts[1]
             old_start = int(old_range.split(",")[0].lstrip("-"))
-            old_count_str = old_range.split(",")[1] if "," in old_range else "1"
-            old_count = int(old_count_str)
 
-            removals: list[int] = []
-            additions: list[str] = []
-            context_offset = 0
+            hunk_lines: list[tuple[str, str]] = []
             i += 1
             while i < len(lines) and not lines[i].startswith("@@"):
                 dl = lines[i]
                 if dl.startswith("-"):
-                    removals.append(context_offset)
-                    context_offset += 1
+                    hunk_lines.append(("-", dl[1:]))
                 elif dl.startswith("+"):
-                    additions.append(dl[1:] + "\n")
+                    hunk_lines.append(("+", dl[1:]))
                 elif dl.startswith(" "):
-                    context_offset += 1
+                    hunk_lines.append((" ", dl[1:]))
                 else:
                     break
                 i += 1
 
-            yield (hunk_idx, old_start, old_count, removals, additions)
-            hunk_idx += 1
+            yield (old_start, hunk_lines)
         else:
             i += 1
 
@@ -114,7 +120,10 @@ def search_content(pattern: str, path: str = ".") -> str:
 
 
 def run_command(cmd: str) -> str:
-    """Run a shell command and return combined stdout+stderr."""
+    """Run a shell command and return combined stdout+stderr.
+
+    Intentionally uses shell=True — nsjail provides the security boundary.
+    """
     try:
         result = subprocess.run(
             cmd, shell=True,  # noqa: S602
@@ -141,12 +150,12 @@ def run_tests(path: str = ".") -> str:
 
 
 def make_tool_namespace(base_dir: str | Path | None = None) -> dict:
-    """Create a namespace dict with all literate tools, rooted at base_dir."""
-    prev = os.getcwd()
-    if base_dir:
-        os.chdir(base_dir)
+    """Create a namespace dict with all literate tools.
 
-    ns = {
+    The tools use relative paths resolved against cwd at call time.
+    The interpreter's execute() method handles chdir to base_dir.
+    """
+    return {
         "read_file": read_file,
         "write_file": write_file,
         "apply_diff": apply_diff,
@@ -154,8 +163,3 @@ def make_tool_namespace(base_dir: str | Path | None = None) -> dict:
         "run_command": run_command,
         "run_tests": run_tests,
     }
-
-    if base_dir:
-        os.chdir(prev)
-
-    return ns

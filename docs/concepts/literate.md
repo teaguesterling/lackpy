@@ -77,6 +77,13 @@ All fields are optional. Defaults: `echo=true`, `output=auto`,
 `interpreter=python`. Frontmatter is stripped before markdown parsing
 since `---` is `<hr>` in CommonMark.
 
+!!! note "Phase 0 limitation"
+
+    Frontmatter fields and per-block options (`echo=false`, `output=all`)
+    are parsed and stored but do not yet alter compilation or execution
+    behavior. All blocks compile and execute unconditionally. Honoring
+    these options is planned for Phase 1.
+
 ### Prose
 
 Everything outside fenced code blocks is a prose cell. Prose compiles to
@@ -275,8 +282,15 @@ Implements the standard `Interpreter` protocol:
 
 - **`validate(program, context)`** — parses the document and reports
   errors without executing
-- **`execute(program, context)`** — parses, compiles, executes with
+- **`execute(program, context)`** — parses, compiles, runs with
   `redirect_stdout`, returns the captured output as markdown
+
+The original design spec proposed delegating to `PythonInterpreter` for
+the run step. The implementation uses direct Python execution with full
+builtins instead, because the literate interpreter needs an unrestricted
+Python environment (file I/O, imports, shell access) that the restricted
+Python interpreter intentionally prohibits. Security is enforced at the
+sandbox level (nsjail), not by Python-level AST restrictions.
 
 The execution result includes metadata: `continue_requested` (whether
 `@continue` was hit), `variables` (namespace after execution),

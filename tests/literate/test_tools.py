@@ -71,7 +71,7 @@ class TestApplyDiff:
         with pytest.raises(FileNotFoundError):
             apply_diff("nonexistent.py", diff)
 
-    def test_addition(self, tmp_workspace):
+    def test_addition_after_context(self, tmp_workspace):
         diff = """\
 --- a/src/main.py
 +++ b/src/main.py
@@ -82,6 +82,42 @@ class TestApplyDiff:
         result = apply_diff("src/main.py", diff)
         assert "return 0" in result
         assert "print('hi')" in result
+
+    def test_insertion_between_context_lines(self, tmp_workspace):
+        (tmp_workspace / "abc.txt").write_text("a\nb\nc\n")
+        diff = """\
+--- a/abc.txt
++++ b/abc.txt
+@@ -1,3 +1,5 @@
+ a
++inserted1
++inserted2
+ b
+ c"""
+        result = apply_diff("abc.txt", diff)
+        lines = result.strip().splitlines()
+        assert lines == ["a", "inserted1", "inserted2", "b", "c"]
+
+    def test_multi_hunk_diff(self, tmp_workspace):
+        (tmp_workspace / "multi.txt").write_text("line1\nline2\nline3\nline4\nline5\n")
+        diff = """\
+--- a/multi.txt
++++ b/multi.txt
+@@ -1,2 +1,2 @@
+-line1
++LINE1
+ line2
+@@ -4,2 +4,2 @@
+-line4
++LINE4
+ line5"""
+        result = apply_diff("multi.txt", diff)
+        lines = result.strip().splitlines()
+        assert lines[0] == "LINE1"
+        assert lines[1] == "line2"
+        assert lines[2] == "line3"
+        assert lines[3] == "LINE4"
+        assert lines[4] == "line5"
 
 
 class TestSearchContent:
