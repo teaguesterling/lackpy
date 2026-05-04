@@ -22,7 +22,7 @@ from .parser import Cell, ParseResult
 
 CONTINUE_SENTINEL = "__literate_continue__()"
 
-_INTERPOLATION = re.compile(r"\{([A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?(?:\[[^\]]*\])?)\}")
+_INTERPOLATION = re.compile(r"\{[A-Za-z_][^}]*\}")
 
 
 def _compile_prose(cell: Cell) -> str:
