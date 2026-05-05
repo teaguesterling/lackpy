@@ -3,6 +3,7 @@
 from .interface import CellResult, KernelInterface
 from .lightweight import LightweightKernel
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
+from .recovery import NoRecoveryHandler, RecoveryAction, RecoveryContext, RecoveryHandler
 from .streaming_parser import StreamingCellParser
 
 __all__ = [
@@ -10,7 +11,11 @@ __all__ = [
     "ExecutionPlugin",
     "KernelInterface",
     "LightweightKernel",
+    "NoRecoveryHandler",
     "PluginAdvice",
+    "RecoveryAction",
+    "RecoveryContext",
+    "RecoveryHandler",
     "StreamingCellParser",
     "merge_advice",
 ]
