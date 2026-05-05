@@ -2,5 +2,6 @@
 
 from .interface import CellResult, KernelInterface
 from .lightweight import LightweightKernel
+from .streaming_parser import StreamingCellParser
 
-__all__ = ["CellResult", "KernelInterface", "LightweightKernel"]
+__all__ = ["CellResult", "KernelInterface", "LightweightKernel", "StreamingCellParser"]
