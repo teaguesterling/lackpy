@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..parser import Cell
-from .interface import CellResult
-from .lightweight import LightweightKernel
+from .interface import CellResult, KernelInterface
 from .plugins import PluginAdvice, merge_advice
 from .recovery import NoRecoveryHandler, RecoveryAction, RecoveryContext, RecoveryHandler
 from .streaming_parser import StreamingCellParser
@@ -26,7 +25,7 @@ class CellExecutionEvent:
 class StreamingDriver:
     def __init__(
         self,
-        kernel: LightweightKernel,
+        kernel: KernelInterface,
         recovery: RecoveryHandler | None = None,
         plugins: list[Any] | None = None,
     ) -> None:

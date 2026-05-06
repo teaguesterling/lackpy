@@ -54,3 +54,9 @@ class TestNameResolution:
 
     def test_function_def_defines_name(self):
         check_cell("def helper():\n    return 42\nhelper()", known_names=set())
+
+    def test_walrus_operator_defines_name(self):
+        check_cell("if (n := len(items)) > 0:\n    print(n)", known_names={"items", "print"})
+
+    def test_except_handler_defines_name(self):
+        check_cell("try:\n    x = 1\nexcept ValueError as e:\n    print(e)", known_names={"print"})

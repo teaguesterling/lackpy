@@ -60,6 +60,10 @@ def _collect_definitions(tree: ast.Module) -> set[str]:
             for item in node.items:
                 if item.optional_vars:
                     defined.update(_names_from_target(item.optional_vars))
+        elif isinstance(node, ast.NamedExpr):
+            defined.add(node.target.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            defined.add(node.name)
         elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
             for gen in node.generators:
                 defined.update(_names_from_target(gen.target))
