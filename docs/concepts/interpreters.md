@@ -176,12 +176,18 @@ instance = cls()
 
 ### `literate` — markdown with embedded code blocks
 
-Executes a markdown document with `` ```lackpy `` fenced code blocks as a
-single Python program. Prose becomes `print()` calls with `{expr}` f-string
-interpolation, code blocks execute inline, and the captured stdout is the
-rendered document. Block annotations (`@hidden`, `@gather`, `@continue`,
-`@read`, `@write`, `@diff`, `@scratch`) control visibility, file I/O, and the
-gather-then-narrate agent pattern.
+Executes a markdown document with `` ```lackpy `` fenced code blocks
+incrementally, cell by cell, through a persistent kernel. Prose becomes
+`print()` calls with `{expr}` f-string interpolation, code blocks execute
+inline, and the captured stdout is the rendered document. Each cell undergoes
+static analysis (compile check + name resolution) before execution. Block
+annotations (`@hidden`, `@gather`, `@continue`, `@read`, `@write`, `@diff`,
+`@scratch`) control visibility, file I/O, and the gather-then-narrate agent
+pattern.
+
+The kernel supports streaming execution (cells execute as model output
+arrives), pluggable recovery when cells fail, and a plugin API for coaching
+systems. The execution log can be serialized to `.ipynb` or clean markdown.
 
 ```python
 from lackpy.interpreters import LiterateInterpreter, ExecutionContext, run_interpreter

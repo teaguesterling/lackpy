@@ -5,20 +5,37 @@ The literate interpreter executes markdown documents with embedded
 inline, and the captured stdout IS the rendered document. It replaces
 N tool round-trips with a single document submission — the model writes
 a complete response as a literate program, and the interpreter produces
-the final rendered output in one pass.
+the final rendered output.
 
 This is the complement of MCP prompts: prompts shape the *request*,
 literate documents shape the *response*.
 
 ```
-   ┌─────────────┐     ┌────────┐     ┌──────────┐     ┌─────────┐
-   │  markdown    │────▶│ parser │────▶│ compiler │────▶│ execute │
-   │  document    │     │        │     │          │     │         │
-   └─────────────┘     └────────┘     └──────────┘     └─────────┘
-                            │              │                 │
-                      Cell sequence   Python source     stdout = rendered
-                                                        document
+  Model stream ──→ StreamingCellParser ──→ Cell objects
+                                                │
+                                                ▼
+                            ┌──────── StreamingDriver ────────┐
+                            │                                  │
+                            │  for each cell:                  │
+                            │    static analysis (compile+AST) │
+                            │    kernel.execute_cell(cell)     │
+                            │      ├─ success → output + state │
+                            │      └─ failure → recovery loop  │
+                            │                                  │
+                            └──────────────────────────────────┘
+                                                │
+                                                ▼
+                                        ExecutionLog
+                                       ╱            ╲
+                              to_notebook()    render_markdown()
+                                   ↓                   ↓
+                                .ipynb            clean markdown
 ```
+
+Cells execute one at a time through a persistent kernel. Variables
+defined in any cell are available to all later cells and to prose
+interpolation. On failure, a pluggable recovery handler can fix, inspect,
+skip, or abort — optionally calling a model to produce replacement cells.
 
 ## Quick example
 
@@ -55,8 +72,7 @@ The title is: README.md — a toolkit for safe code execution
 ```
 
 Prose passes through with `{expr}` interpolation expanded. Code blocks
-execute silently unless they produce print output. The entire document
-compiles to one Python program — variables defined in any block are
+execute silently unless they produce print output. Variables defined in any block are
 available to all later blocks and to prose interpolation.
 
 ## Document format
@@ -191,9 +207,22 @@ b = another_thing()
 Produces: `[scratch: a=int, b=str]` — a summary of what was defined,
 not the full values.
 
-## Compilation model
+## Execution model
 
-The compiler transforms each cell type into Python:
+Cells execute one at a time through a **kernel** — a persistent
+namespace that accumulates state across cells. Each cell goes through
+two phases:
+
+1. **Static analysis** — compile the cell's Python and walk the AST to
+   check that all referenced names exist in the current scope or builtins.
+   Catches syntax errors and undefined references before execution.
+
+2. **Execution** — run the compiled Python in the kernel's namespace,
+   capturing stdout. Variables defined by the cell become available to
+   all later cells.
+
+The compiler transforms each cell type into Python before the kernel
+executes it:
 
 | Cell type | Python output |
 |---|---|
@@ -203,7 +232,7 @@ The compiler transforms each cell type into Python:
 | Code | pass through |
 | @hidden | pass through |
 | @gather | pass through |
-| @continue | `__literate_continue__()` |
+| @continue | continue sentinel |
 | @read(path) | `print(read_file('path'))` |
 | @write(path) | `write_file('path', 'content')` |
 | @diff(path) | `apply_diff('path', 'diff_text')` |
@@ -212,9 +241,52 @@ The compiler transforms each cell type into Python:
 String literals use `repr()` for escaping, which eliminates edge cases
 with quotes and special characters in file content.
 
-All cells concatenate into a single Python program that executes in one
-pass. Variables flow through — anything defined in an earlier block is
-available to all later blocks and to prose interpolation.
+### Streaming execution
+
+The `StreamingCellParser` detects fence boundaries in partial model
+output, yielding Cell objects as they complete. This means cells can
+execute as the model generates them — the parser watches for
+`` ```lackpy `` open fences and `` ``` `` close fences in the text stream,
+yielding each cell as soon as its closing fence arrives.
+
+### Recovery
+
+When a cell fails, the `StreamingDriver` invokes a pluggable
+`RecoveryHandler`:
+
+- **`NoRecoveryHandler`** — aborts immediately. Used for batch execution
+  and tests.
+- **`InferenceRecoveryHandler`** — formats the error, scope, and any
+  plugin advice into a prompt, calls a model, and parses the response
+  as replacement cells. The model can return `@scratch` to inspect a
+  value before fixing.
+
+The recovery flow:
+
+1. Cell fails → driver builds `RecoveryContext` (error, scope, plugin advice)
+2. Handler returns an action: `fix`, `inspect`, `skip`, or `abort`
+3. `fix` — execute replacement cells. If they fail, increment attempt, loop.
+4. `inspect` — evaluate an expression via `kernel.inspect()`, feed result
+   back to handler. Handler can inspect multiple times before fixing.
+5. `skip` — mark cell skipped, continue with next cell.
+6. `abort` — stop execution, return partial results.
+
+Recovery operates on current kernel state (patch-forward). The model
+can't rewrite history — it emits correction cells that fix state going
+forward.
+
+### Artifact formats
+
+The execution log can be serialized to two formats:
+
+- **`.ipynb` (Jupyter notebook)** — each cell becomes a notebook cell
+  with lackpy metadata preserved for round-trip fidelity. This is the
+  artifact format. Loading an `.ipynb` back through the kernel with
+  `NoRecoveryHandler` is "Restart and Run All."
+
+- **Clean markdown** — the literate document the model *should* have
+  written, after recovery fixes. Skipped cells are omitted. Useful for
+  feeding corrected output back to the model.
 
 ## Execution namespace
 
@@ -248,9 +320,19 @@ normally.
 src/lackpy/interpreters/literate/
 ├── __init__.py    LiterateInterpreter — validate(), execute(), registration
 ├── parser.py      markdown-it-py → Cell sequence (frontmatter, fences, prose)
-├── compiler.py    Cell sequence → Python source (repr()-based string literals)
+├── compiler.py    Cell → Python source (repr()-based string literals)
 ├── tools.py       read_file, write_file, apply_diff, search, shell, tests
-└── prompt.py      system_prompt_hint() for model instruction
+├── prompt.py      system_prompt_hint() for model instruction
+└── kernel/
+    ├── __init__.py          Public exports
+    ├── interface.py         KernelInterface protocol + CellResult
+    ├── lightweight.py       LightweightKernel (exec-into-dict)
+    ├── static_analysis.py   compile check + AST name resolution
+    ├── streaming_parser.py  StreamingCellParser (fence detection on partial input)
+    ├── driver.py            StreamingDriver orchestrator
+    ├── recovery.py          RecoveryHandler protocol + handlers
+    ├── plugins.py           ExecutionPlugin protocol + PluginAdvice
+    └── formats.py           to_notebook, from_notebook, render_markdown
 ```
 
 ### Parser (`parser.py`)
@@ -267,7 +349,9 @@ Uses [markdown-it-py](https://markdown-it-py.readthedocs.io/) with the
    back to the first non-empty line of the block body
 
 Returns a `ParseResult` containing `Frontmatter`, a list of `Cell`
-objects, and any parse errors.
+objects, and any parse errors. This is the batch parser used by
+`LiterateInterpreter.validate()` and for pre-parsed document execution.
+The streaming equivalent is `StreamingCellParser` in the kernel package.
 
 ### Compiler (`compiler.py`)
 
@@ -276,21 +360,63 @@ using `repr()` for all string literal generation — this handles quotes,
 newlines, and special characters without manual escaping. Prose cells
 with `{expr}` patterns compile to f-string `print()` calls.
 
+The compiler functions are used by both the batch path and the kernel —
+`LightweightKernel.execute_cell()` calls the same per-cell-type
+compilers internally.
+
+### Kernel (`kernel/`)
+
+The incremental execution engine. Cells execute one at a time through a
+persistent namespace, with static analysis before each execution.
+
+**`KernelInterface`** — protocol for cell execution backends. Methods:
+`execute_cell()`, `inspect()`, `get_scope()`, `restart()`,
+`get_namespace()`.
+
+**`LightweightKernel`** — the default backend. Compiles each cell using
+the compiler functions, runs static analysis (compile check + AST name
+resolution), then `exec()`s into a shared dict namespace. Returns a
+`CellResult` with success/failure, captured stdout, error details, and
+the namespace delta (what the cell changed).
+
+**`StreamingCellParser`** — incremental fence detection on partial input.
+Fed chunks of model output via `feed()`, yields `Cell` objects as fence
+boundaries are detected. Used by `StreamingDriver` for parse-as-you-stream
+execution.
+
+**`StreamingDriver`** — the orchestrator. Connects parser → kernel →
+recovery → plugins. Handles `@continue` pause/resume with generation
+tracking. Provides `execution_log` and `rendered_output` properties.
+
+**`RecoveryHandler`** — protocol for error recovery. Built-in handlers:
+`NoRecoveryHandler` (always aborts) and `InferenceRecoveryHandler`
+(calls a model to fix failing cells).
+
+**`ExecutionPlugin`** — hook protocol for coaching/tracking systems.
+Plugins observe cell lifecycle events (`on_cell_start`, `on_cell_success`,
+`on_cell_error`, `on_recovery_result`) and can provide `PluginAdvice`
+during error recovery. The system works without any plugins; Kibitzer
+subscribes to these hooks when present.
+
+**`formats`** — serialization between execution log, `.ipynb` notebook,
+and clean markdown. `to_notebook()` produces a Jupyter-compatible
+notebook with lackpy metadata. `from_notebook()` recovers cells for
+re-execution. `render_markdown()` produces the corrected literate
+document.
+
 ### Interpreter (`__init__.py`)
 
 Implements the standard `Interpreter` protocol:
 
 - **`validate(program, context)`** — parses the document and reports
   errors without executing
-- **`execute(program, context)`** — parses, compiles, runs with
-  `redirect_stdout`, returns the captured output as markdown
+- **`execute(program, context)`** — parses the document, creates a
+  `LightweightKernel` with the tool namespace, and executes cells
+  one at a time through the kernel
 
-The original design spec proposed delegating to `PythonInterpreter` for
-the run step. The implementation uses direct Python execution with full
-builtins instead, because the literate interpreter needs an unrestricted
-Python environment (file I/O, imports, shell access) that the restricted
-Python interpreter intentionally prohibits. Security is enforced at the
-sandbox level (nsjail), not by Python-level AST restrictions.
+The literate interpreter uses direct Python execution with full
+builtins — security is enforced at the sandbox level (nsjail), not by
+Python-level AST restrictions.
 
 The execution result includes metadata: `continue_requested` (whether
 `@continue` was hit), `variables` (namespace after execution),
@@ -302,6 +428,32 @@ The execution result includes metadata: `continue_requested` (whether
 write literate documents. It covers document structure, annotation
 syntax (with correct/incorrect examples), the gather pattern, available
 tools and builtins, and key rules.
+
+## Plugin architecture
+
+The execution plugin system provides observation hooks for coaching and
+tracking systems. It is designed around three principles:
+
+1. **Plugins observe and advise** — they don't control execution flow
+2. **The system works without plugins** — no plugin is required
+3. **Plugins manage their own state** — no session objects are passed in
+
+```python
+class ExecutionPlugin(Protocol):
+    def on_cell_start(self, cell: Cell, index: int) -> None: ...
+    def on_cell_success(self, cell: Cell, result: CellResult) -> None: ...
+    def on_cell_error(self, cell: Cell, error: str, scope: dict) -> PluginAdvice: ...
+    def on_recovery_result(self, cell: Cell, success: bool, attempt: int) -> None: ...
+```
+
+When a cell fails, plugins return `PluginAdvice` (hints, documentation
+context, and an optional suggestion). If multiple plugins are registered,
+their advice is merged — hints concatenated, first non-None suggestion
+wins. This advice is folded into the recovery prompt when using
+`InferenceRecoveryHandler`.
+
+Plugin methods must not raise — errors are logged and ignored. This
+keeps the execution path stable regardless of plugin quality.
 
 ## Agent harness
 
@@ -349,9 +501,9 @@ Found {len(data)} rows.
 asyncio.run(main())
 ```
 
-## Phase 0 scope
+## Current scope
 
-The current implementation covers:
+The implementation covers:
 
 - All cell types: prose, code, @hidden, @gather, @continue, @read,
   @write, @diff, @scratch
@@ -359,11 +511,20 @@ The current implementation covers:
 - Full Python builtins in the execution namespace
 - Kit tool injection
 - The @gather/@continue agent loop pattern
+- Incremental cell-by-cell execution via the kernel
+- Static analysis (compile check + AST name resolution) before each cell
+- Streaming parse-as-you-generate execution
+- Pluggable recovery (NoRecoveryHandler, InferenceRecoveryHandler)
+- Plugin API for coaching systems (ExecutionPlugin protocol)
+- Notebook (.ipynb) artifact export and re-import
+- Clean markdown rendering from execution log
 - Standalone Ollama harness for testing
 
-Future phases will add:
+Future work:
 
-- Cell-level execution with namespace caching (incremental re-execution)
+- Jupyter kernel backend (wrapping `jupyter_client.KernelClient`)
+- Full plugin lifecycle API (registration, discovery)
+- Kibitzer plugin implementation (subscribes to ExecutionPlugin hooks)
 - Document diffs: REPLACE_CELL, INSERT, DELETE
 - Branching and merging
 - Compaction / history squash
