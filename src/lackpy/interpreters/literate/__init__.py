@@ -1,18 +1,15 @@
 """Literate programming interpreter for lackpy.
 
 Executes markdown documents with embedded ```lackpy code blocks.
-The compilation pipeline: parse markdown → cell sequence → compile
-to Python → execute via restricted runner → captured stdout IS the
-rendered document.
+The execution pipeline: parse markdown → cell sequence → execute
+cells one-by-one through LightweightKernel → captured stdout IS
+the rendered document.
 """
 
 from __future__ import annotations
 
-import io
 import os
-import sys
 import time
-from contextlib import redirect_stdout
 from typing import Any
 
 from ..base import (
@@ -20,7 +17,7 @@ from ..base import (
     InterpreterExecutionResult,
     InterpreterValidationResult,
 )
-from .compiler import CONTINUE_SENTINEL, compile_cells
+from .kernel import LightweightKernel
 from .parser import parse
 from .prompt import LITERATE_HINT
 from .tools import make_tool_namespace
@@ -29,10 +26,10 @@ from .tools import make_tool_namespace
 class LiterateInterpreter:
     """Literate programming interpreter.
 
-    Takes a markdown document with ```lackpy code blocks, compiles it
-    to Python, and executes it. The captured stdout is the rendered
-    document — prose becomes print() calls, code executes and its
-    output joins the stream.
+    Takes a markdown document with ```lackpy code blocks, parses it
+    into cells, and executes each cell incrementally through the kernel.
+    The captured stdout is the rendered document — prose becomes print()
+    calls, code executes and its output joins the stream.
     """
 
     name = "literate"
@@ -72,53 +69,48 @@ class LiterateInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
-        try:
-            compiled = compile_cells(parsed)
-        except ValueError as e:
-            return InterpreterExecutionResult(
-                success=False,
-                error=f"Compilation error: {e}",
-                output_format="none",
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-
         namespace = _build_namespace(context)
-
-        continue_fn_called = False
-
-        def _continue_sentinel():
-            nonlocal continue_fn_called
-            continue_fn_called = True
-
-        namespace["__literate_continue__"] = _continue_sentinel
+        kernel = LightweightKernel(namespace=namespace)
 
         prev_cwd = os.getcwd()
         if context.base_dir:
             os.chdir(context.base_dir)
 
         try:
-            stdout_capture = io.StringIO()
-            with redirect_stdout(stdout_capture):
-                compiled_code = compile(compiled, "<literate>", "exec")
-                _run_literate_code(compiled_code, namespace)
+            output_parts: list[str] = []
+            continue_requested = False
 
-            rendered = stdout_capture.getvalue()
-        except Exception as e:
-            return InterpreterExecutionResult(
-                success=False,
-                error=str(e),
-                output_format="text",
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
+            for index, cell in enumerate(parsed.cells):
+                result = kernel.execute_cell(cell, index)
+
+                if not result.success:
+                    return InterpreterExecutionResult(
+                        success=False,
+                        error=result.error or "Unknown error",
+                        output_format="text",
+                        duration_ms=(time.perf_counter() - start) * 1000,
+                    )
+
+                if result.output:
+                    output_parts.append(result.output)
+
+                if result.namespace_delta.get("__continue_requested__"):
+                    continue_requested = True
+
         finally:
             os.chdir(prev_cwd)
 
         elapsed = (time.perf_counter() - start) * 1000
 
+        # Filter variables the same way the old implementation did:
+        # exclude underscore-prefixed, internal tool names, and callables
+        raw_ns = kernel.get_namespace()
         variables = {
-            k: v for k, v in namespace.items()
-            if not k.startswith("_") and k not in _INTERNAL_NAMES and callable(v) is False
+            k: v for k, v in raw_ns.items()
+            if k not in _INTERNAL_NAMES and not callable(v)
         }
+
+        rendered = "".join(output_parts)
 
         return InterpreterExecutionResult(
             success=True,
@@ -127,7 +119,7 @@ class LiterateInterpreter:
             duration_ms=elapsed,
             metadata={
                 "variables": variables,
-                "continue_requested": continue_fn_called,
+                "continue_requested": continue_requested,
                 "cell_count": len(parsed.cells),
                 "frontmatter": {
                     "echo": parsed.frontmatter.echo,
@@ -162,14 +154,3 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
         ns.update(context.params)
 
     return ns
-
-
-def _run_literate_code(compiled_code: object, namespace: dict) -> None:
-    # Executes the compiled Python from literate document compilation.
-    # This is the core execution path — compiled code is the output of
-    # compiler.compile_cells(), not arbitrary user input.
-    _do_exec(compiled_code, namespace)
-
-
-def _do_exec(code, ns):
-    exec(code, ns)  # noqa: S102
