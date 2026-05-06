@@ -13,25 +13,32 @@ import subprocess
 from pathlib import Path
 
 
-def read_file(path: str) -> str:
-    """Read and return the contents of a file."""
-    return Path(path).read_text()
-
-
-def write_file(path: str, content: str) -> None:
-    """Write content to a file, creating parent directories as needed."""
+def _resolve(path: str, base: Path | None) -> Path:
     p = Path(path)
+    if base and not p.is_absolute():
+        return base / p
+    return p
+
+
+def read_file(path: str, *, _base: Path | None = None) -> str:
+    """Read and return the contents of a file."""
+    return _resolve(path, _base).read_text()
+
+
+def write_file(path: str, content: str, *, _base: Path | None = None) -> None:
+    """Write content to a file, creating parent directories as needed."""
+    p = _resolve(path, _base)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
 
 
-def apply_diff(path: str, diff_text: str) -> str:
+def apply_diff(path: str, diff_text: str, *, _base: Path | None = None) -> str:
     """Apply a unified diff to a file and return the result.
 
     Uses Python's difflib to parse and apply the patch rather than
     shelling out to `patch`, so it works without external tools.
     """
-    target = Path(path)
+    target = _resolve(path, _base)
     if not target.exists():
         raise FileNotFoundError(f"Cannot apply diff: {path} does not exist")
 
@@ -59,6 +66,11 @@ def _apply_unified_diff(original: list[str], diff_text: str) -> list[str]:
 
         for op, text in hunk_lines:
             if op == " ":
+                if 0 <= cursor < len(result) and result[cursor].rstrip("\n") != text:
+                    raise ValueError(
+                        f"Context mismatch at line {cursor + 1}: "
+                        f"expected {text!r}, got {result[cursor].rstrip(chr(10))!r}"
+                    )
                 cursor += 1
             elif op == "-":
                 if 0 <= cursor < len(result):
@@ -98,6 +110,9 @@ def _parse_hunks(diff_text: str):
                     hunk_lines.append(("+", dl[1:]))
                 elif dl.startswith(" "):
                     hunk_lines.append((" ", dl[1:]))
+                elif dl.startswith("\\"):
+                    i += 1
+                    continue
                 else:
                     break
                 i += 1
@@ -107,11 +122,11 @@ def _parse_hunks(diff_text: str):
             i += 1
 
 
-def search_content(pattern: str, path: str = ".") -> str:
+def search_content(pattern: str, path: str = ".", *, _base: Path | None = None) -> str:
     """Grep-like search for a pattern in files under path."""
     try:
         result = subprocess.run(
-            ["grep", "-rn", "--include=*.py", pattern, path],
+            ["grep", "-rn", "--include=*.py", pattern, str(_resolve(path, _base))],
             capture_output=True, text=True, timeout=30,
         )
         return result.stdout or "(no matches)"
@@ -119,7 +134,7 @@ def search_content(pattern: str, path: str = ".") -> str:
         return "(search failed)"
 
 
-def run_command(cmd: str) -> str:
+def run_command(cmd: str, *, _base: Path | None = None) -> str:
     """Run a shell command and return combined stdout+stderr.
 
     Intentionally uses shell=True — nsjail provides the security boundary.
@@ -128,6 +143,7 @@ def run_command(cmd: str) -> str:
         result = subprocess.run(
             cmd, shell=True,  # noqa: S602
             capture_output=True, text=True, timeout=60,
+            cwd=str(_base) if _base else None,
         )
         output = result.stdout
         if result.stderr:
@@ -137,12 +153,13 @@ def run_command(cmd: str) -> str:
         return "(command timed out after 60s)"
 
 
-def run_tests(path: str = ".") -> str:
+def run_tests(path: str = ".", *, _base: Path | None = None) -> str:
     """Run pytest on a path and return the output."""
     try:
         result = subprocess.run(
-            ["python", "-m", "pytest", path, "-v", "--tb=short"],
+            ["python", "-m", "pytest", str(_resolve(path, _base)), "-v", "--tb=short"],
             capture_output=True, text=True, timeout=120,
+            cwd=str(_base) if _base else None,
         )
         return result.stdout + (result.stderr or "")
     except subprocess.TimeoutExpired:
@@ -152,14 +169,16 @@ def run_tests(path: str = ".") -> str:
 def make_tool_namespace(base_dir: str | Path | None = None) -> dict:
     """Create a namespace dict with all literate tools.
 
-    The tools use relative paths resolved against cwd at call time.
-    The interpreter's execute() method handles chdir to base_dir.
+    When base_dir is provided, tool functions resolve relative paths
+    against it instead of relying on os.chdir().
     """
+    from functools import partial
+    base = Path(base_dir) if base_dir else None
     return {
-        "read_file": read_file,
-        "write_file": write_file,
-        "apply_diff": apply_diff,
-        "search_content": search_content,
-        "run_command": run_command,
-        "run_tests": run_tests,
+        "read_file": partial(read_file, _base=base),
+        "write_file": partial(write_file, _base=base),
+        "apply_diff": partial(apply_diff, _base=base),
+        "search_content": partial(search_content, _base=base),
+        "run_command": partial(run_command, _base=base),
+        "run_tests": partial(run_tests, _base=base),
     }

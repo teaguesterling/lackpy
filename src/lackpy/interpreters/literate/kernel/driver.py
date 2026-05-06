@@ -167,8 +167,9 @@ class StreamingDriver:
                 )
 
             if action.kind == "inspect":
-                inspect_result = self._kernel.inspect(action.expr or "None")
-                action = self._recovery.on_inspect_result(ctx, inspect_result)
+                while action.kind == "inspect":
+                    inspect_result = self._kernel.inspect(action.expr or "None")
+                    action = self._recovery.on_inspect_result(ctx, inspect_result)
                 if action.kind != "fix":
                     attempt += 1
                     continue

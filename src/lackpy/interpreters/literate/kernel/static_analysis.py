@@ -46,6 +46,9 @@ def _collect_definitions(tree: ast.Module) -> set[str]:
             defined.update(_names_from_target(node.target))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             defined.add(node.name)
+            defined.update(_names_from_args(node.args))
+        elif isinstance(node, ast.Lambda):
+            defined.update(_names_from_args(node.args))
         elif isinstance(node, ast.ClassDef):
             defined.add(node.name)
         elif isinstance(node, ast.For):
@@ -76,9 +79,19 @@ def _collect_references(tree: ast.Module) -> set[str]:
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             refs.add(node.id)
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
-            # AugAssign reads before writing (counter += 1 requires counter to exist)
             refs.add(node.target.id)
     return refs
+
+
+def _names_from_args(args: ast.arguments) -> set[str]:
+    names: set[str] = set()
+    for arg in args.posonlyargs + args.args + args.kwonlyargs:
+        names.add(arg.arg)
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return names
 
 
 def _names_from_target(node: ast.expr) -> set[str]:

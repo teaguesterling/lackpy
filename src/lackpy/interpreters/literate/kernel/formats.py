@@ -111,7 +111,7 @@ def render_markdown(log: list[CellExecutionEvent], frontmatter: Frontmatter) -> 
         parts.append("")
 
     for event in log:
-        if event.status == "skipped":
+        if event.status in ("skipped", "aborted", "pending"):
             continue
 
         cell = event.cell

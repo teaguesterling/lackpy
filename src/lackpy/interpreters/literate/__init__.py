@@ -8,7 +8,6 @@ the rendered document.
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -57,7 +56,11 @@ class LiterateInterpreter:
         program: str,
         context: ExecutionContext,
     ) -> InterpreterExecutionResult:
-        """Execute a literate document and return the rendered output."""
+        """Execute a literate document and return the rendered output.
+
+        Uses LightweightKernel directly (not StreamingDriver) because the
+        batch path doesn't need streaming, recovery, or plugin orchestration.
+        """
         start = time.perf_counter()
 
         parsed = parse(program)
@@ -72,33 +75,25 @@ class LiterateInterpreter:
         namespace = _build_namespace(context)
         kernel = LightweightKernel(namespace=namespace)
 
-        prev_cwd = os.getcwd()
-        if context.base_dir:
-            os.chdir(context.base_dir)
+        output_parts: list[str] = []
+        continue_requested = False
 
-        try:
-            output_parts: list[str] = []
-            continue_requested = False
+        for index, cell in enumerate(parsed.cells):
+            result = kernel.execute_cell(cell, index)
 
-            for index, cell in enumerate(parsed.cells):
-                result = kernel.execute_cell(cell, index)
+            if not result.success:
+                return InterpreterExecutionResult(
+                    success=False,
+                    error=result.error or "Unknown error",
+                    output_format="text",
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
 
-                if not result.success:
-                    return InterpreterExecutionResult(
-                        success=False,
-                        error=result.error or "Unknown error",
-                        output_format="text",
-                        duration_ms=(time.perf_counter() - start) * 1000,
-                    )
+            if result.output:
+                output_parts.append(result.output)
 
-                if result.output:
-                    output_parts.append(result.output)
-
-                if result.namespace_delta.get("__continue_requested__"):
-                    continue_requested = True
-
-        finally:
-            os.chdir(prev_cwd)
+            if result.namespace_delta.get("__continue_requested__"):
+                continue_requested = True
 
         elapsed = (time.perf_counter() - start) * 1000
 

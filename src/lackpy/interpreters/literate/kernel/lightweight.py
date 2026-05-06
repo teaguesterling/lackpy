@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
 from ..compiler import _COMPILERS
@@ -76,14 +76,21 @@ class LightweightKernel:
         }
 
         stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
         try:
             code_obj = compile(compiled_source, "<cell>", "exec")
-            with redirect_stdout(stdout_capture):
+            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 _do_exec(code_obj, self._namespace)
-        except Exception as e:
+        except BaseException as e:
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            captured = stdout_capture.getvalue()
+            err_out = stderr_capture.getvalue()
+            if err_out:
+                captured = (captured + "\n" + err_out).strip()
             return CellResult(
                 success=False,
-                output=stdout_capture.getvalue() or None,
+                output=captured or None,
                 error=f"{type(e).__name__}: {e}",
                 error_phase="runtime",
                 namespace_delta={},
@@ -93,6 +100,7 @@ class LightweightKernel:
             if is_continue and "__literate_continue__" in self._namespace:
                 del self._namespace["__literate_continue__"]
 
+        # Identity-based: in-place mutations (e.g. list.append) won't appear
         delta: dict[str, Any] = {}
         for k, v in self._namespace.items():
             if k == "__builtins__" or k.startswith("_"):
@@ -103,9 +111,14 @@ class LightweightKernel:
         if is_continue:
             delta["__continue_requested__"] = True
 
+        output = stdout_capture.getvalue()
+        stderr_output = stderr_capture.getvalue()
+        if stderr_output:
+            output = (output + "\n" + stderr_output).strip() if output else stderr_output
+
         return CellResult(
             success=True,
-            output=stdout_capture.getvalue(),
+            output=output,
             error=None,
             error_phase=None,
             namespace_delta=delta,

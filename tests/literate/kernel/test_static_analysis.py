@@ -45,7 +45,7 @@ class TestNameResolution:
     def test_for_loop_defines_target(self):
         check_cell("for i in range(10):\n    print(i)", known_names={"print"})
 
-    def test_comprehension_variable_not_leaked(self):
+    def test_comprehension_variable_resolved_internally(self):
         check_cell("result = [x for x in items]", known_names={"items"})
 
     def test_augmented_assign_requires_existing(self):
@@ -60,3 +60,15 @@ class TestNameResolution:
 
     def test_except_handler_defines_name(self):
         check_cell("try:\n    x = 1\nexcept ValueError as e:\n    print(e)", known_names={"print"})
+
+    def test_function_params_defined(self):
+        check_cell("def add(a, b):\n    return a + b", known_names=set())
+
+    def test_lambda_params_defined(self):
+        check_cell("f = lambda x, y: x + y", known_names=set())
+
+    def test_method_self_defined(self):
+        check_cell("class Foo:\n    def bar(self):\n        return self.x", known_names=set())
+
+    def test_function_kwargs_defined(self):
+        check_cell("def f(*args, **kwargs):\n    return args, kwargs", known_names=set())

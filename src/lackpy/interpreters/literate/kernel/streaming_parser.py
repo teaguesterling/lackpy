@@ -28,7 +28,7 @@ class StreamingCellParser:
         return self._frontmatter
 
     def feed(self, chunk: str) -> list[Cell]:
-        self._buffer += chunk
+        self._buffer += chunk.replace("\r", "")
         if not self._frontmatter_parsed:
             self._try_parse_frontmatter()
         return self._extract_cells()

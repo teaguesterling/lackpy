@@ -71,8 +71,10 @@ class InferenceRecoveryHandler:
 
     def _call_infer(self, prompt: str) -> str:
         try:
-            return asyncio.run(self._infer_fn(prompt))
-        except RuntimeError:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(self._infer_fn(prompt))
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(asyncio.run, self._infer_fn(prompt))
