@@ -44,6 +44,7 @@ class TestSubprocessStrategy:
                 program="x = 1",
                 embedded_sources={},
                 bridge_socket=None,
+                bridge_authkey=None,
                 base_dir=Path("/workspace"),
                 config=MagicMock(),
                 _io_dir=io_dir,

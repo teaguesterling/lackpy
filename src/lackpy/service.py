@@ -678,9 +678,9 @@ class LackpyService:
             "inference_order": self._config.inference_order,
             "inference_mode": self._config.inference_mode,
             "kit_default": self._config.kit_default,
-            "sandbox_enabled": self._config.sandbox_enabled,
-            "sandbox_timeout": self._config.sandbox_timeout,
-            "sandbox_memory_mb": self._config.sandbox_memory_mb,
+            "sandbox_enabled": self._config.sandbox.enabled,
+            "sandbox_timeout": self._config.sandbox.timeout,
+            "sandbox_memory_mb": self._config.sandbox.memory_mb,
             "tools": len(self.toolbox.tools),
         }
 

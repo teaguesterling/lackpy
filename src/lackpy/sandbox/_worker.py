@@ -72,43 +72,35 @@ def main() -> None:
     program = request["program"]
     embedded_sources = request.get("embedded_sources", {})
     bridge_socket = request.get("bridge_socket")
+    bridge_authkey_hex = request.get("bridge_authkey")
     base_dir = request.get("base_dir", ".")
 
     client = None
     if bridge_socket:
         from lackpy.sandbox.bridge import bridge_client as _bridge_client
-        client = _bridge_client(Path(bridge_socket))
+        authkey = bytes.fromhex(bridge_authkey_hex) if bridge_authkey_hex else b""
+        client = _bridge_client(Path(bridge_socket), authkey=authkey)
 
     tool_ns = build_tool_namespace(embedded_sources, client)
 
     import os
     os.chdir(base_dir)
 
+    from lackpy.run.runner import RestrictedRunner
+    runner = RestrictedRunner()
+
     start = time.perf_counter()
-    try:
-        local_ns = dict(tool_ns)
-        compiled_code = compile(program, "<sandbox>", "exec")
-        exec(compiled_code, {"__builtins__": {}}, local_ns)  # noqa: S102
-        output = local_ns.get("__result__")
-        duration_ms = (time.perf_counter() - start) * 1000
-        write_result(io_dir, {
-            "success": True,
-            "output": str(output) if output is not None else None,
-            "output_format": "text" if output is not None else "none",
-            "error": None,
-            "duration_ms": duration_ms,
-            "metadata": {},
-        })
-    except Exception as e:
-        duration_ms = (time.perf_counter() - start) * 1000
-        write_result(io_dir, {
-            "success": False,
-            "output": None,
-            "output_format": "none",
-            "error": f"{type(e).__name__}: {e}",
-            "duration_ms": duration_ms,
-            "metadata": {},
-        })
+    result = runner.run(program, namespace=tool_ns)
+    duration_ms = (time.perf_counter() - start) * 1000
+
+    write_result(io_dir, {
+        "success": result.success,
+        "output": str(result.output) if result.output is not None else None,
+        "output_format": "text" if result.output is not None else "none",
+        "error": result.error,
+        "duration_ms": duration_ms,
+        "metadata": {},
+    })
 
 
 if __name__ == "__main__":

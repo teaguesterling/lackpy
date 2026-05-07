@@ -67,6 +67,7 @@ class SandboxedInterpreter:
                 program=program,
                 embedded_sources={},
                 bridge_socket=None,
+                bridge_authkey=None,
                 base_dir=context.base_dir,
                 config=config,
             )

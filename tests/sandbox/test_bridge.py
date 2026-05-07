@@ -46,14 +46,14 @@ class TestToolBridgeManager:
         def greet(name: str) -> str:
             return f"hello {name}"
         with ToolBridgeManager(callables={"greet": greet}, socket_dir=tmp_path) as mgr:
-            client = bridge_client(mgr.socket_path)
+            client = bridge_client(mgr.socket_path, authkey=mgr.authkey)
             result = client.call("greet", "world")
             assert result == "hello world"
 
     def test_client_unknown_tool_raises(self, tmp_path):
         from lackpy.sandbox.bridge import ToolBridgeManager, bridge_client
         with ToolBridgeManager(callables={}, socket_dir=tmp_path) as mgr:
-            client = bridge_client(mgr.socket_path)
+            client = bridge_client(mgr.socket_path, authkey=mgr.authkey)
             with pytest.raises(KeyError):
                 client.call("nonexistent")
 

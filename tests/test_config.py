@@ -24,7 +24,7 @@ default = "debug"
 
 [sandbox]
 enabled = false
-timeout_seconds = 60
+timeout = 60
 ''')
     return tmp_path
 
@@ -34,6 +34,7 @@ def test_load_config(config_dir):
     assert cfg.inference_order == ["templates", "rules", "ollama-local"]
     assert cfg.kit_default == "debug"
     assert cfg.sandbox.enabled is False
+    assert cfg.sandbox.timeout == 60
 
 
 def test_load_config_defaults(tmp_path):

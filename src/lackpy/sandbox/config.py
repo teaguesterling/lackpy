@@ -43,7 +43,7 @@ class SandboxBaseConfig:
             backend=data.get("backend", "nsjail"),
             strategy=data.get("strategy", "subprocess"),
             constraint_warnings=data.get("constraint_warnings", "warn"),
-            timeout=data.get("timeout", 120),
+            timeout=data.get("timeout", data.get("timeout_seconds", 120)),
             memory_mb=data.get("memory_mb", 512),
             pids_max=data.get("pids_max", 16),
             network=data.get("network", False),

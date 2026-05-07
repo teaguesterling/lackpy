@@ -149,6 +149,27 @@ def merge_constraints(
                     allowed_providers=tuple(sorted(providers)),
                 ))
 
+        elif cls is NetworkRestriction:
+            all_dests = [set(c.allowed_destinations) for c in group]
+            all_protos = [set(c.allowed_protocols) for c in group]
+            dests = set.intersection(*all_dests) if all_dests else set()
+            protos = set.intersection(*all_protos) if all_protos else set()
+            result.append(NetworkRestriction(
+                allowed_destinations=tuple(sorted(dests)),
+                allowed_protocols=tuple(sorted(protos)),
+            ))
+
+        elif cls is UserMapping:
+            if len(group) > 1:
+                import warnings
+                warnings.warn(
+                    f"Multiple UserMapping constraints ({len(group)}); "
+                    "using the first one. Conflicting UID maps may produce "
+                    "invalid sandbox configs.",
+                    stacklevel=2,
+                )
+            result.append(group[0])
+
         else:
             result.extend(group)
 

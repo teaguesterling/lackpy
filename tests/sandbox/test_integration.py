@@ -35,6 +35,7 @@ class TestNsjailIntegration:
             program="__result__ = 2 + 2",
             embedded_sources={},
             bridge_socket=None,
+            bridge_authkey=None,
             base_dir=tmp_path,
             config=compilation.config,
         )
@@ -70,6 +71,7 @@ class TestNsjailIntegration:
                 "read_file": "def read_file(path):\n    return open(path).read()\n",
             },
             bridge_socket=None,
+            bridge_authkey=None,
             base_dir=tmp_path,
             config=compilation.config,
         )
@@ -96,6 +98,7 @@ class TestNsjailIntegration:
             program="import time; time.sleep(60)",
             embedded_sources={},
             bridge_socket=None,
+            bridge_authkey=None,
             base_dir=tmp_path,
             config=compilation.config,
         )
@@ -125,6 +128,7 @@ class TestNsjailIntegration:
             program="import os; __result__ = os.path.exists('/etc/passwd')",
             embedded_sources={},
             bridge_socket=None,
+            bridge_authkey=None,
             base_dir=tmp_path,
             config=compilation.config,
         )

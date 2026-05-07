@@ -24,8 +24,9 @@ class SubprocessStrategy:
         program: str,
         embedded_sources: dict[str, str],
         bridge_socket: Path | None,
-        base_dir: Path,
         config: Any,
+        base_dir: Path = Path("."),
+        bridge_authkey: bytes | None = None,
         _io_dir: Path | None = None,
     ) -> InterpreterExecutionResult:
         own_io_dir = _io_dir is None
@@ -36,6 +37,7 @@ class SubprocessStrategy:
                 "program": program,
                 "embedded_sources": embedded_sources,
                 "bridge_socket": str(bridge_socket) if bridge_socket else None,
+                "bridge_authkey": bridge_authkey.hex() if bridge_authkey else None,
                 "base_dir": str(base_dir),
             }
             write_request(io_dir, request)

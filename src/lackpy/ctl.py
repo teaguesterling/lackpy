@@ -36,7 +36,7 @@ default = "debug"
 
 [sandbox]
 enabled = false
-timeout_seconds = 120
+timeout = 120
 memory_mb = 512
 """)
     print(f"Initialized lackpy workspace at {config_dir}")

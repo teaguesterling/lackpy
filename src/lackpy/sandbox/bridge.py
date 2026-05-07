@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import threading
 from multiprocessing.managers import BaseManager
@@ -40,8 +41,10 @@ class ToolBridgeManager:
         socket_dir: Path | None = None,
     ) -> None:
         self._callables = callables
+        self._owns_socket_dir = socket_dir is None
         self._socket_dir = socket_dir or Path(tempfile.mkdtemp(prefix="lackpy_bridge_"))
         self._socket_path = self._socket_dir / "bridge.sock"
+        self._authkey = os.urandom(32)
         self._dispatcher = _ToolDispatcher(callables)
         self._server: Any | None = None
         self._server_thread: threading.Thread | None = None
@@ -49,6 +52,10 @@ class ToolBridgeManager:
     @property
     def socket_path(self) -> Path:
         return self._socket_path
+
+    @property
+    def authkey(self) -> bytes:
+        return self._authkey
 
     def start(self) -> None:
         dispatcher = self._dispatcher
@@ -58,7 +65,7 @@ class ToolBridgeManager:
 
         ServerManager.register("get_dispatcher", callable=lambda: dispatcher)
         address = str(self._socket_path)
-        mgr = ServerManager(address=address, authkey=b"lackpy-bridge")
+        mgr = ServerManager(address=address, authkey=self._authkey)
         # get_server() binds the socket synchronously — file exists after this call
         self._server = mgr.get_server()
         server = self._server
@@ -93,6 +100,11 @@ class ToolBridgeManager:
             self._server_thread = None
         if self._socket_path.exists():
             self._socket_path.unlink()
+        if self._owns_socket_dir and self._socket_dir.exists():
+            try:
+                self._socket_dir.rmdir()
+            except OSError:
+                pass
 
     def __enter__(self) -> ToolBridgeManager:
         self.start()
@@ -115,14 +127,14 @@ class _BridgeClient:
         return self._dispatcher.list_tools()
 
 
-def bridge_client(socket_path: Path) -> _BridgeClient:
+def bridge_client(socket_path: Path, authkey: bytes) -> _BridgeClient:
     """Connect to a running ToolBridgeManager and return a client."""
 
     class ClientManager(_BridgeManager):
         pass
 
     ClientManager.register("get_dispatcher")
-    mgr = ClientManager(address=str(socket_path), authkey=b"lackpy-bridge")
+    mgr = ClientManager(address=str(socket_path), authkey=authkey)
     mgr.connect()
     dispatcher = mgr.get_dispatcher()
     return _BridgeClient(dispatcher)
