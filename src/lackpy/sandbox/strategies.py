@@ -1,4 +1,4 @@
-"""Execution strategies: subprocess (default) and jail_call."""
+"""Execution strategies: subprocess worker harness."""
 
 from __future__ import annotations
 
@@ -86,35 +86,3 @@ class SubprocessStrategy:
         finally:
             if own_io_dir:
                 shutil.rmtree(io_dir, ignore_errors=True)
-
-
-class JailCallStrategy:
-    """Use nsjail-python's jail_call for direct serialized execution."""
-
-    async def run_with_interpreter(
-        self,
-        interpreter: Any,
-        program: str,
-        context: Any,
-        config: Any,
-    ) -> InterpreterExecutionResult:
-        try:
-            from nsjail.call import jail_call
-        except ImportError as e:
-            raise RuntimeError(
-                "jail_call strategy requires nsjail-python with call support"
-            ) from e
-
-        try:
-            result = jail_call(
-                interpreter.execute,
-                args=(program, context),
-            )
-            if hasattr(result, "__await__"):
-                result = await result
-            return result
-        except Exception as e:
-            raise RuntimeError(
-                f"jail_call strategy failed (serialization issue?): {e}. "
-                "Consider using subprocess strategy instead."
-            ) from e

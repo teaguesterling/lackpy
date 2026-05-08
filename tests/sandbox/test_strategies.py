@@ -97,20 +97,3 @@ class TestSubprocessStrategy:
         )
         assert exec_result.success is False
         assert "memory" in exec_result.error.lower() or "oom" in exec_result.error.lower()
-
-
-class TestJailCallStrategy:
-    @pytest.mark.asyncio
-    async def test_raises_on_unserializable(self):
-        from lackpy.sandbox.strategies import JailCallStrategy
-        strategy = JailCallStrategy()
-        mock_interpreter = MagicMock()
-        mock_interpreter.execute = AsyncMock(side_effect=Exception("cannot serialize"))
-
-        with pytest.raises(RuntimeError, match="jail_call|serializ"):
-            await strategy.run_with_interpreter(
-                interpreter=mock_interpreter,
-                program="x = 1",
-                context=MagicMock(),
-                config=MagicMock(),
-            )
