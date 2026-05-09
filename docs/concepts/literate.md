@@ -226,7 +226,7 @@ executes it:
 
 | Cell type | Python output |
 |---|---|
-| Prose `"Hello {x}"` | `print(f'Hello {x}')` |
+| Prose `"Hello {x}"` | `print('Hello ' + f"""{x}""")` |
 | Prose `"Hello world"` | `print('Hello world')` |
 | Empty prose | `print()` |
 | Code | pass through |
@@ -238,8 +238,11 @@ executes it:
 | @diff(path) | `apply_diff('path', 'diff_text')` |
 | @scratch | capture `locals()` diff, print summary |
 
-String literals use `repr()` for escaping, which eliminates edge cases
-with quotes and special characters in file content.
+String literals in non-interpolated prose use `repr()` for escaping.
+Interpolated prose is split into literal and expression parts using a
+brace-matching parser; each expression compiles to its own triple-quoted
+f-string (`f"""{expr}"""`), which handles nested quotes, backslashes,
+and complex expressions safely.
 
 ### Streaming execution
 
@@ -320,7 +323,7 @@ normally.
 src/lackpy/interpreters/literate/
 ├── __init__.py    LiterateInterpreter — validate(), execute(), registration
 ├── parser.py      markdown-it-py → Cell sequence (frontmatter, fences, prose)
-├── compiler.py    Cell → Python source (repr()-based string literals)
+├── compiler.py    Cell → Python source (brace-matching interpolation)
 ├── tools.py       read_file, write_file, apply_diff, search, shell, tests
 ├── prompt.py      system_prompt_hint() for model instruction
 └── kernel/
@@ -355,10 +358,12 @@ The streaming equivalent is `StreamingCellParser` in the kernel package.
 
 ### Compiler (`compiler.py`)
 
-Transforms each `Cell` into Python source. The key design choice is
-using `repr()` for all string literal generation — this handles quotes,
-newlines, and special characters without manual escaping. Prose cells
-with `{expr}` patterns compile to f-string `print()` calls.
+Transforms each `Cell` into Python source. Non-interpolated prose uses
+`repr()` for safe string literals. Interpolated prose uses a
+brace-matching splitter (`_split_interpolation`) that handles nested
+braces, then compiles each expression as a standalone triple-quoted
+f-string. This avoids `repr()`-related issues with nested quotes and
+backslash escapes inside complex expressions.
 
 The compiler functions are used by both the batch path and the kernel —
 `LightweightKernel.execute_cell()` calls the same per-cell-type
@@ -472,6 +477,100 @@ python scripts/literate_agent.py "Analyze the files in src/"
 python scripts/literate_agent.py --model qwen3.5:35b "Find all TODOs"
 python scripts/literate_agent.py -v --base-dir /project "Summarize tests"
 ```
+
+## Annotated example: codebase health report
+
+This walkthrough shows the full execution flow for a real analysis task.
+The document gathers data silently, computes metrics in a hidden block,
+then renders a formatted report with variable interpolation.
+
+### The document
+
+````markdown
+```lackpy @gather
+result = search_content("TODO|FIXME|HACK|noqa|type: ignore", "src/lackpy")
+pragmas = [l.strip() for l in result.splitlines() if l.strip()]
+```
+
+```lackpy @gather
+import_result = run_command("find src/lackpy -name '*.py' -exec grep -l 'import asyncio\\|async def' {} +")
+async_files = [l.strip() for l in import_result.splitlines() if l.strip()]
+src_result = run_command("find src/lackpy -name '*.py' | wc -l")
+loc_result = run_command("find src/lackpy -name '*.py' -exec cat {} + | wc -l")
+test_loc_result = run_command("find tests -name '*.py' -exec cat {} + | wc -l")
+```
+
+```lackpy @hidden
+src_count = int(src_result.strip())
+src_loc = int(loc_result.strip())
+test_loc = int(test_loc_result.strip())
+ratio = test_loc / src_loc if src_loc > 0 else 0
+```
+
+# Lackpy Codebase Health Report
+
+```lackpy
+print(f"| Metric | Value |")
+print(f"|--------|-------|")
+print(f"| Source files | {src_count} |")
+print(f"| Source LOC | {src_loc:,} |")
+print(f"| Test LOC | {test_loc:,} |")
+print(f"| Test/Source ratio | {ratio:.2f}x |")
+print(f"| Async modules | {len(async_files)} |")
+```
+````
+
+### Execution trace
+
+The interpreter parses this into 6 cells and executes them in order:
+
+| Step | Cell type | What happens | Output |
+|------|-----------|-------------|--------|
+| 1 | `@gather` | `search_content(...)` runs, `pragmas` variable set | *(silent)* |
+| 2 | `@gather` | `run_command(...)` calls run, 5 variables set | *(silent)* |
+| 3 | `@hidden` | Integer parsing, ratio computation | *(silent)* |
+| 4 | prose | `"# Lackpy Codebase Health Report"` printed | heading |
+| 5 | code | `print(f"| Metric | ...")` renders table | table rows |
+
+Steps 1-3 build up the namespace silently. Steps 4-5 render the
+report. All 5 `@gather`/`@hidden` variables are available to the
+visible code block and to any prose interpolation.
+
+### Rendered output
+
+```
+# Lackpy Codebase Health Report
+
+| Metric | Value |
+|--------|-------|
+| Source files | 101 |
+| Source LOC | 10,442 |
+| Test LOC | 9,373 |
+| Test/Source ratio | 0.90x |
+| Async modules | 30 |
+```
+
+Total execution time: ~200ms for 6 cells. The gather blocks do real
+I/O (grep, find, wc), the hidden block does arithmetic, and the code
+block formats the output. The reader sees only the clean report.
+
+### Key patterns demonstrated
+
+**Gather-then-render.** Data collection is separated from presentation.
+`@gather` blocks run silently so the reader never sees raw command
+output. The code block formats the data into a readable table.
+
+**Variable persistence.** `src_count` defined in the `@hidden` block
+(step 3) is used in the code block (step 5). Variables accumulate
+across cells — the namespace is shared.
+
+**Tool composition.** `search_content` and `run_command` are injected
+tools from the literate namespace. They run real shell commands and
+return string results that the code processes with standard Python.
+
+**Prose as glue.** The heading cell is pure prose — it becomes
+`print("# Lackpy Codebase Health Report")`. Prose cells can include
+`{variable}` interpolation, but here the heading is static.
 
 ## Using the interpreter directly
 

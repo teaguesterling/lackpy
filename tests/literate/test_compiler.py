@@ -23,7 +23,7 @@ class TestProseCompilation:
     def test_prose_with_interpolation(self):
         cells = [Cell(cell_type="prose", content="Value is {x}")]
         code = compile_cells(_make_result(cells))
-        assert "print(f" in code and "{x}" in code
+        assert "print(" in code and "{x}" in code
 
     def test_empty_prose(self):
         cells = [Cell(cell_type="prose", content="   \n  ")]
@@ -38,33 +38,133 @@ class TestProseCompilation:
     def test_prose_with_json_braces_not_interpolated(self):
         cells = [Cell(cell_type="prose", content='Config: {"key": "value"}')]
         code = compile_cells(_make_result(cells))
-        assert "print(f" not in code
+        assert 'f"""' not in code
         assert "print(" in code
 
     def test_prose_with_attribute_interpolation(self):
         cells = [Cell(cell_type="prose", content="Type: {obj.name}")]
         code = compile_cells(_make_result(cells))
-        assert "print(f" in code
+        assert "{obj.name}" in code
 
     def test_prose_with_function_call_interpolation(self):
         cells = [Cell(cell_type="prose", content="Count: {len(items)}")]
         code = compile_cells(_make_result(cells))
-        assert "print(f" in code
+        assert "{len(items)}" in code
 
     def test_prose_with_nested_call_interpolation(self):
         cells = [Cell(cell_type="prose", content="Count: {len(inv.items())}")]
         code = compile_cells(_make_result(cells))
-        assert "print(f" in code
+        assert "{len(inv.items())}" in code
 
     def test_prose_with_format_spec_interpolation(self):
         cells = [Cell(cell_type="prose", content="Price: {total:.2f}")]
         code = compile_cells(_make_result(cells))
-        assert "print(f" in code
+        assert "{total:.2f}" in code
 
     def test_prose_with_subscript_interpolation(self):
         cells = [Cell(cell_type="prose", content="First: {items[0]}")]
         code = compile_cells(_make_result(cells))
-        assert "print(f" in code
+        assert "{items[0]}" in code
+
+
+class TestProseCompilationEdgeCases:
+    """Edge cases that previously caused SyntaxError with repr()-based compilation."""
+
+    def test_multiline_prose_with_interpolation(self):
+        content = "# Title\n\nFound {count} items.\n\nDone."
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        ns = {"count": 5}
+        compiled = compile(code, "<test>", "exec")
+        _safe_exec(compiled, ns)
+
+    def test_dict_subscript_with_quotes_in_interpolation(self):
+        content = "Value: {data['key']}"
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        ns = {"data": {"key": 42}, "print": print}
+        compiled = compile(code, "<test>", "exec")
+        _safe_exec(compiled, ns)
+
+    def test_nested_braces_in_interpolation(self):
+        content = "Items: {chr(10).join([f'- {x}' for x in items])}"
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        ns = {"items": ["a", "b"], "chr": chr, "print": print}
+        compiled = compile(code, "<test>", "exec")
+        _safe_exec(compiled, ns)
+
+    def test_backslash_in_nested_fstring(self):
+        r"""Backslash-n in nested f-string expression should not cause SyntaxError."""
+        content = r"Rows: {chr(10).join([f'{k}\t{v}' for k, v in data.items()])}"
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        ns = {"data": {"a": 1}, "chr": chr, "print": print}
+        compiled = compile(code, "<test>", "exec")
+        _safe_exec(compiled, ns)
+
+    def test_multiple_interpolations_in_multiline_prose(self):
+        content = "Found {total} files totaling {loc} lines.\n\nAverage: {avg} lines per file."
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        ns = {"total": 100, "loc": 5000, "avg": 50}
+        compiled = compile(code, "<test>", "exec")
+        _safe_exec(compiled, ns)
+
+    def test_triple_quotes_in_prose_with_interpolation(self):
+        content = 'Result is {x} with """emphasis"""'
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        assert "print(" in code
+        compile(code, "<test>", "exec")
+
+    def test_prose_with_literal_backslash(self):
+        content = r"Path: C:\Users\{name}"
+        cells = [Cell(cell_type="prose", content=content)]
+        code = compile_cells(_make_result(cells))
+        compile(code, "<test>", "exec")
+
+
+class TestSplitInterpolation:
+    """Test the brace-matching interpolation splitter directly."""
+
+    def test_no_interpolation(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Hello world")
+        assert parts == [("Hello world", False)]
+
+    def test_simple_variable(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Hello {name}")
+        assert parts == [("Hello ", False), ("name", True)]
+
+    def test_nested_braces(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Items: {chr(10).join([f'- {x}' for x in items])}")
+        assert len(parts) == 2
+        assert parts[0] == ("Items: ", False)
+        assert parts[1][1] is True
+        assert "items" in parts[1][0]
+        assert parts[1][0].startswith("chr(10)")
+
+    def test_multiple_expressions(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("{a} and {b}")
+        assert len(parts) == 3
+        assert parts[0] == ("a", True)
+        assert parts[1] == (" and ", False)
+        assert parts[2] == ("b", True)
+
+    def test_json_braces_not_matched(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation('Config: {"key": "value"}')
+        assert len(parts) == 1
+        assert parts[0][1] is False
+
+    def test_unmatched_brace_treated_as_literal(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Incomplete {expr")
+        assert all(not is_expr for _, is_expr in parts)
 
 
 class TestCodeCompilation:

@@ -22,7 +22,55 @@ from .parser import Cell, ParseResult
 
 CONTINUE_SENTINEL = "__literate_continue__()"
 
-_INTERPOLATION = re.compile(r"\{[A-Za-z_][^}]*\}")
+_INTERPOLATION_START = re.compile(r"\{[A-Za-z_]")
+
+
+def _split_interpolation(content: str) -> list[tuple[str, bool]]:
+    """Split prose into (text, is_expression) parts with proper brace matching.
+
+    Handles nested braces so expressions like {chr(10).join([f"...{x}..."])}
+    are captured as a single expression rather than splitting at the first }.
+    """
+    parts: list[tuple[str, bool]] = []
+    i = 0
+    n = len(content)
+    literal_start = 0
+
+    while i < n:
+        if content[i] == "{" and i + 1 < n and (content[i + 1].isalpha() or content[i + 1] == "_"):
+            if i > literal_start:
+                parts.append((content[literal_start:i], False))
+            depth = 1
+            j = i + 1
+            in_string: str | None = None
+            while j < n and depth > 0:
+                ch = content[j]
+                if in_string:
+                    if ch == "\\" and j + 1 < n:
+                        j += 2
+                        continue
+                    if ch == in_string:
+                        in_string = None
+                elif ch in ('"', "'"):
+                    in_string = ch
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                j += 1
+            if depth == 0:
+                parts.append((content[i + 1 : j - 1], True))
+                literal_start = j
+                i = j
+            else:
+                i += 1
+        else:
+            i += 1
+
+    if literal_start < n:
+        parts.append((content[literal_start:], False))
+
+    return parts
 
 
 def _compile_prose(cell: Cell) -> str:
@@ -30,10 +78,21 @@ def _compile_prose(cell: Cell) -> str:
     if not content.strip():
         return "print()"
 
-    has_interpolation = _INTERPOLATION.search(content)
-    if has_interpolation:
-        return f"print(f{repr(content)})"
-    return f"print({repr(content)})"
+    if not _INTERPOLATION_START.search(content):
+        return f"print({repr(content)})"
+
+    parts = _split_interpolation(content)
+    if not any(is_expr for _, is_expr in parts):
+        return f"print({repr(content)})"
+
+    segments: list[str] = []
+    for text, is_expr in parts:
+        if is_expr:
+            segments.append(f'f"""{{{text}}}"""')
+        else:
+            segments.append(repr(text))
+
+    return f"print({' + '.join(segments)})"
 
 
 def _compile_code(cell: Cell) -> str:
