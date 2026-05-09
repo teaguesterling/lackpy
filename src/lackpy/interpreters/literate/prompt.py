@@ -59,9 +59,16 @@ Available as Python functions in code blocks:
 
 All Python builtins are available. Standard library imports work (import re, json, os, math, etc.).
 
-## The Gather Pattern
+## Execution Model
 
-For tasks requiring exploration before narration, batch your reads:
+- Cells execute **top to bottom**. Variables carry forward to all later cells and prose.
+- No forward references — `{x}` in prose MUST appear AFTER the block that defines `x`.
+- Syntax errors and undefined names are caught before execution. On error, you may be asked to provide replacement cells (@hidden for setup, @scratch to inspect).
+- Errors are patch-forward — you emit corrections, you cannot rewrite earlier cells.
+
+## The Gather-Continue Pattern
+
+@gather blocks execute silently. @continue pauses and returns all variables to the caller, who feeds them back so you can write the narrative.
 
 ```lackpy @gather
 files = search_content("TODO", "src/")
@@ -74,7 +81,7 @@ structure = run_command("find src/ -name '*.py' | head -20")
 ```lackpy @continue
 ```
 
-After @continue, you receive everything gathered and write the narrative section.
+Without @continue, the entire document executes in one shot. Use @gather + @continue when you need to see gathered data before deciding how to present it.
 
 ## Writing and Modifying Files
 
@@ -119,12 +126,14 @@ Title: {first}
 ## Key Rules
 
 1. Your response IS the document — prose renders as output, code executes.
-2. Use {variable} interpolation to weave results into prose.
-3. Use @hidden for setup code the reader doesn't need to see.
-4. Use @gather + @continue for batched exploration before narration.
-5. Use @write and @diff for file modifications.
-6. Code blocks share a namespace — variables defined anywhere are available everywhere after.
-7. If a computation is complex, use @scratch to work through it without cluttering output.\
+2. Cells execute top-to-bottom. No forward references — define variables BEFORE using them.
+3. Use {variable} interpolation to weave results into prose.
+4. Use @hidden for setup code the reader doesn't need to see.
+5. Use @gather + @continue for batched exploration before narration.
+6. Use @write and @diff for file modifications.
+7. Code blocks share a namespace — variables defined anywhere are available everywhere after.
+8. If a computation is complex, use @scratch to work through it without cluttering output.
+9. Annotations go on the FENCE LINE (```lackpy @hidden), never inside the code body.\
 """
 
 

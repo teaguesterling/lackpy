@@ -29,6 +29,8 @@ _ANNOTATION_TYPES: set[str] = {
     "hidden", "gather", "continue", "read", "write", "diff", "scratch",
 }
 
+_BODY_ANNOTATION_RE = re.compile(r"^\s*@(\w+)(?:\(.*\))?\s*$")
+
 _PATH_ANNOTATIONS: set[str] = {"read", "write", "diff"}
 
 _md = MarkdownIt("commonmark")
@@ -176,6 +178,17 @@ def parse(document: str) -> ParseResult:
             errors.append(f"Line {fm_lines + fence_start + 1}: {e}")
 
         content_stripped = content.rstrip("\n")
+
+        if cell_type == "code" and content_stripped:
+            first_line = content_stripped.split("\n", 1)[0]
+            body_m = _BODY_ANNOTATION_RE.match(first_line)
+            if body_m and body_m.group(1) in _ANNOTATION_TYPES:
+                ann = body_m.group(1)
+                errors.append(
+                    f"Line {fm_lines + fence_start + 1}: "
+                    f"@{ann} found inside code body — "
+                    f"annotations go on the fence line: ```lackpy @{ann}"
+                )
 
         if cell_type in _PATH_ANNOTATIONS and "path" not in annotation_args:
             path, content_stripped = _extract_path_from_body(content_stripped)

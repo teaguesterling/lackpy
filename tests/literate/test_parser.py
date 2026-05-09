@@ -154,6 +154,25 @@ class TestAnnotations:
         assert result.cells[0].cell_type == "hidden"
         assert result.cells[0].options == {"echo": "true"}
 
+    def test_annotation_in_body_produces_error(self):
+        doc = "```lackpy\n@hidden\nx = 1\n```"
+        result = parse(doc)
+        assert len(result.errors) == 1
+        assert "inside code body" in result.errors[0]
+        assert "```lackpy @hidden" in result.errors[0]
+
+    def test_annotation_in_body_with_path(self):
+        doc = "```lackpy\n@read(src/main.py)\n```"
+        result = parse(doc)
+        assert len(result.errors) == 1
+        assert "inside code body" in result.errors[0]
+        assert "```lackpy @read" in result.errors[0]
+
+    def test_annotation_in_body_not_triggered_for_decorators(self):
+        doc = "```lackpy\n@decorator\ndef func(): pass\n```"
+        result = parse(doc)
+        assert not result.errors
+
 
 class TestLineNumbers:
     def test_prose_line_numbers(self):
