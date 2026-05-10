@@ -1,9 +1,15 @@
-"""Literate programming interpreter for lackpy.
+"""Literate programming interpreter — top-level entry point.
 
-Executes markdown documents with embedded ```lackpy code blocks.
-The execution pipeline: parse markdown → cell sequence → execute
-cells one-by-one through LightweightKernel → captured stdout IS
+Pipeline: document → parser.parse() → [Cell] → kernel.execute_cell() → stdout
+
+The kernel compiles each cell type to Python via compiler._COMPILERS,
+runs static analysis (compile check + AST name resolution), then
+evaluates the code in a shared namespace dict. Captured stdout IS
 the rendered document.
+
+This module owns the batch execution path (LiterateInterpreter.execute).
+The streaming path uses kernel.StreamingDriver instead — it adds
+recovery, plugin orchestration, and parse-as-you-generate execution.
 """
 
 from __future__ import annotations
@@ -77,6 +83,7 @@ class LiterateInterpreter:
 
         output_parts: list[str] = []
         continue_requested = False
+        assigned_names: set[str] = set()
 
         for index, cell in enumerate(parsed.cells):
             result = kernel.execute_cell(cell, index)
@@ -92,17 +99,19 @@ class LiterateInterpreter:
             if result.output:
                 output_parts.append(result.output)
 
+            assigned_names.update(result.namespace_delta.keys())
+
             if result.namespace_delta.get("__continue_requested__"):
                 continue_requested = True
 
         elapsed = (time.perf_counter() - start) * 1000
 
-        # Filter variables the same way the old implementation did:
-        # exclude underscore-prefixed, internal tool names, and callables
         raw_ns = kernel.get_namespace()
         variables = {
             k: v for k, v in raw_ns.items()
-            if k not in _INTERNAL_NAMES and not callable(v)
+            if k in assigned_names
+            and k not in _INTERNAL_NAMES
+            and not callable(v)
         }
 
         rendered = "".join(output_parts)

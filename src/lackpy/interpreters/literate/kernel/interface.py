@@ -1,4 +1,11 @@
-"""Kernel interface protocol and result types."""
+"""Kernel interface protocol and result types.
+
+KernelInterface defines the contract that LightweightKernel implements.
+CellResult carries success/failure, captured output, and the namespace
+delta (new or changed variables) for each cell execution.
+
+Called by: StreamingDriver._execute_cells(), LiterateInterpreter.execute()
+"""
 
 from __future__ import annotations
 

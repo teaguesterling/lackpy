@@ -1,8 +1,18 @@
 """Parse literate markdown documents into cell sequences.
 
-Uses markdown-it-py for proper fence detection, then extracts prose
-from raw source text between fences. Frontmatter is parsed separately
-since it's not part of CommonMark.
+Entry point for the batch path: parse(document) → ParseResult with
+a list of Cell objects. Uses markdown-it-py for proper fence detection,
+then extracts prose from raw source text between fences. Frontmatter
+is parsed separately since --- is <hr> in CommonMark.
+
+The streaming path uses kernel.StreamingCellParser instead, which
+detects fences incrementally in partial model output.
+
+Cell types are determined by the fence info string:
+  ```lackpy           → code
+  ```lackpy @hidden   → hidden
+  ```lackpy @read(p)  → read (with path)
+  (text between fences) → prose
 """
 
 from __future__ import annotations

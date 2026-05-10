@@ -1,4 +1,15 @@
-"""Streaming driver - orchestrates parse, kernel, recovery, plugins."""
+"""Streaming driver — orchestrates parse, kernel, recovery, and plugins.
+
+The driver is the streaming execution path's top-level orchestrator:
+  1. StreamingCellParser yields Cell objects from partial model output
+  2. For each cell, the driver calls kernel.execute_cell()
+  3. On success, output is appended and plugins are notified
+  4. On failure, the RecoveryHandler is consulted (fix/inspect/skip/abort)
+  5. @continue cells pause execution and set continue_requested
+
+The batch path (LiterateInterpreter.execute) bypasses the driver and
+calls LightweightKernel directly — no recovery, no plugins.
+"""
 
 from __future__ import annotations
 

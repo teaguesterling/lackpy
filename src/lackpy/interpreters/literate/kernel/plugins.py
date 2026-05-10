@@ -1,4 +1,13 @@
-"""Execution plugin protocol and advice types."""
+"""Execution plugin protocol and advice types.
+
+Plugins observe cell execution and provide advice on errors. The
+StreamingDriver calls plugin hooks at each lifecycle point:
+  on_cell_start → on_cell_success or on_cell_error → on_recovery_result
+
+On error, plugins return PluginAdvice (hints, doc_context, suggestion)
+which the driver merges and passes to the RecoveryHandler. This is how
+coaching systems like Kibitzer can influence recovery without owning it.
+"""
 
 from __future__ import annotations
 

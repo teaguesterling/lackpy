@@ -52,6 +52,9 @@ Prose text can include `{expression}` for variable interpolation. The compiler s
 
 **The compiler handles nested braces correctly.** An expression like `{chr(10).join([f'- {x}' for x in items])}` is captured as a single expression because the splitter tracks brace depth.
 
+**Escaping literal braces:**
+- `{{variable}}` in prose produces literal `{variable}` — doubled braces are not interpolated
+
 **What is NOT interpolation:**
 - `{"key": "value"}` — starts with `"`, not an identifier
 - `{123}` — starts with a digit

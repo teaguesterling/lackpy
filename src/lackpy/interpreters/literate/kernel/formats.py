@@ -1,4 +1,11 @@
-"""Format converters: execution log / .ipynb / markdown."""
+"""Format converters: execution log ↔ .ipynb ↔ markdown.
+
+Converts between the driver's CellExecutionEvent log and two output formats:
+  to_notebook() — .ipynb with lackpy metadata for round-trip fidelity.
+                  Loading it back via from_notebook() + kernel = "Restart and Run All."
+  render_markdown() — the literate document the model should have written
+                      after recovery fixes. Skipped/aborted cells are omitted.
+"""
 
 from __future__ import annotations
 

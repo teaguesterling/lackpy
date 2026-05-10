@@ -1,4 +1,13 @@
-"""Streaming cell parser - detects fence boundaries in partial input."""
+"""Streaming cell parser — detects fence boundaries in partial model output.
+
+Used by StreamingDriver to parse-as-you-generate: the model's response
+streams in via feed(), and complete Cell objects are yielded as soon as
+their closing fence arrives. Prose before a fence is held until the
+fence completes, so partial fences don't emit incorrect prose cells.
+
+Not used by the batch path (LiterateInterpreter), which uses parser.parse()
+on the complete document instead.
+"""
 
 from __future__ import annotations
 

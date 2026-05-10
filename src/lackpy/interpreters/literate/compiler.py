@@ -1,15 +1,26 @@
-"""Compile a cell sequence into a single Python program.
+"""Compile parsed cells into Python source code.
 
-Each cell type has its own compilation rule:
-- prose → print(f"...") with {expr} interpolation
-- code → pass through
-- @hidden → pass through (no print wrapping)
-- @gather → pass through
-- @continue → emit sentinel that executor recognizes as pause point
-- @read(path) → print(read_file(path))
-- @write(path) → write_file(path, content)
-- @diff(path) → apply_diff(path, diff_text)
-- @scratch → capture new variables, emit summary
+Each cell type maps to a compiler function in _COMPILERS. The kernel
+calls these via _COMPILERS[cell.cell_type](cell) to get Python source,
+which it then passes through static_analysis.check_cell() and runs
+in the kernel namespace.
+
+Compilation rules:
+  prose    → print() with brace-matching interpolation: each {expr}
+             compiles to its own triple-quoted f-string,
+             literal text uses repr(). Concatenated with +.
+  code     → pass through
+  @hidden  → pass through (same as code; visibility is the driver's concern)
+  @gather  → pass through
+  @continue → sentinel function call that the kernel detects
+  @read    → print(read_file(path))
+  @write   → write_file(path, content)
+  @diff    → apply_diff(path, diff_text)
+  @scratch → capture locals() diff, print variable summary
+
+The _split_interpolation() function handles prose interpolation by
+tracking brace depth and string context to correctly parse nested
+expressions like {chr(10).join([f"...{x}..." for x in items])}.
 """
 
 from __future__ import annotations
@@ -30,6 +41,7 @@ def _split_interpolation(content: str) -> list[tuple[str, bool]]:
 
     Handles nested braces so expressions like {chr(10).join([f"...{x}..."])}
     are captured as a single expression rather than splitting at the first }.
+    Doubled braces ({{ and }}) produce literal { and } characters.
     """
     parts: list[tuple[str, bool]] = []
     i = 0
@@ -37,40 +49,62 @@ def _split_interpolation(content: str) -> list[tuple[str, bool]]:
     literal_start = 0
 
     while i < n:
-        if content[i] == "{" and i + 1 < n and (content[i + 1].isalpha() or content[i + 1] == "_"):
-            if i > literal_start:
-                parts.append((content[literal_start:i], False))
-            depth = 1
-            j = i + 1
-            in_string: str | None = None
-            while j < n and depth > 0:
-                ch = content[j]
-                if in_string:
-                    if ch == "\\" and j + 1 < n:
-                        j += 2
-                        continue
-                    if ch == in_string:
-                        in_string = None
-                elif ch in ('"', "'"):
-                    in_string = ch
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                j += 1
-            if depth == 0:
-                parts.append((content[i + 1 : j - 1], True))
-                literal_start = j
-                i = j
+        if content[i] == "{" and i + 1 < n:
+            if content[i + 1] == "{":
+                # {{ → literal {
+                parts.append((content[literal_start:i] + "{", False))
+                i += 2
+                literal_start = i
+                continue
+            if content[i + 1].isalpha() or content[i + 1] == "_":
+                if i > literal_start:
+                    parts.append((content[literal_start:i], False))
+                depth = 1
+                j = i + 1
+                in_string: str | None = None
+                while j < n and depth > 0:
+                    ch = content[j]
+                    if in_string:
+                        if ch == "\\" and j + 1 < n:
+                            j += 2
+                            continue
+                        if ch == in_string:
+                            in_string = None
+                    elif ch in ('"', "'"):
+                        in_string = ch
+                    elif ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                    j += 1
+                if depth == 0:
+                    parts.append((content[i + 1 : j - 1], True))
+                    literal_start = j
+                    i = j
+                else:
+                    i += 1
             else:
                 i += 1
+        elif content[i] == "}" and i + 1 < n and content[i + 1] == "}":
+            # }} → literal }
+            parts.append((content[literal_start:i] + "}", False))
+            i += 2
+            literal_start = i
         else:
             i += 1
 
     if literal_start < n:
         parts.append((content[literal_start:], False))
 
-    return parts
+    # Merge adjacent literal parts (produced by escape sequences)
+    merged: list[tuple[str, bool]] = []
+    for text, is_expr in parts:
+        if not is_expr and merged and not merged[-1][1]:
+            merged[-1] = (merged[-1][0] + text, False)
+        else:
+            merged.append((text, is_expr))
+
+    return merged
 
 
 def _compile_prose(cell: Cell) -> str:
@@ -83,7 +117,8 @@ def _compile_prose(cell: Cell) -> str:
 
     parts = _split_interpolation(content)
     if not any(is_expr for _, is_expr in parts):
-        return f"print({repr(content)})"
+        resolved = "".join(text for text, _ in parts)
+        return f"print({repr(resolved)})"
 
     segments: list[str] = []
     for text, is_expr in parts:

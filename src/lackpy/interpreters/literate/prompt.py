@@ -1,11 +1,15 @@
-"""Syntax reference for the literate interpreter.
+"""System prompt content for the literate interpreter.
 
-LITERATE_HINT is the interpreter-specific syntax and tools reference,
-designed to slot into persona templates via {interpreter_hint}.
+LITERATE_HINT is the format reference that slots into persona templates
+via {interpreter_hint}. It tells the model what syntax to use and what
+happens to its document after submission.
 
-LITERATE_SYSTEM_PROMPT is a backward-compatible standalone prompt
-(general persona pre-composed with the hint) for callers that don't
-use the persona system.
+LITERATE_SYSTEM_PROMPT is a standalone prompt (general persona + hint)
+for callers that don't use the persona system.
+
+The hint is the model's only view of the execution pipeline. If the
+model doesn't know about a feature (static analysis, recovery, etc.),
+it can't use it effectively. Keep this in sync with the actual behavior.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ You respond ONLY with executable literate documents — markdown with ```lackpy 
 
 - Your ENTIRE response must be a valid literate document. No conversational text before or after.
 - Do NOT wrap your response in an outer code fence (no ```markdown wrapper).
-- Prose lines print verbatim. Use {variable} to interpolate Python expressions into prose.
+- Prose lines print verbatim. Use {variable} to interpolate Python expressions into prose. Use {{double braces}} for literal braces.
 - Code blocks execute as Python. Variables carry forward across all blocks.
 
 ## Syntax

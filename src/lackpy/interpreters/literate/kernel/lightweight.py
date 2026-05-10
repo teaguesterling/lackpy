@@ -1,4 +1,17 @@
-"""Lightweight kernel: exec-into-dict with static analysis."""
+"""Lightweight kernel: exec-into-dict with static analysis.
+
+For each cell, the kernel: (1) looks up the compiler for the cell type
+in compiler._COMPILERS, (2) runs static_analysis.check_cell() to catch
+syntax errors and undefined names before evaluation, (3) evaluates the
+compiled Python in a persistent namespace dict with stdout captured.
+
+The namespace persists across all cells — variables defined in any cell
+(including @gather and @hidden) are available to all later cells. This
+is what makes prose interpolation work: {variable} in prose compiles to
+an f-string expression evaluated against the same namespace.
+
+Called by: StreamingDriver, LiterateInterpreter.execute()
+"""
 
 from __future__ import annotations
 

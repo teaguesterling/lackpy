@@ -166,6 +166,23 @@ class TestSplitInterpolation:
         parts = _split_interpolation("Incomplete {expr")
         assert all(not is_expr for _, is_expr in parts)
 
+    def test_double_brace_escape(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Use {{variable}} in prose")
+        assert parts == [("Use {variable} in prose", False)]
+
+    def test_double_brace_escape_with_interpolation(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("{{escaped}} and {real}")
+        assert len(parts) == 2
+        assert parts[0] == ("{escaped} and ", False)
+        assert parts[1] == ("real", True)
+
+    def test_double_close_brace_escape(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Result: }} done")
+        assert parts == [("Result: } done", False)]
+
 
 class TestCodeCompilation:
     def test_code_passthrough(self):

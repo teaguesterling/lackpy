@@ -1,4 +1,17 @@
-"""Recovery handler protocol and built-in handlers."""
+"""Recovery handler protocol and built-in handlers.
+
+Called by StreamingDriver._handle_failure() when a cell fails.
+The handler receives RecoveryContext (failed cell, error, scope,
+plugin advice) and returns a RecoveryAction:
+  - fix: execute replacement cells (handler parses model response)
+  - inspect: evaluate an expression, feed result back to handler
+  - skip: mark cell skipped, continue with next
+  - abort: stop execution
+
+Two built-in handlers:
+  NoRecoveryHandler — always aborts. Used by the batch path and tests.
+  InferenceRecoveryHandler — calls a model to generate replacement cells.
+"""
 
 from __future__ import annotations
 

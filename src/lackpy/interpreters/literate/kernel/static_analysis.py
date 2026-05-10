@@ -1,8 +1,14 @@
 """Static analysis for cell pre-flight checks.
 
-Performs two checks before executing a cell:
-1. compile() - catches syntax errors, malformed f-strings
-2. AST name resolution - catches undefined references
+Called by LightweightKernel.execute_cell() BEFORE every cell evaluation.
+Two checks:
+  1. compile() — catches syntax errors, malformed f-strings
+  2. AST name resolution — walks the AST to find Name(Load) nodes and
+     verifies each against known_names (kernel namespace) + builtins.
+     Catches forward references like using {x} before defining x.
+
+Raises StaticAnalysisError on failure; the kernel returns this as
+CellResult(success=False, error_phase="static").
 """
 
 from __future__ import annotations
