@@ -53,6 +53,7 @@ class Cell:
     annotation_args: dict[str, str] = field(default_factory=dict)
     line_number: int = 0
     options: dict[str, str] = field(default_factory=dict)
+    truncated: bool = False
 
 
 @dataclass

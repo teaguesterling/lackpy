@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import re
 
-from ..parser import Cell, Frontmatter, _parse_info_string, _PATH_ANNOTATIONS, _extract_path_from_body
+from ..parser import (
+    Cell, Frontmatter, _parse_info_string, _PATH_ANNOTATIONS,
+    _extract_path_from_body, _BODY_ANNOTATION_RE, _ANNOTATION_TYPES,
+)
 
 _FENCE_OPEN = re.compile(r"^```(\S.*)?$", re.MULTILINE)
 _FENCE_CLOSE = re.compile(r"^```\s*$", re.MULTILINE)
@@ -61,7 +64,9 @@ class StreamingCellParser:
                 if after_open < len(buf) and buf[after_open] == "\n":
                     after_open += 1
                 content = buf[after_open:].rstrip("\n")
-                cells.append(self._make_fence_cell(info, content))
+                cell = self._make_fence_cell(info, content)
+                cell.truncated = True
+                cells.append(cell)
                 self._buffer = ""
                 return cells
 
@@ -192,6 +197,15 @@ class StreamingCellParser:
             path, content = _extract_path_from_body(content)
             if path:
                 annotation_args["path"] = path
+
+        # Auto-correct misplaced annotations (e.g. @hidden on first line of body)
+        if cell_type == "code" and content:
+            first_line = content.split("\n", 1)[0]
+            body_m = _BODY_ANNOTATION_RE.match(first_line)
+            if body_m and body_m.group(1) in _ANNOTATION_TYPES:
+                cell_type = body_m.group(1)
+                content = content.split("\n", 1)[1] if "\n" in content else ""
+
         return Cell(
             cell_type=cell_type,
             content=content,

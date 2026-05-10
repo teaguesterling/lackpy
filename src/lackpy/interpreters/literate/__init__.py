@@ -138,6 +138,7 @@ _INTERNAL_NAMES = frozenset({
     "read_file", "write_file", "apply_diff",
     "search_content", "run_command", "run_tests",
     "__literate_continue__", "__builtins__",
+    "__continue_requested__",
 })
 
 

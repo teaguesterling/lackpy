@@ -196,3 +196,12 @@ class TestPluginNotifications:
         await driver.flush()
         assert plugin.started == [0]
         assert plugin.succeeded == [0]
+
+
+class TestTruncationWarning:
+    @pytest.mark.asyncio
+    async def test_truncated_cell_produces_warning(self, driver):
+        await driver.feed("```lackpy\nx = 1\n")
+        await driver.flush()
+        assert "[warning:" in driver.rendered_output
+        assert "truncated" in driver.rendered_output

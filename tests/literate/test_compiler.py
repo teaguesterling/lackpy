@@ -183,6 +183,24 @@ class TestSplitInterpolation:
         parts = _split_interpolation("Result: }} done")
         assert parts == [("Result: } done", False)]
 
+    def test_unmatched_doubled_open_brace(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Text {{}")
+        assert len(parts) == 1
+        assert parts[0] == ("Text {}", False)
+
+    def test_triple_close_brace(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("Result: }}}")
+        assert all(not is_expr for _, is_expr in parts)
+        resolved = "".join(text for text, _ in parts)
+        assert resolved == "Result: }}"
+
+    def test_escaped_brace_adjacent_to_expression(self):
+        from lackpy.interpreters.literate.compiler import _split_interpolation
+        parts = _split_interpolation("{{{x}}}")
+        assert parts == [("{", False), ("x", True), ("}", False)]
+
 
 class TestCodeCompilation:
     def test_code_passthrough(self):

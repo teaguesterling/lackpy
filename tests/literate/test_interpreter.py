@@ -191,6 +191,29 @@ class TestMetadata:
         result = await interpreter.execute(doc, context)
         assert result.duration_ms > 0
 
+    @pytest.mark.asyncio
+    async def test_variables_exclude_internals_and_tools(self, interpreter, context):
+        doc = """\
+```lackpy @gather
+import os
+items = [1, 2, 3]
+for x in items:
+    pass
+result = sum(items)
+```
+
+```lackpy @continue
+```"""
+        result = await interpreter.execute(doc, context)
+        assert result.success
+        variables = result.metadata["variables"]
+        assert "result" in variables
+        assert "items" in variables
+        assert "read_file" not in variables
+        assert "write_file" not in variables
+        assert "__builtins__" not in variables
+        assert "__continue_requested__" not in variables
+
 
 class TestErrorHandling:
     @pytest.mark.asyncio

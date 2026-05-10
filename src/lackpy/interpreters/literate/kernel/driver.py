@@ -103,6 +103,11 @@ class StreamingDriver:
             index = self._cell_counter
             self._cell_counter += 1
 
+            if cell.truncated:
+                self._output_parts.append(
+                    "[warning: cell may be truncated — model hit token limit]\n"
+                )
+
             self._notify_start(cell, index)
             result = self._kernel.execute_cell(cell, index)
 

@@ -15,6 +15,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import time
+
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -28,29 +30,54 @@ DEFAULT_MODEL = "qwen3:8b"
 OLLAMA_URL = "http://localhost:11434"
 
 
+async def _progress_indicator(label: str) -> None:
+    """Print dots to stderr while waiting for a response."""
+    print(f"  {label} ", end="", file=sys.stderr, flush=True)
+    try:
+        while True:
+            await asyncio.sleep(3)
+            print(".", end="", file=sys.stderr, flush=True)
+    except asyncio.CancelledError:
+        print(file=sys.stderr)
+
+
 async def call_ollama(
     prompt: str,
     model: str = DEFAULT_MODEL,
     system: str = "",
+    num_predict: int = 8192,
+    verbose: bool = False,
 ) -> str:
     """Call Ollama and return the response text."""
-    async with httpx.AsyncClient(timeout=600.0) as client:
-        response = await client.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "system": system,
-                "stream": False,
-                "options": {
-                    "temperature": 0.7,
-                    "num_predict": 8192,
+    indicator = asyncio.create_task(_progress_indicator("Generating")) if verbose else None
+    start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "system": system,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": num_predict,
+                    },
                 },
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["response"]
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["response"]
+    finally:
+        if indicator:
+            indicator.cancel()
+            try:
+                await indicator
+            except asyncio.CancelledError:
+                pass
+            elapsed = time.perf_counter() - start
+            print(f"  ({elapsed:.1f}s)", file=sys.stderr)
 
 
 async def run_literate_agent(
@@ -60,6 +87,7 @@ async def run_literate_agent(
     max_iterations: int = 3,
     verbose: bool = False,
     persona: str = DEFAULT_PERSONA,
+    num_predict: int = 8192,
 ) -> str:
     """Run the literate agent loop.
 
@@ -89,7 +117,7 @@ async def run_literate_agent(
             print(f"Iteration {iteration + 1}/{max_iterations}", file=sys.stderr)
             print(f"{'='*60}", file=sys.stderr)
 
-        response = await call_ollama(full_prompt, model=model, system=system_prompt)
+        response = await call_ollama(full_prompt, model=model, system=system_prompt, num_predict=num_predict, verbose=verbose)
 
         if verbose:
             print(f"\n--- Model Response ---", file=sys.stderr)
@@ -134,6 +162,7 @@ def main():
         choices=sorted(PERSONAS),
         help=f"System prompt persona (default: {DEFAULT_PERSONA})",
     )
+    parser.add_argument("--num-predict", type=int, default=8192, help="Max tokens for model response (default: 8192)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show model responses on stderr")
     args = parser.parse_args()
 
@@ -144,6 +173,7 @@ def main():
         max_iterations=args.max_iterations,
         verbose=args.verbose,
         persona=args.persona,
+        num_predict=args.num_predict,
     ))
     print(output)
 

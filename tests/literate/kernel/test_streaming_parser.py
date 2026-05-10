@@ -85,6 +85,17 @@ class TestStreamingBehavior:
         assert cells[0].cell_type == "code"
         assert cells[0].content == "x = 1"
 
+    def test_unclosed_fence_on_flush_marked_truncated(self, parser):
+        parser.feed("```lackpy\nx = 1\n")
+        cells = parser.flush()
+        assert len(cells) == 1
+        assert cells[0].truncated is True
+
+    def test_closed_fence_not_truncated(self, parser):
+        cells = parser.feed("```lackpy\nx = 1\n```\n")
+        assert len(cells) == 1
+        assert cells[0].truncated is False
+
 
 class TestFrontmatter:
     def test_frontmatter_consumed(self, parser):
@@ -101,6 +112,31 @@ class TestFrontmatter:
         parser.feed(text)
         parser.flush()
         assert parser.frontmatter.echo == "true"
+
+
+class TestAnnotationAutoCorrection:
+    def test_hidden_in_body_auto_corrected(self, parser):
+        cells = parser.feed("```lackpy\n@hidden\nx = 1\n```\n")
+        assert len(cells) == 1
+        assert cells[0].cell_type == "hidden"
+        assert cells[0].content == "x = 1"
+
+    def test_gather_in_body_auto_corrected(self, parser):
+        cells = parser.feed("```lackpy\n@gather\ndata = 42\n```\n")
+        assert len(cells) == 1
+        assert cells[0].cell_type == "gather"
+        assert cells[0].content == "data = 42"
+
+    def test_decorator_not_auto_corrected(self, parser):
+        cells = parser.feed("```lackpy\n@decorator\ndef f(): pass\n```\n")
+        assert len(cells) == 1
+        assert cells[0].cell_type == "code"
+
+    def test_fence_line_annotation_unchanged(self, parser):
+        cells = parser.feed("```lackpy @hidden\nx = 1\n```\n")
+        assert len(cells) == 1
+        assert cells[0].cell_type == "hidden"
+        assert cells[0].content == "x = 1"
 
 
 class TestReset:

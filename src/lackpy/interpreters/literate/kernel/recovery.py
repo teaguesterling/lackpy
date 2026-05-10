@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..parser import Cell
+from ..parser import Cell, _BODY_ANNOTATION_RE, _ANNOTATION_TYPES
 from .plugins import PluginAdvice
 
 
@@ -116,12 +116,30 @@ class InferenceRecoveryHandler:
                 for doc in ctx.plugin_advice.doc_context:
                     parts.append(f"  {doc}")
 
+        if self._is_annotation_placement_error(ctx):
+            first_line = ctx.failed_cell.content.split("\n", 1)[0].strip()
+            parts.append(
+                f"\nNote: '{first_line}' is an annotation — it goes on the fence line "
+                f"(```lackpy {first_line}), not inside the code body."
+            )
+
         parts.append(
             "\nFix this cell. Return replacement cells as a literate document fragment. "
             "You may add @hidden blocks before the cell to pre-compute values. "
             "Use @scratch if you need to inspect a value first."
         )
         return "\n".join(parts)
+
+    @staticmethod
+    def _is_annotation_placement_error(ctx: RecoveryContext) -> bool:
+        if "inside code body" in (ctx.error or ""):
+            return True
+        if ctx.failed_cell.content:
+            first_line = ctx.failed_cell.content.split("\n", 1)[0]
+            m = _BODY_ANNOTATION_RE.match(first_line)
+            if m and m.group(1) in _ANNOTATION_TYPES:
+                return True
+        return False
 
     def _build_inspect_followup(self, ctx: RecoveryContext, result: str) -> str:
         return (

@@ -71,6 +71,35 @@ class TestInferenceRecoveryHandler:
         handler.on_cell_error(ctx)
         assert "Try importing the module" in prompts_seen[0]
 
+    def test_annotation_placement_hint_in_prompt(self):
+        prompts_seen: list[str] = []
+
+        async def fake_infer(prompt: str) -> str:
+            prompts_seen.append(prompt)
+            return "```lackpy @hidden\nfoo = 1\n```"
+
+        handler = InferenceRecoveryHandler(infer_fn=fake_infer, max_attempts=2)
+        ctx = _make_context(
+            failed_cell=Cell(cell_type="code", content="@hidden\nx = 1"),
+            error="@hidden found inside code body — annotations go on the fence line",
+            error_phase="parse",
+        )
+        handler.on_cell_error(ctx)
+        assert "fence line" in prompts_seen[0]
+        assert "@hidden" in prompts_seen[0]
+
+    def test_no_annotation_hint_for_normal_errors(self):
+        prompts_seen: list[str] = []
+
+        async def fake_infer(prompt: str) -> str:
+            prompts_seen.append(prompt)
+            return "```lackpy @hidden\nfoo = 1\n```"
+
+        handler = InferenceRecoveryHandler(infer_fn=fake_infer, max_attempts=2)
+        ctx = _make_context()
+        handler.on_cell_error(ctx)
+        assert "fence line" not in prompts_seen[0]
+
     def test_inspect_result_fed_back(self):
         call_count = [0]
 
