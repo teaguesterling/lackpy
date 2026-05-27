@@ -80,5 +80,6 @@ class PolicyContext(TypedDict, total=False):
     principal: Principal
     model: ModelSpec
     session_id: str
+    mode: str  # active operating mode (implement/review/explore) for mode-scoped policy
     history: Any  # StepContext | None
     trace: Any  # Trace | None

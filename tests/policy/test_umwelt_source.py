@@ -33,7 +33,7 @@ class FakePolicyEngine:
     def __init__(self, tool_entries: list[dict]):
         self._entries = tool_entries
 
-    def resolve_all(self, type: str = "tool"):
+    def resolve_all(self, type: str = "tool", context=None):
         return self._entries
 
 

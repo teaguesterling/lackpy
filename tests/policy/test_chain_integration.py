@@ -43,7 +43,7 @@ class FakePolicyEngine:
     def __init__(self, tool_entries):
         self._entries = tool_entries
 
-    def resolve_all(self, type="tool"):
+    def resolve_all(self, type="tool", context=None):
         return self._entries
 
 
@@ -135,9 +135,9 @@ class TestFullStack:
             FakeKibitzerSession(coaching="\n- Be careful with edit_file"),
         ))
         layer.add_source(UmweltPolicySource(FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
-            {"id": "find_files", "visible": "true"},
-            {"id": "edit_file", "visible": "false"},
+            {"entity_id": "read_file", "properties": {"allow": "true"}},
+            {"entity_id": "find_files", "properties": {"allow": "true"}},
+            {"entity_id": "edit_file", "properties": {"allow": "false"}},
         ])))
 
         result = layer.resolve({"kit": kit})
@@ -152,9 +152,9 @@ class TestFullStack:
         layer = PolicyLayer()
         layer.add_source(KitPolicySource(toolbox))
         layer.add_source(UmweltPolicySource(FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
-            {"id": "edit_file", "visible": "true"},
-            {"id": "bash", "visible": "true"},
+            {"entity_id": "read_file", "properties": {"allow": "true"}},
+            {"entity_id": "edit_file", "properties": {"allow": "true"}},
+            {"entity_id": "bash", "properties": {"allow": "true"}},
         ])))
 
         result = layer.resolve({"kit": kit})
@@ -170,8 +170,8 @@ class TestKitPlusUmwelt:
         layer = PolicyLayer()
         layer.add_source(KitPolicySource(toolbox))
         layer.add_source(UmweltPolicySource(FakePolicyEngine([
-            {"id": "read_file", "visible": "true", "max_level": "1"},
-            {"id": "edit_file", "visible": "false"},
+            {"entity_id": "read_file", "properties": {"allow": "true", "max-level": "1"}},
+            {"entity_id": "edit_file", "properties": {"allow": "false"}},
         ])))
 
         result = layer.resolve({"kit": kit})

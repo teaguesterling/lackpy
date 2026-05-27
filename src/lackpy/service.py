@@ -303,6 +303,11 @@ class LackpyService:
         policy_context: PolicyContext = {"kit": resolved}
         if model_name:
             policy_context["model"] = ModelSpec(name=model_name)
+        # Thread the active operating mode (if kibitzer is tracking one) so umwelt's
+        # mode-scoped policy resolves to the mode the agent is actually in.
+        active_mode = getattr(self._kibitzer, "mode", None)
+        if active_mode:
+            policy_context["mode"] = active_mode
         policy = self._policy.resolve(policy_context)
         namespace_desc = policy.namespace_desc or resolved.description
 

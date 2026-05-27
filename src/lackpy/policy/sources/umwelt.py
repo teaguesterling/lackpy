@@ -42,7 +42,12 @@ class UmweltPolicySource:
         self._engine = engine
 
     def resolve(self, current: PolicyResult, context: PolicyContext) -> PolicyResult:
-        tool_entries = self._engine.resolve_all(type="tool")
+        # Thread the active operating mode so mode-scoped rules resolve correctly.
+        # Without a mode, an explicit empty context yields the unscoped baseline rather
+        # than letting every mode's rules compete (which over-restricts every mode).
+        mode = context.get("mode")
+        resolve_ctx = {"mode": mode} if mode else {}
+        tool_entries = self._engine.resolve_all(type="tool", context=resolve_ctx)
 
         allowed: set[str] = set()
         denied: set[str] = set()
