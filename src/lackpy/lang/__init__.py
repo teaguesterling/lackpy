@@ -8,20 +8,20 @@ This package is a **leaf**: `tests/lang/test_no_upward_deps.py` guards that noth
 imports "upward" into run/kit/policy/infer/service/interpreters. That guard is what makes
 `lackpy-lang` an extractable boundary rather than an aspiration.
 """
-from lackpy.lang.grammar import (
+from .grammar import (
     ALLOWED_BUILTINS,
     ALLOWED_NODES,
     FORBIDDEN_NAMES,
     FORBIDDEN_NODES,
 )
-from lackpy.lang.grader import (
+from .grader import (
     DEFAULT_EFFECTS_CEILING,
     DEFAULT_GRADE_W,
     Grade,
     compute_grade,
 )
-from lackpy.lang.spec import format_spec, get_spec
-from lackpy.lang.validator import ValidationResult, validate
+from .spec import format_spec, get_spec
+from .validator import ValidationResult, validate
 
 __all__ = [
     # grammar — the restriction surface

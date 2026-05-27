@@ -40,3 +40,16 @@ def test_lang_is_a_leaf_no_upward_imports():
     assert not violations, (
         f"lackpy.lang must be a pure leaf, but found upward imports: {violations}"
     )
+
+
+def test_lang_is_relocatable_no_absolute_self_imports():
+    """lang must reference its own modules RELATIVELY (from .grammar import ...), not
+    absolutely (from lackpy.lang.grammar ...). Absolute self-imports tie the package to
+    the `lackpy.lang` path and break when it is relocated/distributed standalone — which
+    is exactly the bug the lackpy-lang wheel proof surfaced."""
+    offenders = []
+    for py in LANG_DIR.rglob("*.py"):
+        for module, _ in _imported_modules(py):
+            if module.startswith("lackpy.lang"):
+                offenders.append((py.name, module))
+    assert not offenders, f"lang/ should self-import relatively, not absolutely: {offenders}"
