@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
-
 import pytest
 
 from lackpy.policy.types import PolicyResult, PolicyContext
@@ -145,3 +142,18 @@ class TestKibitzerPolicySourceCoaching:
         context: PolicyContext = {"kit": empty_kit}
         result = source.resolve(current, context)
         assert result.namespace_desc is None
+
+    def test_skips_coaching_when_session_lacks_methods(self, empty_kit):
+        # The real KibitzerSession exposes get_correction_hints but NOT
+        # has_coaching/apply_coaching — the production case the guard exists for.
+        # Every other mock here implements both, so without this test a "cleanup"
+        # of the guard would re-introduce the crash with all suites still green.
+        class BareSession:
+            def get_correction_hints(self, **_):
+                return FakeHints()
+
+        source = KibitzerPolicySource(BareSession())
+        current = PolicyResult(namespace_desc="tools: read_file")
+        context: PolicyContext = {"kit": empty_kit}
+        result = source.resolve(current, context)  # must not raise
+        assert result.namespace_desc == "tools: read_file"
