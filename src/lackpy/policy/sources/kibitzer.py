@@ -39,8 +39,15 @@ class KibitzerPolicySource:
                     docs.append(correction.doc_context)
 
         ns_desc = current.namespace_desc
-        if ns_desc and self._session.has_coaching():
-            ns_desc = self._session.apply_coaching(ns_desc)
+        # Optional namespace-description coaching hook. The current KibitzerSession does not
+        # expose has_coaching()/apply_coaching() (the active coaching path is the correction
+        # hints + suggestions above), so guard rather than assume the API — calling missing
+        # methods here previously crashed every kibitzer-backed delegation. Use it if a
+        # session provides it; skip gracefully otherwise.
+        _has = getattr(self._session, "has_coaching", None)
+        _apply = getattr(self._session, "apply_coaching", None)
+        if ns_desc and callable(_has) and callable(_apply) and _has():
+            ns_desc = _apply(ns_desc)
 
         return current.replace(
             namespace_desc=ns_desc,
