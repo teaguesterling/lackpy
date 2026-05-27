@@ -78,6 +78,17 @@ def test_literate_kernel_conforms_to_IncrementalInterpreter():
     assert isinstance(LightweightKernel(), IncrementalInterpreter)
 
 
+def test_KernelInterface_declares_the_runtime_base():
+    """The lift is WIRED, not coincidental: literate's KernelInterface explicitly
+    extends the runtime IncrementalInterpreter, so the relationship is in the type
+    hierarchy. Guards against the contract drifting back into a parallel duplicate —
+    a 'cleanup' that drops the base class would fail here while isinstance() above
+    still passes (LightweightKernel is structurally conformant either way)."""
+    from lackpy.interpreters.literate.kernel.interface import KernelInterface
+
+    assert IncrementalInterpreter in KernelInterface.__mro__
+
+
 def test_delegating_propagates_sub_failure():
     """A delegating interpreter must pass the sub's failure through unchanged (still
     annotated), not swallow or alter it."""
