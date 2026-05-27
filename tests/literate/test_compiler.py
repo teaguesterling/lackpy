@@ -1,5 +1,7 @@
 """Tests for the literate document compiler."""
 
+import sys
+
 import pytest
 
 from lackpy.interpreters.literate.compiler import (
@@ -94,6 +96,10 @@ class TestProseCompilationEdgeCases:
         compiled = compile(code, "<test>", "exec")
         _safe_exec(compiled, ns)
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 12),
+        reason="backslash in an f-string expression part requires Python 3.12+",
+    )
     def test_backslash_in_nested_fstring(self):
         r"""Backslash-n in nested f-string expression should not cause SyntaxError."""
         content = r"Rows: {chr(10).join([f'{k}\t{v}' for k, v in data.items()])}"
