@@ -4,7 +4,6 @@ from literate's KernelInterface)."""
 import asyncio
 import dataclasses
 
-import pytest
 
 from lackpy.interpreters.base import (
     DelegatingInterpreter,
@@ -77,3 +76,25 @@ def test_literate_kernel_conforms_to_IncrementalInterpreter():
     from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
 
     assert isinstance(LightweightKernel(), IncrementalInterpreter)
+
+
+def test_delegating_propagates_sub_failure():
+    """A delegating interpreter must pass the sub's failure through unchanged (still
+    annotated), not swallow or alter it."""
+    class _Failing:
+        name = "failsub"
+        description = "always fails"
+        def validate(self, program, context):
+            return InterpreterValidationResult(valid=True)
+        async def execute(self, program, context):
+            return InterpreterExecutionResult(success=False, error="boom", output_format="none")
+
+    class _Wrap(DelegatingInterpreter):
+        name = "wrap"
+
+        def __init__(self):
+            self.sub = _Failing()
+
+    res = asyncio.run(_Wrap().execute("p", ExecutionContext()))
+    assert res.success is False and res.error == "boom"   # failure passed through
+    assert res.metadata["interpreter"] == "wrap"          # still annotated

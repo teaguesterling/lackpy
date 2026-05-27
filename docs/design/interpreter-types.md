@@ -19,14 +19,14 @@ A concrete interpreter = profile × model.
 | model | existing interpreter(s) | shape in the code |
 |---|---|---|
 | **one-shot** | `PythonInterpreter`, `AstSelectInterpreter` | `validate` + async `execute → InterpreterExecutionResult`; stateless. **The current `Interpreter` protocol models exactly this.** |
-| **composite — delegating** | `PluckerInterpreter`, `PssInterpreter` | hold **one** sub-interpreter (`self._python = PythonInterpreter()`), transform the context (`_with_plucker_kit` → new kit), **delegate** validate/execute, then annotate the result. A decorator over another interpreter. |
+| **composite — delegating** | `PluckerInterpreter` | holds **one** sub-interpreter (`self.sub = PythonInterpreter()`), transforms the context (`_with_plucker_kit` → new kit), **delegates** validate/execute, then annotates the result. A decorator over another interpreter. (`PssInterpreter` is **not** delegating — it has bespoke validate/execute over pluckit's AstViewer directly, i.e. a one-shot; it was correctly *not* migrated.) |
 | **incremental / kernel** | `literate/kernel/` (`KernelInterface`) | `execute_cell(cell, idx) → CellResult` + `get_namespace()`; `CellResult.namespace_delta`; a **persistent namespace dict**; `StreamingDriver`, `static_analysis` (names vs the live namespace), `recovery` (patch-forward). A full incremental interpreter — but a *protocol scoped inside literate*. |
 | **composite — decomposing** | `literate` (the interpreter) | parse a document into cells → drive them through the kernel (incremental) → assemble. **Composite *over* incremental.** |
 
 Two observations that sharpen the RFC:
 
 1. **Composite has two sub-shapes**, both already present:
-   - **delegating** (plucker/pss): wrap **one** sub-interpreter + a context transform (a decorator).
+   - **delegating** (plucker): wrap **one** sub-interpreter + a context transform (a decorator). (pss is *not* this — it's a one-shot using pluckit's AstViewer directly.)
    - **decomposing** (literate): split into **many** units and drive them (usually through an incremental kernel) + assemble.
 2. **The incremental abstraction already exists** as literate's `KernelInterface` — it's
    general (execute a unit, persist namespace, return a delta) and is only literate-scoped
@@ -59,8 +59,8 @@ class CompositeInterpreter(Interpreter, Protocol):
     # decomposing: decompose→[cells], route each (often to an IncrementalInterpreter), assemble
 ```
 
-- `PluckerInterpreter`/`PssInterpreter` become `CompositeInterpreter`s with one sub + a
-  context transform — deleting the hand-rolled delegation boilerplate.
+- `PluckerInterpreter` becomes a `DelegatingInterpreter` (one sub + a context transform) —
+  deleting the hand-rolled delegation boilerplate. (pss stays a one-shot; it never delegated.)
 - literate's kernel becomes *the* reference `IncrementalInterpreter`; literate becomes a
   `CompositeInterpreter` (decomposing) that drives it.
 - A registry advertising each interpreter's `(language, model, accepts→emits)` is the

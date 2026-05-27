@@ -192,7 +192,10 @@ class IncrementalInterpreter(Protocol):
 
     Loosely typed on purpose: this base must not depend on any single interpreter's result
     type (literate's ``CellResult`` is the concrete shape). ``runtime_checkable`` makes the
-    conformance structural — see ``tests/interpreters/test_composite.py``.
+    conformance structural — note it checks only that the *method names* exist, not their
+    signatures or callability, so it is a consolidation MARKER, not a strict contract; a
+    malformed conformer passes ``isinstance`` and fails at call. See
+    ``tests/interpreters/test_composite.py``.
     """
 
     def execute_cell(self, cell: Any, cell_index: int) -> Any: ...
@@ -212,8 +215,11 @@ class DelegatingInterpreter:
     usually override :meth:`transform_context`.
     """
 
-    name: str = "delegating"
-    description: str = ""
+    # Subclasses MUST set these — no defaults on purpose. A forgotten ``sub`` or ``name``
+    # then fails loudly (AttributeError at first use) instead of silently delegating to
+    # nothing or mislabelling every result's ``metadata["interpreter"]``.
+    name: str
+    description: str
     sub: "Interpreter"
 
     def transform_context(self, context: ExecutionContext) -> ExecutionContext:

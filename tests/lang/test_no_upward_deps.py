@@ -34,9 +34,13 @@ def test_lang_is_a_leaf_no_upward_imports():
             # absolute:  from lackpy.<forbidden> ...
             if len(parts) >= 2 and parts[0] == "lackpy" and parts[1] in FORBIDDEN:
                 violations.append((py.name, module))
-            # relative escape: from ..<forbidden> ...  (level>=2 leaves lang/)
+            # relative escape: from ..<forbidden> ... (level>=2 leaves lang/ — valid while
+            # lang/ is flat, i.e. no subpackages; revisit the threshold if it gains nesting)
             elif level >= 2 and parts and parts[0] in FORBIDDEN:
                 violations.append((py.name, "." * level + module))
+    # Known limitation: only static imports are checked; dynamic ones
+    # (__import__/importlib.import_module) would slip past, but lang/ is small enough that
+    # review catches those.
     assert not violations, (
         f"lackpy.lang must be a pure leaf, but found upward imports: {violations}"
     )
