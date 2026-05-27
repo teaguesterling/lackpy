@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -177,3 +177,63 @@ async def run_interpreter(
             output_format="none",
         )
     return await interpreter.execute(program, context)
+
+
+@runtime_checkable
+class IncrementalInterpreter(Protocol):
+    """Stateful, cell-at-a-time execution model (vs the one-shot :class:`Interpreter`).
+
+    A kernel-style interpreter: a persistent namespace, ``execute_cell`` advancing it one
+    unit at a time and returning a per-cell result that carries a namespace delta. This
+    lifts the contract literate's ``kernel.KernelInterface`` already defines, so it can be
+    named and reused at the runtime base — a one-shot ``execute`` is then "run the whole
+    program as one cell," and a *decomposing composite* (literate) drives many cells through
+    one incremental interpreter.
+
+    Loosely typed on purpose: this base must not depend on any single interpreter's result
+    type (literate's ``CellResult`` is the concrete shape). ``runtime_checkable`` makes the
+    conformance structural — see ``tests/interpreters/test_composite.py``.
+    """
+
+    def execute_cell(self, cell: Any, cell_index: int) -> Any: ...
+    def get_namespace(self) -> dict[str, Any]: ...
+
+
+class DelegatingInterpreter:
+    """Base for a *delegating composite* interpreter (RFC 0001 Addendum E).
+
+    It does not execute directly — it transforms the context and delegates ``validate`` /
+    ``execute`` to a wrapped SUB-interpreter, then annotates the result. Formalizes the
+    pattern previously hand-rolled in :class:`PluckerInterpreter`: a decorator over another
+    interpreter (the one-sub case of "composite"; the *decomposing* case — many units, e.g.
+    literate — is a separate base).
+
+    Subclasses set ``self.sub`` (the wrapped interpreter) plus ``name``/``description``, and
+    usually override :meth:`transform_context`.
+    """
+
+    name: str = "delegating"
+    description: str = ""
+    sub: "Interpreter"
+
+    def transform_context(self, context: ExecutionContext) -> ExecutionContext:
+        """Return the context the sub-interpreter should run against. Default: unchanged."""
+        return context
+
+    def annotate(self, result: InterpreterExecutionResult) -> InterpreterExecutionResult:
+        """Tag the sub-interpreter's result as this interpreter's. Override to add more."""
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["interpreter"] = self.name
+        return result
+
+    def validate(
+        self, program: str, context: ExecutionContext
+    ) -> InterpreterValidationResult:
+        return self.sub.validate(program, self.transform_context(context))
+
+    async def execute(
+        self, program: str, context: ExecutionContext
+    ) -> InterpreterExecutionResult:
+        result = await self.sub.execute(program, self.transform_context(context))
+        return self.annotate(result)

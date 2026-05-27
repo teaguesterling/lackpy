@@ -78,8 +78,20 @@ class CompositeInterpreter(Interpreter, Protocol):
 - **Where the base types live:** runtime package, atop `lackpy-lang` (confirms Addendum D —
   this whole axis is runtime; lang stays pure language).
 
-## Next (not done here — this branch is the design dig)
+## Prototype (landed on this branch)
 
-A prototype: lift `KernelInterface` → `IncrementalInterpreter`, add `CompositeInterpreter`,
-re-express `PluckerInterpreter` on it (smallest real consolidation), behind the unchanged
-`Interpreter` protocol so nothing else moves. Run the interpreter test suite.
+Done — the smallest real consolidation, behind the unchanged `Interpreter` protocol:
+- `base.py`: added `IncrementalInterpreter` (`@runtime_checkable`; `execute_cell` +
+  `get_namespace`) and `DelegatingInterpreter` (sub + `transform_context` + `annotate`
+  + delegating `validate`/`execute`).
+- `PluckerInterpreter` re-expressed on `DelegatingInterpreter` — its hand-rolled
+  `validate`/`execute` deleted; only `transform_context` (the plucker kit) remains.
+- `tests/interpreters/test_composite.py` (4): delegating transform+annotate; plucker is a
+  `DelegatingInterpreter`; and **`LightweightKernel` is an `IncrementalInterpreter`** —
+  proving the lift is consolidation, not invention.
+- Verified behavior-preserving: the `tests/interpreters` failure set is **identical** to
+  baseline (the 40 pre-existing failures are unrelated lackpy suite rot), +4 passing.
+
+Next (not here): re-express the literate kernel under `IncrementalInterpreter` for real
+(lift `CellResult`/`KernelInterface` to the runtime base + shim literate), and a
+`DecomposingComposite` base literate can use. Bigger; needs literate's test env.
