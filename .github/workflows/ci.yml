@@ -48,6 +48,15 @@ jobs:
           name: dist
           path: dist/
 
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ ⚠️  BEFORE the first v0.12.0 tag: lackpy is now TWO dists (lackpy +        │
+  # │ lackpy-lang) sharing the `lackpy` namespace, and lackpy pins              │
+  # │ lackpy-lang==<ver>. The build job publishes BOTH wheels, but a NEW PyPI   │
+  # │ project `lackpy-lang` with its own trusted-publisher (OIDC) must exist    │
+  # │ first — otherwise the upload of lackpy-lang is rejected and               │
+  # │ `pip install lackpy==0.12.0` breaks on the unresolvable dep.              │
+  # │ Set up: https://pypi.org/manage/account/publishing/  (env: pypi)          │
+  # └─────────────────────────────────────────────────────────────────────────┘
   publish:
     needs: build
     runs-on: ubuntu-latest
