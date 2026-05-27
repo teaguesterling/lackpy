@@ -1,8 +1,12 @@
-"""Tests for UmweltPolicySource."""
+"""Tests for UmweltPolicySource.
+
+The stub PolicyEngine returns the SAME shape umwelt's real PolicyEngine.resolve_all
+produces — {entity_id, type_name, classes, attributes, properties:{...}} with hyphenated
+string-valued props. (An earlier flat-dict stub let a real KeyError drift hide; the
+retritis bench/phase4 conformance test is the cross-repo net against the live engine.)
+"""
 
 from __future__ import annotations
-
-from types import MappingProxyType
 
 import pytest
 
@@ -12,8 +16,19 @@ from lackpy.kit.registry import ResolvedKit
 from lackpy.lang.grader import Grade
 
 
+def _tool(entity_id: str, **properties) -> dict:
+    """Build an entry in umwelt's real resolve_all(type='tool') shape."""
+    return {
+        "entity_id": entity_id,
+        "type_name": "tool",
+        "classes": [],
+        "attributes": {"name": entity_id},
+        "properties": {k.replace("_", "-"): v for k, v in properties.items()},
+    }
+
+
 class FakePolicyEngine:
-    """Stub PolicyEngine that returns pre-configured tool entries."""
+    """Stub PolicyEngine returning entries in umwelt's real resolve_all shape."""
 
     def __init__(self, tool_entries: list[dict]):
         self._entries = tool_entries
@@ -37,9 +52,9 @@ class TestUmweltPolicySourceBasic:
 
     def test_restricts_to_kit_intersection(self, kit):
         engine = FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
-            {"id": "edit_file", "visible": "true"},
-            {"id": "bash", "visible": "true"},
+            _tool("read_file", allow="true"),
+            _tool("edit_file", allow="true"),
+            _tool("bash", allow="true"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file", "edit_file"}))
@@ -48,10 +63,10 @@ class TestUmweltPolicySourceBasic:
         assert result.allowed_tools == frozenset({"read_file", "edit_file"})
         assert "bash" not in result.allowed_tools
 
-    def test_denies_tools_marked_invisible(self, kit):
+    def test_denies_tools_marked_not_allowed(self, kit):
         engine = FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
-            {"id": "edit_file", "visible": "false"},
+            _tool("read_file", allow="true"),
+            _tool("edit_file", allow="false"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(
@@ -64,8 +79,8 @@ class TestUmweltPolicySourceBasic:
 
     def test_cannot_grant_tools_kit_lacks(self, kit):
         engine = FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
-            {"id": "bash", "visible": "true"},
+            _tool("read_file", allow="true"),
+            _tool("bash", allow="true"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
@@ -84,13 +99,13 @@ class TestUmweltPolicySourceBasic:
 class TestUmweltPolicySourceConstraints:
     def test_sets_tool_constraints(self, kit):
         engine = FakePolicyEngine([
-            {
-                "id": "read_file",
-                "visible": "true",
-                "max_level": "2",
-                "allow_patterns": ["src/**/*.py"],
-                "deny_patterns": ["*.secret"],
-            },
+            _tool(
+                "read_file",
+                allow="true",
+                max_level="2",
+                allow_patterns="src/**/*.py",
+                deny_patterns="*.secret",
+            ),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
@@ -102,9 +117,20 @@ class TestUmweltPolicySourceConstraints:
         assert tc.allow_patterns == ("src/**/*.py",)
         assert tc.deny_patterns == ("*.secret",)
 
+    def test_comma_separated_patterns_split(self, kit):
+        """umwelt serializes list props as comma-separated strings — must split, not
+        iterate per-character."""
+        engine = FakePolicyEngine([
+            _tool("edit_file", allow="true", allow_patterns="src/**,tests/**"),
+        ])
+        source = UmweltPolicySource(engine)
+        current = PolicyResult(allowed_tools=frozenset({"edit_file"}))
+        result = source.resolve(current, {"kit": kit})
+        assert result.tool_constraints["edit_file"].allow_patterns == ("src/**", "tests/**")
+
     def test_no_constraints_when_not_specified(self, kit):
         engine = FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
+            _tool("read_file", allow="true"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
@@ -114,7 +140,7 @@ class TestUmweltPolicySourceConstraints:
 
     def test_merges_denied_with_existing(self, kit):
         engine = FakePolicyEngine([
-            {"id": "bash", "visible": "false"},
+            _tool("bash", allow="false"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(
@@ -130,7 +156,7 @@ class TestUmweltPolicySourceConstraints:
 class TestUmweltPolicySourcePreservesOtherFields:
     def test_preserves_hints_and_docs(self, kit):
         engine = FakePolicyEngine([
-            {"id": "read_file", "visible": "true"},
+            _tool("read_file", allow="true"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(

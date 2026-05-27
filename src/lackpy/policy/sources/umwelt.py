@@ -17,6 +17,16 @@ def _parse_int(value: Any) -> int | None:
         return None
 
 
+def _split_patterns(value: Any) -> tuple[str, ...]:
+    """umwelt stores list-valued properties as comma-separated strings; lackpy's
+    ToolConstraints wants a tuple. (A bare str would otherwise iterate per-char.)"""
+    if not value:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(str(v).strip() for v in value if str(v).strip())
+    return tuple(s.strip() for s in str(value).split(",") if s.strip())
+
+
 class UmweltPolicySource:
     """Restricts tools based on umwelt's resolved capability-taxon policy.
 
@@ -39,17 +49,24 @@ class UmweltPolicySource:
         constraints: dict[str, ToolConstraints] = {}
 
         for entry in tool_entries:
-            name = entry["id"]
-            if entry.get("visible") == "false":
+            # umwelt's resolve_all(type="tool") yields
+            #   {entity_id, type_name, classes, attributes, properties:{...}}
+            # with property keys hyphenated and values as strings.
+            name = entry["entity_id"]
+            props = entry.get("properties", {})
+            if props.get("allow") == "false":
                 denied.add(name)
             else:
                 allowed.add(name)
 
-            if entry.get("max_level") or entry.get("allow_patterns") or entry.get("deny_patterns"):
+            max_level = props.get("max-level")
+            allow_patterns = _split_patterns(props.get("allow-patterns"))
+            deny_patterns = _split_patterns(props.get("deny-patterns"))
+            if max_level or allow_patterns or deny_patterns:
                 constraints[name] = ToolConstraints(
-                    max_level=_parse_int(entry.get("max_level")),
-                    allow_patterns=tuple(entry.get("allow_patterns", ())),
-                    deny_patterns=tuple(entry.get("deny_patterns", ())),
+                    max_level=_parse_int(max_level),
+                    allow_patterns=allow_patterns,
+                    deny_patterns=deny_patterns,
                 )
 
         effective_allowed = current.allowed_tools & frozenset(allowed)
