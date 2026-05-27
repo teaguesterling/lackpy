@@ -18,7 +18,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
-        run: pip install -e ".[dev]"
+        # Both namespace halves, editable. lackpy depends on lackpy-lang==<ver>, which
+        # is not on PyPI until its own tag — installing the local lackpy-lang first
+        # satisfies that pin from source.
+        run: pip install -e ./packages/lackpy-lang -e ".[dev]"
       - name: Run tests
         run: pytest tests/ -v
 
@@ -33,8 +36,12 @@ jobs:
           python-version: "3.12"
       - name: Install build tools
         run: pip install hatch
-      - name: Build package
+      - name: Build lackpy (core)
         run: hatch build
+      - name: Build lackpy-lang
+        # Emit lackpy-lang's sdist+wheel into the same dist/ so both are published
+        # together — otherwise `pip install lackpy==X` can't resolve lackpy-lang==X.
+        run: cd packages/lackpy-lang && hatch build ../../dist
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

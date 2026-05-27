@@ -17,9 +17,26 @@ lackpy takes an intent, generates a restricted Python program using a local 1.5B
 ## Install
 
 ```bash
-pip install lackpy            # core (zero dependencies)
+pip install lackpy            # runtime (pulls in lackpy-lang automatically)
 pip install lackpy[ollama]    # + local model inference
 pip install lackpy[full]      # + all optional features
+
+pip install lackpy-lang       # JUST the language (grammar/validator/grader/spec),
+                              # no runtime — for tools that only reason about programs
+```
+
+`lackpy` and `lackpy-lang` share the `lackpy` namespace ([PEP 420](https://peps.python.org/pep-0420/));
+neither ships a top-level `lackpy/__init__.py`, so import from submodules
+(`from lackpy.lang import validate`, `from lackpy.service import LackpyService`).
+
+### Development (monorepo)
+
+This repo builds two distributions. For a working editable checkout, install **both** —
+`lackpy` pins `lackpy-lang`, which isn't on PyPI until its own tag, so install the local
+copy first:
+
+```bash
+pip install -e ./packages/lackpy-lang -e ".[dev]"
 ```
 
 ## Quick start
