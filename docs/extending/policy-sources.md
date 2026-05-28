@@ -67,7 +67,7 @@ class RoleBasedSource:
 ### Registration
 
 ```python
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from lackpy.policy.types import Principal
 
 svc = LackpyService()

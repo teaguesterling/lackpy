@@ -84,7 +84,7 @@ class RestProvider:
 
 ```python
 import asyncio
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from lackpy.kit.toolbox import ToolSpec, ArgSpec
 from my_project.providers.rest_provider import RestProvider
 

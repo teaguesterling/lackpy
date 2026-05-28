@@ -98,7 +98,7 @@ Insert the cache provider before the LLM providers. After a successful `delegate
 
 ```python
 import asyncio
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from my_project.providers.cache_provider import CacheProvider
 
 async def main():

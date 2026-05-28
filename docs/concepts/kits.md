@@ -36,7 +36,7 @@ The `Toolbox` holds every tool that has been registered across all providers. A 
 Tools are registered by adding a `ToolSpec` to the `Toolbox` and ensuring a matching provider is also registered:
 
 ```python
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from lackpy.kit.toolbox import ToolSpec, ArgSpec
 
 svc = LackpyService()
@@ -164,7 +164,7 @@ lackpy kit create mykit --tools read_file find_files --description "Read-only to
 `compute_grade(tools)` takes a dict of `{name: {"grade_w": int, "effects_ceiling": int}}` and returns the element-wise maximum across all tools:
 
 ```python
-from lackpy import compute_grade
+from lackpy.lang import compute_grade
 
 grade = compute_grade({
     "read_file":  {"grade_w": 1, "effects_ceiling": 0},
