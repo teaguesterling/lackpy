@@ -13,7 +13,7 @@ from langchain_lackpy import LackpyToolkit, LackpyToolWrapper, LackpyDelegateToo
 
 @pytest.fixture
 def real_service(tmp_path):
-    from lackpy import LackpyService
+    from lackpy.service import LackpyService
     svc = LackpyService(workspace=tmp_path)
     test_file = tmp_path / "hello.txt"
     test_file.write_text("hello world")

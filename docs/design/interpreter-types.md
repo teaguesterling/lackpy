@@ -34,7 +34,12 @@ Two observations that sharpen the RFC:
 
 ## Proposed protocols (consolidate, don't invent)
 
-All under the runtime, atop `lackpy-lang`. Sketches:
+All under the runtime, atop `lackpy-lang`. Sketches — these are the *original* proposal;
+the prototype that actually landed (see "Prototype" below) deliberately diverged: shipped
+`IncrementalInterpreter` is a **standalone** `Protocol` (NOT `(Interpreter, Protocol)` — it
+does not subsume one-shot), the session was inlined into the interpreter (no
+`open_session`/`close`), and the decomposing `CompositeInterpreter` was **not built** (one
+user, no boilerplate to subtract). Read the code in `base.py` as the source of truth.
 
 ```python
 # (exists) one-shot — today's protocol
@@ -89,8 +94,10 @@ Done — the smallest real consolidation, behind the unchanged `Interpreter` pro
 - `tests/interpreters/test_composite.py` (4): delegating transform+annotate; plucker is a
   `DelegatingInterpreter`; and **`LightweightKernel` is an `IncrementalInterpreter`** —
   proving the lift is consolidation, not invention.
-- Verified behavior-preserving: the `tests/interpreters` failure set is **identical** to
-  baseline (the 40 pre-existing failures are unrelated lackpy suite rot), +4 passing.
+- Verified behavior-preserving: `tests/interpreters` + `tests/literate` + `tests/lang` all
+  green (the plucker re-expression is covered end-to-end by the pre-existing
+  `tests/interpreters/test_plucker.py`), and the full suite is green (786 passed, ollama/eval
+  excluded).
 
 Next (not here): re-express the literate kernel under `IncrementalInterpreter` for real
 (lift `CellResult`/`KernelInterface` to the runtime base + shim literate), and a

@@ -22,7 +22,7 @@ pip install langchain-lackpy[graph]
 
 ```python
 from pathlib import Path
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from langchain_lackpy import LackpyToolkit
 
 svc = LackpyService(workspace=Path("."))

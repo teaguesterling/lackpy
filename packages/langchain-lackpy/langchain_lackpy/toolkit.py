@@ -8,7 +8,7 @@ from typing import Any, Callable
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import PrivateAttr
 
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from lackpy.config import load_config
 from lackpy.kit.registry import ResolvedKit, resolve_kit
 

@@ -23,7 +23,9 @@ jobs:
         # satisfies that pin from source.
         run: pip install -e ./packages/lackpy-lang -e ".[dev]"
       - name: Run tests
-        run: pytest tests/ -v
+        # tests/eval imports scripts.prompt_eval (a dev-only harness, not packaged) and
+        # ollama tests need a live model — both fail in CI; exclude them.
+        run: pytest tests/ -v -m "not ollama" --ignore=tests/eval
 
   build:
     if: startsWith(github.ref, 'refs/tags/v')
