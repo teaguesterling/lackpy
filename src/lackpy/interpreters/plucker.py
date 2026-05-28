@@ -55,15 +55,11 @@ from typing import Any
 from ..kit.registry import ResolvedKit
 from ..kit.toolbox import ArgSpec, ToolSpec
 from ..lang.grader import Grade
-from .base import (
-    ExecutionContext,
-    InterpreterExecutionResult,
-    InterpreterValidationResult,
-)
+from .base import DelegatingInterpreter, ExecutionContext
 from .python import PythonInterpreter
 
 
-class PluckerInterpreter:
+class PluckerInterpreter(DelegatingInterpreter):
     """Fluent chain interpreter backed by pluckit's Plucker + Selection classes.
 
     Configuration (via ``context.config``):
@@ -107,42 +103,13 @@ class PluckerInterpreter:
         )
 
     def __init__(self) -> None:
-        self._python = PythonInterpreter()
+        self.sub = PythonInterpreter()
 
-    def validate(
-        self,
-        program: str,
-        context: ExecutionContext,
-    ) -> InterpreterValidationResult:
-        """Validate using the restricted Python grammar with a plucker kit.
-
-        The plucker kit exposes ``source()`` as the sole bare callable.
-        Any chain rooted in ``source(...)`` passes validation because
-        the restricted validator allows method calls on the result of
-        allowed-name calls without checking the method names.
-        """
-        plucker_ctx = self._with_plucker_kit(context)
-        return self._python.validate(program, plucker_ctx)
-
-    async def execute(
-        self,
-        program: str,
-        context: ExecutionContext,
-    ) -> InterpreterExecutionResult:
-        """Execute a fluent chain against a real pluckit Plucker.
-
-        Delegates to :meth:`PythonInterpreter.execute` with a kit whose
-        ``source`` callable constructs a live :class:`pluckit.Plucker`.
-        The result is whatever the chain's terminal operation returns.
-        """
-        plucker_ctx = self._with_plucker_kit(context)
-        result = await self._python.execute(program, plucker_ctx)
-        # Annotate the metadata so downstream consumers can tell a
-        # plucker result apart from a raw python result.
-        if result.metadata is None:
-            result.metadata = {}
-        result.metadata["interpreter"] = "plucker"
-        return result
+    def transform_context(self, context: ExecutionContext) -> ExecutionContext:
+        """Run the wrapped restricted-Python interpreter against a plucker kit (``source()``
+        as the sole bare callable). Validate/execute + result annotation come from
+        :class:`DelegatingInterpreter`; this is the only plucker-specific hook."""
+        return self._with_plucker_kit(context)
 
     def _with_plucker_kit(self, context: ExecutionContext) -> ExecutionContext:
         """Return a new context with a plucker-specific kit installed.
