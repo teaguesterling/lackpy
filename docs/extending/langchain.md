@@ -24,7 +24,7 @@ Everything flows through `LackpyToolkit`, which wraps a lackpy kit as a LangChai
 
 ```python
 from pathlib import Path
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 from langchain_lackpy import LackpyToolkit
 
 svc = LackpyService(workspace=Path("."))

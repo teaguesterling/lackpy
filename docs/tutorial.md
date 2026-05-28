@@ -137,7 +137,7 @@ lackpy validate bad.py --kit find_files
 ### Python API
 
 ```python
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 
 svc = LackpyService()
 result = svc.validate(

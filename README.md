@@ -47,7 +47,8 @@ lackpy delegate "find all python files" --kit read_file,find_files
 ```
 
 ```python
-from lackpy import LackpyService, ToolSpec, ArgSpec
+from lackpy.service import LackpyService
+from lackpy.kit.toolbox import ToolSpec, ArgSpec
 import asyncio
 
 async def main():

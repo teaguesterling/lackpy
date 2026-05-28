@@ -38,7 +38,7 @@ lackpy validate my_program.py --kit read_file,find_files
 
 ```python
 import asyncio
-from lackpy import LackpyService
+from lackpy.service import LackpyService
 
 async def main():
     svc = LackpyService()
