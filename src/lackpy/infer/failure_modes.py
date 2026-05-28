@@ -1,55 +1,36 @@
-"""Failure mode taxonomy for generation outcomes.
+"""Failure-mode classification for generation outcomes.
 
-These identifiers are shared between lackpy and kibitzer. Lackpy
-classifies the failure mode after validation/execution; kibitzer
-accumulates them in the event log and returns them via
-get_failure_patterns() and get_prompt_hints().
-
-The taxonomy is deliberately small. Each category maps to a specific
-prompt intervention — if two failure modes need the same fix, they
-should be the same category.
+The taxonomy itself (the mode identifiers + ALL_MODES) is the SemVer-stable shared
+vocabulary and now lives in ``lackpy.lang.failure_modes`` so the coaching side (kibitzer)
+can import it without lackpy's runtime. It is re-exported here for back-compat — existing
+``from lackpy.infer.failure_modes import STDLIB_LEAK`` callers are unchanged. This module
+keeps ``classify_failure``, the runtime logic that maps a failed generation onto a mode.
 """
 
 from __future__ import annotations
 
-# Model defines functions/classes instead of calling pre-loaded tools.
-# Fix: "ORCHESTRATE, DO NOT IMPLEMENT" framing.
-IMPLEMENT_NOT_ORCHESTRATE = "implement_not_orchestrate"
-
-# Model uses open(), import os, or other stdlib instead of kit tools.
-# Fix: "Do NOT use open(). Use read_file() for ALL file reading."
-STDLIB_LEAK = "stdlib_leak"
-
-# Model prefixes paths with directory names (e.g. 'toybox/app.py').
-# Fix: "All paths are relative to the workspace root."
-PATH_PREFIX = "path_prefix"
-
-# Model outputs bare tokens (ipynb, py, sql) from Jupyter framing.
-# Fix: use interpreter-specialized prompt instead of Jupyter template.
-JUPYTER_CONFUSION = "jupyter_confusion"
-
-# Model emits non-Python syntax (-> annotations, prose, arrow operators).
-# Fix: "Output ONLY the program — no annotations, no prose."
-SYNTAX_ARTIFACT = "syntax_artifact"
-
-# Model accesses wrong dict keys (e.g. 'path' instead of 'file').
-# Fix: document return schema in namespace_desc.
-KEY_HALLUCINATION = "key_hallucination"
-
-# Model generates valid code that executes but produces wrong output.
-# No single prompt fix — may need better examples or constraints.
-WRONG_OUTPUT = "wrong_output"
-
-# All recognized failure mode strings.
-ALL_MODES = frozenset({
+from lackpy.lang.failure_modes import (
+    ALL_MODES,
     IMPLEMENT_NOT_ORCHESTRATE,
-    STDLIB_LEAK,
-    PATH_PREFIX,
     JUPYTER_CONFUSION,
-    SYNTAX_ARTIFACT,
     KEY_HALLUCINATION,
+    PATH_PREFIX,
+    STDLIB_LEAK,
+    SYNTAX_ARTIFACT,
     WRONG_OUTPUT,
-})
+)
+
+__all__ = [
+    "ALL_MODES",
+    "IMPLEMENT_NOT_ORCHESTRATE",
+    "STDLIB_LEAK",
+    "PATH_PREFIX",
+    "JUPYTER_CONFUSION",
+    "SYNTAX_ARTIFACT",
+    "KEY_HALLUCINATION",
+    "WRONG_OUTPUT",
+    "classify_failure",
+]
 
 
 def classify_failure(

@@ -20,6 +20,16 @@ from .grader import (
     Grade,
     compute_grade,
 )
+from .failure_modes import (
+    ALL_MODES,
+    IMPLEMENT_NOT_ORCHESTRATE,
+    JUPYTER_CONFUSION,
+    KEY_HALLUCINATION,
+    PATH_PREFIX,
+    STDLIB_LEAK,
+    SYNTAX_ARTIFACT,
+    WRONG_OUTPUT,
+)
 from .spec import format_spec, get_spec
 from .validator import ValidationResult, validate
 
@@ -32,4 +42,7 @@ __all__ = [
     "Grade", "compute_grade", "DEFAULT_GRADE_W", "DEFAULT_EFFECTS_CEILING",
     # spec — the human/agent-facing language description
     "get_spec", "format_spec",
+    # failure modes — the shared generator/coach vocabulary
+    "ALL_MODES", "IMPLEMENT_NOT_ORCHESTRATE", "STDLIB_LEAK", "PATH_PREFIX",
+    "JUPYTER_CONFUSION", "SYNTAX_ARTIFACT", "KEY_HALLUCINATION", "WRONG_OUTPUT",
 ]
