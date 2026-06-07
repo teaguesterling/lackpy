@@ -13,7 +13,7 @@ import lackpy.lang
 
 LANG_DIR = Path(lackpy.lang.__file__).parent
 FORBIDDEN = {"run", "kit", "policy", "infer", "service", "lackey", "prompts",
-             "interpreters", "mcp"}
+             "interpreters", "mcp", "sources"}
 
 
 def _imported_modules(py: Path):

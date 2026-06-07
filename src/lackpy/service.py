@@ -15,37 +15,10 @@ from .infer.providers.templates import TemplatesProvider
 from .kit.providers.builtin import BuiltinProvider
 from .kit.providers.python import PythonProvider
 from .kit.registry import ResolvedKit, resolve_kit
-from .kit.toolbox import ArgSpec, Toolbox, ToolSpec
+from .kit.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
 from .policy.sources.kit import KitPolicySource
-
-_BUILTIN_TOOLS = [
-    ToolSpec(
-        name="read_file", provider="builtin", description="Read file contents",
-        args=[ArgSpec(name="path", type="str", description="File path")],
-        returns="str", grade_w=1, effects_ceiling=1,
-        docs="docs/tools/read_file.md",
-    ),
-    ToolSpec(
-        name="find_files", provider="builtin", description="Find files matching a glob pattern",
-        args=[ArgSpec(name="pattern", type="str", description="Glob pattern")],
-        returns="list[str]", grade_w=1, effects_ceiling=1,
-        docs="docs/tools/find_files.md",
-    ),
-    ToolSpec(
-        name="write_file", provider="builtin", description="Write content to a file",
-        args=[ArgSpec(name="path", type="str"), ArgSpec(name="content", type="str")],
-        returns="bool", grade_w=3, effects_ceiling=3,
-        docs="docs/tools/write_file.md",
-    ),
-    ToolSpec(
-        name="edit_file", provider="builtin", description="Replace text in a file",
-        args=[ArgSpec(name="path", type="str"), ArgSpec(name="old_str", type="str"), ArgSpec(name="new_str", type="str")],
-        returns="bool", grade_w=3, effects_ceiling=3,
-        docs="docs/tools/edit_file.md",
-    ),
-]
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.runner import RestrictedRunner
@@ -106,16 +79,37 @@ class LackpyService:
         self._config = config or load_config(self._workspace)
         self._runner = RestrictedRunner()
         self.toolbox = Toolbox()
+        # Resolution mechanisms for directly-registered specs (tools themselves
+        # come from sources, not these). Kept for back-compat with callers that
+        # register their own provider="builtin"/"python" specs.
         self.toolbox.register_provider(BuiltinProvider())
         self.toolbox.register_provider(PythonProvider())
-        for spec in _BUILTIN_TOOLS:
-            self.toolbox.register_tool(spec)
+        for source in self._build_tool_sources():
+            self.toolbox.add_source(source)
         self._inference_providers: list = []
         self._init_inference_providers()
         self._policy = PolicyLayer()
         self._policy.add_source(KitPolicySource(self.toolbox))
         self._kibitzer: Any = None
         self._init_kibitzer()
+
+    def _build_tool_sources(self) -> list[Any]:
+        """Assemble the tool sources that populate the toolbox.
+
+        Shipped defaults first, then user-configured ``[[tools]]`` (so a user
+        definition overrides a default of the same name). Future MCP-discovered
+        and virtual/harness sources slot into this list (see
+        docs/design/tool-sources.md).
+        """
+        from .sources import load_default_tool_defs
+        from .sources.config import ConfigToolSource
+
+        sources: list[Any] = [
+            ConfigToolSource(load_default_tool_defs(), name="default"),
+        ]
+        if self._config.tools:
+            sources.append(ConfigToolSource(self._config.tools, name="config"))
+        return sources
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"

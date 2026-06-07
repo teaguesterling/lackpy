@@ -75,6 +75,27 @@ class Toolbox:
     def __init__(self) -> None:
         self.tools: dict[str, ToolSpec] = {}
         self._providers: dict[str, Any] = {}
+        # Per-tool resolver when a tool was contributed by a ToolSource
+        # (the source resolves its own callables; takes precedence over the
+        # name→provider dispatch used by directly-registered tools).
+        self._spec_owner: dict[str, Any] = {}
+
+    def add_source(self, source: Any) -> None:
+        """Discover and register every tool a :class:`ToolSource` provides.
+
+        The source owns resolution for the tools it contributes. A later source
+        overrides an earlier one on name collision (so user config beats shipped
+        defaults). No-op if the source reports itself unavailable.
+
+        Args:
+            source: An object with ``available()``, ``discover()`` and
+                ``resolve(spec)`` (the ToolSource protocol).
+        """
+        if not source.available():
+            return
+        for spec in source.discover():
+            self.register_tool(spec)          # clears any prior owner for this name
+            self._spec_owner[spec.name] = source  # this source now owns resolution
 
     def register_provider(self, provider: Any) -> None:
         """Register a tool provider plugin and load its tools into the registry.
@@ -104,6 +125,9 @@ class Toolbox:
                 UserWarning,
                 stacklevel=2,
             )
+        # A directly-registered tool resolves via provider dispatch; drop any
+        # prior source ownership for this name so a later register_tool wins.
+        self._spec_owner.pop(spec.name, None)
         self.tools[spec.name] = spec
 
     def resolve(self, name: str) -> Callable[..., Any]:
@@ -121,6 +145,9 @@ class Toolbox:
         if name not in self.tools:
             raise KeyError(f"Unknown tool: {name}")
         spec = self.tools[name]
+        owner = self._spec_owner.get(name)
+        if owner is not None:
+            return owner.resolve(spec)
         provider = self._providers.get(spec.provider)
         if provider is None:
             raise KeyError(f"No provider '{spec.provider}' registered for tool '{name}'")

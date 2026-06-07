@@ -1,10 +1,15 @@
-"""Built-in tool provider — tools implemented inside lackpy."""
+"""Built-in tool provider — tools implemented inside lackpy.
+
+Retained for direct ``register_provider(BuiltinProvider())`` use (notably in tests).
+The implementations themselves live in ``lackpy.sources.builtins`` (the single
+source of truth shared with the shipped ``default_tools.toml``).
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Callable
 
+from ...sources.builtins import edit_file, find_files, read_file, write_file
 from ..toolbox import ToolSpec
 
 
@@ -18,34 +23,12 @@ class BuiltinProvider:
 
     def resolve(self, tool_spec: ToolSpec) -> Callable[..., Any]:
         implementations = {
-            "read_file": _builtin_read,
-            "find_files": _builtin_glob,
-            "write_file": _builtin_write,
-            "edit_file": _builtin_edit,
+            "read_file": read_file,
+            "find_files": find_files,
+            "write_file": write_file,
+            "edit_file": edit_file,
         }
         fn = implementations.get(tool_spec.name)
         if fn is None:
             raise KeyError(f"No builtin implementation for '{tool_spec.name}'")
         return fn
-
-
-def _builtin_read(path: str) -> str:
-    return Path(path).read_text()
-
-
-def _builtin_glob(pattern: str) -> list[str]:
-    return sorted(str(p) for p in Path(".").glob(pattern))
-
-
-def _builtin_write(path: str, content: str) -> bool:
-    Path(path).write_text(content)
-    return True
-
-
-def _builtin_edit(path: str, old_str: str, new_str: str) -> bool:
-    p = Path(path)
-    text = p.read_text()
-    if old_str not in text:
-        return False
-    p.write_text(text.replace(old_str, new_str, 1))
-    return True
