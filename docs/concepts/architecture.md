@@ -1,8 +1,19 @@
 # Architecture
 
+## Tool sources
+
+At service init the `Toolbox` is populated by **tool sources** — there are no
+hard-coded tool names in lackpy. Each source *discovers* full `ToolSpec`s and
+*resolves* their callables: config-defined tools (`[[tools]]`, plus the shipped
+`default_tools.toml` builtins), MCP-discovered tools (`[mcp_servers]` + ingested
+host configs), and virtual/harness tools (`[[virtual_tools]]`). Sources merge by
+precedence (local config/builtins > own MCP > host); a shadowed name is dropped.
+See [Kits & Toolbox](kits.md) and the [Tool Sources RFC](../design/tool-sources.md).
+
 ## Pipeline
 
-A `delegate()` call traverses four stages in sequence:
+A `delegate()` call traverses four stages in sequence (kit resolution draws on the
+source-populated toolbox above):
 
 ```
   ┌────────────────────────────────────────────────────────────────┐
@@ -47,12 +58,16 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.lang.grader` | `Grade(w, d)` computation from tool specs | none |
 | `lackpy.lang.rules` | Built-in custom rule callables | `ast` |
 | `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpy spec`) | `lang.grammar` |
-| `lackpy.kit.toolbox` | `Toolbox` — provider registry + tool resolution | none |
+| `lackpy.kit.toolbox` | `Toolbox` — tool registry; `add_source()` merge with precedence + resolution | none |
 | `lackpy.kit.registry` | `resolve_kit()` — name/list/dict → `ResolvedKit` | `kit.toolbox`, `lang.grader` |
-| `lackpy.kit.providers.builtin` | Built-in tools: `read_file`, `find_files`, `write_file`, `edit_file` | `pathlib` |
-| `lackpy.kit.providers.python` | Wrap any importable function as a tool | `importlib` |
+| `lackpy.kit.providers.python` | Resolve a `ToolSpec` to an importable function | `importlib` |
+| `lackpy.sources.base` | `ToolSource` protocol — discover (own the names) + resolve | `kit.toolbox` |
+| `lackpy.sources.config` | `ConfigToolSource` — tools fully defined in config; `default_tools.toml` ships the builtins as data | `kit.providers.python` |
+| `lackpy.sources.virtual` | `VirtualToolSource` — harness-provided tools (`[[virtual_tools]]` + resolver) | `kit.toolbox` |
+| `lackpy.sources.mcp.*` | MCP client (dedicated loop), `McpToolSource`, grade-from-hints, host-config ingestion | `mcp` (optional), `run.bridge` |
 | `lackpy.run.trace` | `Trace`, `TraceEntry`, `make_traced()` | `inspect`, `time` |
 | `lackpy.run.base` | `ExecutionResult`, `Executor` protocol | `run.trace` |
+| `lackpy.run.bridge` | `AsyncBridge` — marshal a coroutine from a worker thread onto a loop | `asyncio` |
 | `lackpy.run.runner` | `RestrictedRunner` — compile + exec with traced namespace | `lang.grammar`, `run.trace` |
 | `lackpy.infer.dispatch` | `InferenceDispatcher` — priority-ordered provider loop | `lang.validator`, `infer.sanitize` |
 | `lackpy.infer.prompt` | `build_system_prompt()`, `format_params_description()` | `lang.grammar` |
