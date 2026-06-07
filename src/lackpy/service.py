@@ -317,6 +317,23 @@ class LackpyService:
             interpreter=interpreter, kibitzer_session=self._kibitzer,
         )
 
+    def _execute(self, program: str, callables: dict[str, Any],
+                 param_values: dict[str, Any], kibitzer_session: Any = None) -> ExecutionResult:
+        """Run a (already validated) program through the restricted runner.
+
+        The single execution path shared by ``run_program`` and ``delegate``:
+        switch into the workspace, run, and always restore the prior cwd.
+        """
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(self._workspace)
+            return self._runner.run(
+                program, callables, params=param_values,
+                kibitzer_session=kibitzer_session,
+            )
+        finally:
+            os.chdir(prev_cwd)
+
     async def run_program(self, program: str, kit: str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
@@ -342,12 +359,7 @@ class LackpyService:
         validation = validate(program, allowed_names=allowed, extra_rules=rules)
         if not validation.valid:
             return ExecutionResult(success=False, error=f"Validation failed: {'; '.join(validation.errors)}")
-        prev_cwd = os.getcwd()
-        try:
-            os.chdir(self._workspace)
-            return self._runner.run(program, resolved.callables, params=param_values)
-        finally:
-            os.chdir(prev_cwd)
+        return self._execute(program, resolved.callables, param_values)
 
     async def delegate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
@@ -421,15 +433,10 @@ class LackpyService:
                         "correction_attempts": gen_result.correction_attempts,
                     }
 
-        prev_cwd = os.getcwd()
-        try:
-            os.chdir(self._workspace)
-            exec_result = self._runner.run(
-                gen_result.program, resolved.callables, params=param_values,
-                kibitzer_session=self._kibitzer,
-            )
-        finally:
-            os.chdir(prev_cwd)
+        exec_result = self._execute(
+            gen_result.program, resolved.callables, param_values,
+            kibitzer_session=self._kibitzer,
+        )
 
         # Kibitzer: get coaching suggestions after execution
         if self._kibitzer:

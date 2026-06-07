@@ -1,0 +1,21 @@
+# Example lackpy workspace config — copy to `.lackpy/config.toml` and adjust.
+#
+# `.lackpy/config.toml` is NOT tracked in git: the choice of local model is a
+# per-machine/deployment decision, not a package default. The package ships a
+# generic small default (qwen2.5-coder:1.5b); pick whatever your host serves best
+# here. (On the maintainer's host that has been a qwen3 14b-class model.)
+
+[inference]
+# Provider order: cheap deterministic tiers first, local LLM last.
+order = ["templates", "rules", "ollama-local"]
+
+[inference.providers.ollama-local]
+plugin = "ollama"
+host = "http://localhost:11434"
+# Local choice — set to the best model your Ollama host serves.
+model = "qwen2.5-coder:1.5b"
+temperature = 0.2
+keep_alive = "30m"
+
+[kit]
+default = "debug"

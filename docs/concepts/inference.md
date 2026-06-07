@@ -114,6 +114,14 @@ model = "claude-haiku-4-5-20251001"
 
 The `order` list controls priority. Built-in providers (`templates`, `rules`) are always prepended regardless of their position in `order`.
 
+!!! note "Model choice is local config, not a package default"
+    Which model you run is a **per-machine / per-deployment decision**, not something
+    lackpy bakes in. The package's built-in fallback is the generic, small
+    `qwen2.5-coder:1.5b`; set the model your host actually serves best in
+    `.lackpy/config.toml` (under `[inference.providers.<name>]`). That file is
+    **gitignored** — copy `.lackpy/config.toml.example` to start. Don't commit a
+    machine-specific big-model pin into the repo; keep the shipped default generic.
+
 ---
 
 ## The ratchet
