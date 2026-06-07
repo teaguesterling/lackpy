@@ -1,9 +1,9 @@
 # RFC 0002 — Tool sources (config, MCP, virtual) & the sync↔async bridge
 
 !!! note "Status"
-    Increments 1–3 are **implemented** (config-defined source; async bridge + MCP
-    client; multi-source precedence + host-config ingestion). Increments 4–5
-    (virtual tools, kits→profile) are **design-only** here. Siblings:
+    Increments 1–4 are **implemented** (config-defined source; async bridge + MCP
+    client; multi-source precedence + host-config ingestion; virtual/harness tools).
+    Increment 5 (kits→profile) is **design-only** here. Siblings:
     [Direction](direction.md), [Interpreter Types](interpreter-types.md), RFC 0001
     (the `lackpy-lang` leaf split).
 
@@ -201,7 +201,15 @@ wins**. Do not mix partial MCP annotation defaults with the mapping — any miss
 ⇒ conservative. Derived grades land on the `ToolSpec` and feed `compute_grade` →
 `ResolvedKit.grade` → `KitPolicySource` → kibitzer with **zero downstream change**.
 
-## 7. Virtual / harness-provided tools (deferred)
+## 7. Virtual / harness-provided tools (implemented)
+
+Implemented as `sources/virtual.py:VirtualToolSource` + the service's
+`harness_resolver` (a `name -> callable | None`) and `_gate_kit`. Declared via
+`[[virtual_tools]]` (full spec; no module). Two-layer enforcement: `_gate_kit`
+drops currently-unavailable virtual tools from the kit before generation, and the
+resolve-time proxy raises if the harness withdrew the tool by call time (→ failed
+ExecutionResult). v1 harness callables are sync (wrap via §5 if async later).
+Precedence sits below local config/builtins, above MCP.
 
 A virtual tool is **fully declared** (`[virtual_tools.<name>]` with full spec) but its
 implementation is supplied by the harness/host at call time and may be absent. The
@@ -241,7 +249,7 @@ kibitzer chain is unchanged; new sources plug in by populating grades correctly.
 3. **Multi/host config + namespacing** — *implemented*. Precedence + drop-with-log
    collision merge in `Toolbox` (§4); `[mcp].host_configs` ingestion of external
    `mcpServers` files at descending precedence (§3.4).
-4. **Virtual/harness tools** (§7).
+4. **Virtual/harness tools** — *implemented* (§7).
 5. **kits→profile layer** on top of sources, retiring "kit" ([direction.md](direction.md) §2).
 
 Throughout: keep `tests/lang/test_no_upward_deps.py` green.
