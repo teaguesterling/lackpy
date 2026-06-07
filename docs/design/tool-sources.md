@@ -1,9 +1,9 @@
 # RFC 0002 — Tool sources (config, MCP, virtual) & the sync↔async bridge
 
 !!! note "Status"
-    Increment 1 (config-defined source) and increment 2 (async bridge + MCP client
-    for own `[mcp_servers]`) are **implemented**. Increments 3–5 (multi/host config
-    + namespacing, virtual tools, kits→profile) are **design-only** here. Siblings:
+    Increments 1–3 are **implemented** (config-defined source; async bridge + MCP
+    client; multi-source precedence + host-config ingestion). Increments 4–5
+    (virtual tools, kits→profile) are **design-only** here. Siblings:
     [Direction](direction.md), [Interpreter Types](interpreter-types.md), RFC 0001
     (the `lackpy-lang` leaf split).
 
@@ -86,21 +86,27 @@ first MCP *client*.
   `inputSchema`→`ArgSpec`s (unknown/nested → `type="Any"`, matching
   `resolve_python_type`'s fallback), `annotations`→grade (§6).
 
-## 4. Multi-inventory merge, namespacing, precedence (deferred)
+## 4. Multi-inventory merge, namespacing, precedence (implemented)
 
 Tension: host convention uses long names (`mcp__claude_ai_Gmail__create_draft`), but
 `toolbox._MASKING_NAMES` + the `register_tool` warning exist precisely because long/
 confusing names degrade the small (1.5B) generator lackpy targets.
 
-**Recommendation — short-by-default, qualify-on-collision:** each source contributes
-tools under their bare name; on collision the higher-precedence tool keeps the bare
-name and the loser is *also* kept as `<server>__<tool>`. Names hitting `_MASKING_NAMES`
-auto-qualify + warn (reuse existing machinery).
+**Implemented — short names, drop-with-log on collision (v1):** each source contributes
+tools under their bare name; on collision the higher-precedence source keeps the bare
+name and the shadowed tool is **dropped and logged** (`logger.info`). v1 does *not*
+keep a `<server>__<tool>` alias — the small models lackpy targets never call qualified
+names, so the alias machinery would serve no real path; add it in a later increment
+only if a workflow needs a shadowed tool. Masking names stay **warn-only** (auto-qualify
+deferred).
 
-**Precedence (deterministic), highest wins the bare name:** own `[mcp_servers]` → host
-configs (listed order) → local config-defined/builtins (auditable local source wins).
-Applied once at inventory assembly; the resolved name set feeds `KitPolicySource` and
-`format_description` unchanged.
+**Precedence (deterministic), highest wins the bare name** — *auditable local source
+wins*: user config `[[tools]]` (20) > shipped defaults/builtins (10) > own
+`[mcp_servers]` (5) > host configs (4, descending per file so the earlier file wins,
+floored at 1). Equal precedence → the later-added source wins (this is how a user
+`[[tools]]` entry overrides a default of the same name). Directly-`register_tool`'d
+tools use `inf` (always authoritative). The resolved name set feeds `KitPolicySource`
+and `format_description` unchanged.
 
 ## 5. The sync↔async bridge (centerpiece, deferred)
 
@@ -232,7 +238,9 @@ kibitzer chain is unchanged; new sources plug in by populating grades correctly.
    2b: dedicated-loop `McpClient` (loop-ownership decision = dedicated client
    thread, so eager discovery + session reuse compose across the MCP-server and
    per-command CLI contexts), `McpToolSource`, grade-from-hints; own `[mcp_servers]`.
-3. **Multi/host config + namespacing** (§3.4, §4) — *next*.
+3. **Multi/host config + namespacing** — *implemented*. Precedence + drop-with-log
+   collision merge in `Toolbox` (§4); `[mcp].host_configs` ingestion of external
+   `mcpServers` files at descending precedence (§3.4).
 4. **Virtual/harness tools** (§7).
 5. **kits→profile layer** on top of sources, retiring "kit" ([direction.md](direction.md) §2).
 
