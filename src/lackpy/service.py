@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from pathlib import Path
@@ -24,6 +25,8 @@ from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.bridge import AsyncBridge, is_async_callable
 from .run.runner import RestrictedRunner
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_top_level_return(program: str) -> str:
@@ -95,8 +98,8 @@ class LackpyService:
         # register their own provider="builtin"/"python" specs.
         self.toolbox.register_provider(BuiltinProvider())
         self.toolbox.register_provider(PythonProvider())
-        for source in self._build_tool_sources():
-            self.toolbox.add_source(source)
+        for source, precedence in self._build_tool_sources():
+            self.toolbox.add_source(source, precedence)
         self._inference_providers: list = []
         self._init_inference_providers()
         self._policy = PolicyLayer()
@@ -104,43 +107,53 @@ class LackpyService:
         self._kibitzer: Any = None
         self._init_kibitzer()
 
-    def _build_tool_sources(self) -> list[Any]:
-        """Assemble the tool sources that populate the toolbox.
+    # Source precedences (higher wins the bare name on collision; see Toolbox).
+    _PREC_CONFIG = 20    # user [[tools]]
+    _PREC_DEFAULT = 10   # shipped builtins
+    _PREC_OWN_MCP = 5    # own [mcp_servers]
+    _PREC_HOST_MCP = 4   # host configs (earlier file higher; floors at 1)
 
-        Shipped defaults first, then user-configured ``[[tools]]`` (so a user
-        definition overrides a default of the same name). Future MCP-discovered
-        and virtual/harness sources slot into this list (see
-        docs/design/tool-sources.md).
+    def _build_tool_sources(self) -> list[tuple[Any, float]]:
+        """Assemble (source, precedence) pairs that populate the toolbox.
+
+        Precedence: user ``[[tools]]`` > shipped defaults > own ``[mcp_servers]`` >
+        host configs (auditable local source wins; see docs/design/tool-sources.md §4).
         """
         from .sources import load_default_tool_defs
         from .sources.config import ConfigToolSource
 
-        sources: list[Any] = [
-            ConfigToolSource(load_default_tool_defs(), name="default"),
+        sources: list[tuple[Any, float]] = [
+            (ConfigToolSource(load_default_tool_defs(), name="default"), self._PREC_DEFAULT),
         ]
         if self._config.tools:
-            sources.append(ConfigToolSource(self._config.tools, name="config"))
+            sources.append((ConfigToolSource(self._config.tools, name="config"), self._PREC_CONFIG))
         sources.extend(self._build_mcp_sources())
         return sources
 
-    def _build_mcp_sources(self) -> list[Any]:
-        """One McpToolSource per configured [mcp_servers] entry (if mcp installed).
+    def _build_mcp_sources(self) -> list[tuple[Any, float]]:
+        """McpToolSources for own [mcp_servers] and ingested host configs.
 
         A server that fails to connect reports available()==False and is skipped
-        by add_source — one dead server never breaks the others.
+        by add_source — one dead server (or one malformed host config) never
+        breaks the others.
         """
-        if not self._config.mcp_servers:
+        own = self._config.mcp_servers
+        host_paths = self._config.mcp_host_configs
+        if not own and not host_paths:
             return []
         from .sources.mcp import mcp_available
         if not mcp_available():
             return []
-        from .sources.mcp.client import McpClient, McpServerSpec
+        from .sources.mcp.client import McpServerSpec, McpClient
+        from .sources.mcp.host_config import load_host_servers
         from .sources.mcp.source import McpToolSource
 
         if self._mcp_client is None:
             self._mcp_client = McpClient()
-        sources: list[Any] = []
-        for server_id, cfg in self._config.mcp_servers.items():
+        out: list[tuple[Any, float]] = []
+
+        # own servers — highest MCP precedence
+        for server_id, cfg in own.items():
             spec = McpServerSpec(
                 server_id=server_id,
                 transport=cfg.get("transport", "stdio"),
@@ -156,8 +169,20 @@ class LackpyService:
                 for name, t in (cfg.get("tools", {}) or {}).items()
                 if isinstance((g := (t or {}).get("grade")), dict) and "w" in g and "d" in g
             }
-            sources.append(McpToolSource(spec, self._mcp_client, grade_overrides=overrides))
-        return sources
+            out.append((McpToolSource(spec, self._mcp_client, grade_overrides=overrides),
+                        self._PREC_OWN_MCP))
+
+        # host configs — earlier file wins (descending precedence, floored at 1)
+        for i, path in enumerate(host_paths):
+            prec = max(1.0, self._PREC_HOST_MCP - i)
+            try:
+                specs = load_host_servers(path)
+            except Exception:
+                logger.warning("skipping unreadable MCP host config: %s", path)
+                continue
+            for spec in specs:
+                out.append((McpToolSource(spec, self._mcp_client), prec))
+        return out
 
     def close(self) -> None:
         """Release background resources (the MCP client thread). Idempotent.

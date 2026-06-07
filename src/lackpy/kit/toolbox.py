@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 # Names that will confuse small language models if used as tool names.
 # Includes Python stdlib top-level modules and builtin functions.
@@ -79,23 +82,41 @@ class Toolbox:
         # (the source resolves its own callables; takes precedence over the
         # name→provider dispatch used by directly-registered tools).
         self._spec_owner: dict[str, Any] = {}
+        # Precedence of the source that currently holds each (bare) tool name.
+        # Higher wins; equal → later-added wins. Directly-registered tools use inf.
+        self._precedence: dict[str, float] = {}
 
-    def add_source(self, source: Any) -> None:
+    def add_source(self, source: Any, precedence: float = 0) -> None:
         """Discover and register every tool a :class:`ToolSource` provides.
 
-        The source owns resolution for the tools it contributes. A later source
-        overrides an earlier one on name collision (so user config beats shipped
-        defaults). No-op if the source reports itself unavailable.
+        On a name collision the higher-``precedence`` source keeps the name
+        (equal precedence → the later-added source wins); the shadowed tool is
+        **dropped and logged** (v1 has no qualified alias — the small models
+        lackpy targets never call ``server__tool`` names). No-op if the source
+        reports itself unavailable.
 
         Args:
             source: An object with ``available()``, ``discover()`` and
                 ``resolve(spec)`` (the ToolSource protocol).
+            precedence: Higher wins the bare name. Service order: user config
+                ``[[tools]]`` > shipped defaults > own ``[mcp_servers]`` > host.
         """
         if not source.available():
             return
         for spec in source.discover():
-            self.register_tool(spec)          # clears any prior owner for this name
-            self._spec_owner[spec.name] = source  # this source now owns resolution
+            name = spec.name
+            held = self._precedence.get(name)
+            if held is not None and precedence < held:
+                logger.info(
+                    "tool %r from source %r shadowed by higher-precedence %r",
+                    name, getattr(source, "name", "?"),
+                    getattr(self._spec_owner.get(name), "name", "?"),
+                )
+                continue
+            self._warn_if_masking(name)
+            self.tools[name] = spec
+            self._spec_owner[name] = source
+            self._precedence[name] = precedence
 
     def register_provider(self, provider: Any) -> None:
         """Register a tool provider plugin and load its tools into the registry.
@@ -116,19 +137,24 @@ class Toolbox:
             UserWarning: If the tool name masks a Python stdlib module or builtin,
                 which causes small language models to generate incorrect code.
         """
-        if spec.name in _MASKING_NAMES:
+        self._warn_if_masking(spec.name)
+        # A directly-registered tool is authoritative: it resolves via provider
+        # dispatch (drop any source ownership) and outranks every source so a
+        # later add_source can't steal the name.
+        self._spec_owner.pop(spec.name, None)
+        self._precedence[spec.name] = float("inf")
+        self.tools[spec.name] = spec
+
+    def _warn_if_masking(self, name: str) -> None:
+        if name in _MASKING_NAMES:
             warnings.warn(
-                f"Tool name '{spec.name}' masks a Python stdlib module or builtin. "
-                f"Small language models may generate `{spec.name}.{spec.name}()` or "
-                f"`import {spec.name}` instead of calling the tool directly. "
-                f"Consider a more specific name (e.g. '{spec.name}_file').",
+                f"Tool name '{name}' masks a Python stdlib module or builtin. "
+                f"Small language models may generate `{name}.{name}()` or "
+                f"`import {name}` instead of calling the tool directly. "
+                f"Consider a more specific name (e.g. '{name}_file').",
                 UserWarning,
                 stacklevel=2,
             )
-        # A directly-registered tool resolves via provider dispatch; drop any
-        # prior source ownership for this name so a later register_tool wins.
-        self._spec_owner.pop(spec.name, None)
-        self.tools[spec.name] = spec
 
     def resolve(self, name: str) -> Callable[..., Any]:
         """Return the callable implementation for a named tool.
