@@ -59,6 +59,31 @@ svc.toolbox.register_tool(ToolSpec(
 
 The `python` provider is always registered. It resolves tools by importing the named module and looking up the function.
 
+### Tools come from sources (no hard-coded names)
+
+Tools are never hard-coded in lackpy by name — they come from **tool sources** that
+fully define them. The first source is **config-defined**: declare a tool in
+`.lackpy/config.toml` under a top-level `[[tools]]` array and it is loaded at service
+init (no Python needed):
+
+```toml
+[[tools]]
+name = "count_lines"
+provider = "python"
+module = "my_tools"
+function = "count_lines"
+description = "Count the number of lines in a file"
+returns = "int"
+grade_w = 1
+effects_ceiling = 0
+args = [{ name = "path", type = "str", description = "File path" }]
+```
+
+The shipped builtins (`read_file`, `find_files`, `write_file`, `edit_file`) are
+themselves config-defined data (`lackpy/sources/default_tools.toml`), auto-loaded by
+default; a `[[tools]]` entry with the same name overrides one. MCP-discovered and
+virtual/harness sources are planned — see [Tool Sources (RFC 0002)](../design/tool-sources.md).
+
 ---
 
 ## Provider table

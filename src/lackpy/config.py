@@ -26,6 +26,7 @@ class LackpyConfig:
     sandbox_memory_mb: int = 512
     inference_mode: str | None = None
     tool_providers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    tools: list[dict[str, Any]] = field(default_factory=list)
     config_dir: Path = field(default_factory=lambda: Path(".lackpy"))
 
 
@@ -42,6 +43,7 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
     kit = data.get("kit", {})
     sandbox = data.get("sandbox", {})
     tool_providers = data.get("tool_providers", {})
+    tools = data.get("tools", [])
     providers: dict[str, dict[str, Any]] = {}
     for name, cfg in inference.get("providers", {}).items():
         providers[name] = cfg
@@ -54,5 +56,6 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
         sandbox_timeout=sandbox.get("timeout_seconds", 120),
         sandbox_memory_mb=sandbox.get("memory_mb", 512),
         tool_providers=tool_providers,
+        tools=tools,
         config_dir=config_dir,
     )

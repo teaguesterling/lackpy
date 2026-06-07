@@ -1,0 +1,61 @@
+# Shipped default tools (formerly the hard-coded service._BUILTIN_TOOLS).
+#
+# These are DATA, auto-loaded by ConfigToolSource at service init — not a
+# hard-coded ToolSpec list in Python. A user's .lackpy/config.toml [[tools]]
+# entry with the same name overrides the default; deleting from a local override
+# config is the path toward shipping these as separate addon packages instead.
+
+[[tools]]
+name = "read_file"
+provider = "python"
+module = "lackpy.sources.builtins"
+function = "read_file"
+description = "Read file contents"
+returns = "str"
+grade_w = 1
+effects_ceiling = 1
+docs = "docs/tools/read_file.md"
+args = [{ name = "path", type = "str", description = "File path" }]
+
+[[tools]]
+name = "find_files"
+provider = "python"
+module = "lackpy.sources.builtins"
+function = "find_files"
+description = "Find files matching a glob pattern"
+returns = "list[str]"
+grade_w = 1
+effects_ceiling = 1
+docs = "docs/tools/find_files.md"
+args = [{ name = "pattern", type = "str", description = "Glob pattern" }]
+
+[[tools]]
+name = "write_file"
+provider = "python"
+module = "lackpy.sources.builtins"
+function = "write_file"
+description = "Write content to a file"
+returns = "bool"
+grade_w = 3
+effects_ceiling = 3
+docs = "docs/tools/write_file.md"
+args = [
+    { name = "path", type = "str" },
+    { name = "content", type = "str" },
+]
+
+[[tools]]
+name = "edit_file"
+provider = "python"
+module = "lackpy.sources.builtins"
+function = "edit_file"
+description = "Replace text in a file"
+returns = "bool"
+grade_w = 3
+effects_ceiling = 3
+docs = "docs/tools/edit_file.md"
+args = [
+    { name = "path", type = "str" },
+    { name = "old_str", type = "str" },
+    { name = "new_str", type = "str" },
+]

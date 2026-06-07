@@ -77,6 +77,7 @@ nav:
     - LangChain Integration: extending/langchain.md
   - Design:
     - Direction (roadmap): design/direction.md
+    - Tool Sources (RFC 0002): design/tool-sources.md
     - Interpreter Types: design/interpreter-types.md
   - Reference:
     - Python API: reference/api.md
