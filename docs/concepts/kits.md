@@ -105,8 +105,17 @@ grade = { w = 1, d = 0 }
 MCP I/O runs on a dedicated client loop; an MCP-backed tool call from a (synchronous)
 lackpy program is bridged to that loop without blocking generation. A server that
 fails to connect is skipped (its tools simply don't appear), never breaking the
-others. Multi-server namespacing, host-config ingestion, and virtual/harness tools
-are planned — see [Tool Sources (RFC 0002)](../design/tool-sources.md).
+others. Multiple servers and external host configs (`[mcp].host_configs`) merge by
+precedence — local config/builtins win the bare name, then own `[mcp_servers]`, then
+host configs; a shadowed tool is dropped.
+
+### Virtual / harness-provided tools
+
+A host embedding lackpy can pass a `harness_resolver` (`name -> callable | None`) and
+declare tools under `[[virtual_tools]]` (full spec, no implementation). These resolve
+to the harness's callable at run time. Tools the harness can't currently supply are
+hidden from generation; if one is withdrawn between generation and the call, the call
+fails cleanly. See [Tool Sources (RFC 0002)](../design/tool-sources.md).
 
 ---
 

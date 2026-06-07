@@ -79,9 +79,12 @@ class LackpyService:
         config: Override configuration. Loaded from .lackpy/config.toml if not provided.
     """
 
-    def __init__(self, workspace: Path | None = None, config: LackpyConfig | None = None) -> None:
+    def __init__(self, workspace: Path | None = None, config: LackpyConfig | None = None,
+                 harness_resolver: Any = None) -> None:
         self._workspace = workspace or Path.cwd()
         self._config = config or load_config(self._workspace)
+        # Optional host/harness resolver for virtual tools: name -> callable | None.
+        self._harness_resolver = harness_resolver
         self._runner = RestrictedRunner()
         # Single-flight execution: serializes the process-global os.chdir in
         # _execute so concurrent delegations can't race on cwd once an execution
@@ -110,6 +113,7 @@ class LackpyService:
     # Source precedences (higher wins the bare name on collision; see Toolbox).
     _PREC_CONFIG = 20    # user [[tools]]
     _PREC_DEFAULT = 10   # shipped builtins
+    _PREC_VIRTUAL = 7    # [[virtual_tools]] (declared locally, harness-implemented)
     _PREC_OWN_MCP = 5    # own [mcp_servers]
     _PREC_HOST_MCP = 4   # host configs (earlier file higher; floors at 1)
 
@@ -127,6 +131,10 @@ class LackpyService:
         ]
         if self._config.tools:
             sources.append((ConfigToolSource(self._config.tools, name="config"), self._PREC_CONFIG))
+        if self._config.virtual_tools:
+            from .sources.virtual import VirtualToolSource
+            sources.append((VirtualToolSource(self._config.virtual_tools, self._harness_resolver),
+                            self._PREC_VIRTUAL))
         sources.extend(self._build_mcp_sources())
         return sources
 
@@ -268,6 +276,32 @@ class LackpyService:
         kits_dir = self._config.config_dir / "kits"
         return resolve_kit(kit, self.toolbox, kits_dir=kits_dir, extra_tools=extra_tools)
 
+    def _gate_kit(self, resolved: ResolvedKit) -> ResolvedKit:
+        """Generation gate: drop virtual tools the harness can't currently supply.
+
+        Keeps the model from composing against an absent tool. (The call-time
+        proxy still raises if a tool is withdrawn between generation and call.)
+        Non-virtual tools are never gated.
+        """
+        drop = {
+            n for n, s in resolved.tools.items()
+            if s.provider == "virtual"
+            and (self._harness_resolver is None or self._harness_resolver(n) is None)
+        }
+        if not drop:
+            return resolved
+        from .lang.grader import compute_grade
+        tools = {n: s for n, s in resolved.tools.items() if n not in drop}
+        callables = {n: c for n, c in resolved.callables.items() if n not in drop}
+        grade = compute_grade(
+            {n: {"grade_w": s.grade_w, "effects_ceiling": s.effects_ceiling} for n, s in tools.items()}
+        )
+        return ResolvedKit(
+            tools=tools, callables=callables, grade=grade,
+            description=self.toolbox.format_description(list(tools.keys())),
+            docs=resolved.docs,
+        )
+
     def _resolve_params(self, params: dict[str, Any] | None, kit: ResolvedKit) -> tuple[dict[str, Any], str | None, set[str]]:
         if not params:
             return {}, None, set()
@@ -329,7 +363,7 @@ class LackpyService:
         from .infer.strategy import STRATEGIES
         from .infer.context import StepContext
 
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
         _, params_desc, param_names = self._resolve_params(params, resolved)
 
         effective_mode = mode or self._config.inference_mode
@@ -455,7 +489,7 @@ class LackpyService:
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
         param_values, _, param_names = self._resolve_params(params, resolved)
         allowed = set(resolved.tools.keys()) | param_names
         validation = validate(program, allowed_names=allowed, extra_rules=rules)
@@ -494,7 +528,7 @@ class LackpyService:
             RuntimeError: If all inference providers fail to produce a valid program.
         """
         start = time.perf_counter()
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
 
         # Kibitzer: register context for this delegation

@@ -29,6 +29,7 @@ class LackpyConfig:
     tools: list[dict[str, Any]] = field(default_factory=list)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     mcp_host_configs: list[str] = field(default_factory=list)
+    virtual_tools: list[dict[str, Any]] = field(default_factory=list)
     config_dir: Path = field(default_factory=lambda: Path(".lackpy"))
 
 
@@ -48,6 +49,7 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
     tools = data.get("tools", [])
     mcp_servers = data.get("mcp_servers", {})
     mcp_host_configs = data.get("mcp", {}).get("host_configs", [])
+    virtual_tools = data.get("virtual_tools", [])
     providers: dict[str, dict[str, Any]] = {}
     for name, cfg in inference.get("providers", {}).items():
         providers[name] = cfg
@@ -63,5 +65,6 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
         tools=tools,
         mcp_servers=mcp_servers,
         mcp_host_configs=mcp_host_configs,
+        virtual_tools=virtual_tools,
         config_dir=config_dir,
     )
