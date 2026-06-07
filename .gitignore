@@ -12,3 +12,12 @@ results/prompt-eval-dry-run/
 
 # local per-machine workspace config (model choice is a local decision)
 .lackpy/config.toml
+
+# blq — local state ignored; shared command registry tracked
+.bird/*
+!.bird/hooks/
+!.bird/config.toml
+!.bird/commands.toml
+# blq also generates these agent-facing files; keep them local (not committed)
+/.mcp.json
+/CLAUDE.md
