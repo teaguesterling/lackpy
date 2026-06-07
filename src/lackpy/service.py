@@ -84,7 +84,11 @@ class LackpyService:
         # _execute so concurrent delegations can't race on cwd once an execution
         # runs off the loop thread (the threaded/async path below).
         self._exec_lock = asyncio.Lock()
+        # Bridge for execution-loop-local async tools. NB: MCP tools do NOT use
+        # this — they marshal to their own client-loop bridge (McpClient.bridge);
+        # this one is set per threaded run for any tool bound to the exec loop.
         self._bridge = AsyncBridge()
+        self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
         # Resolution mechanisms for directly-registered specs (tools themselves
         # come from sources, not these). Kept for back-compat with callers that
@@ -116,7 +120,55 @@ class LackpyService:
         ]
         if self._config.tools:
             sources.append(ConfigToolSource(self._config.tools, name="config"))
+        sources.extend(self._build_mcp_sources())
         return sources
+
+    def _build_mcp_sources(self) -> list[Any]:
+        """One McpToolSource per configured [mcp_servers] entry (if mcp installed).
+
+        A server that fails to connect reports available()==False and is skipped
+        by add_source — one dead server never breaks the others.
+        """
+        if not self._config.mcp_servers:
+            return []
+        from .sources.mcp import mcp_available
+        if not mcp_available():
+            return []
+        from .sources.mcp.client import McpClient, McpServerSpec
+        from .sources.mcp.source import McpToolSource
+
+        if self._mcp_client is None:
+            self._mcp_client = McpClient()
+        sources: list[Any] = []
+        for server_id, cfg in self._config.mcp_servers.items():
+            spec = McpServerSpec(
+                server_id=server_id,
+                transport=cfg.get("transport", "stdio"),
+                command=cfg.get("command"),
+                args=cfg.get("args", []),
+                env=cfg.get("env"),
+                cwd=cfg.get("cwd"),
+                url=cfg.get("url"),
+                headers=cfg.get("headers"),
+            )
+            overrides = {
+                name: (g["w"], g["d"])
+                for name, t in (cfg.get("tools", {}) or {}).items()
+                if isinstance((g := (t or {}).get("grade")), dict) and "w" in g and "d" in g
+            }
+            sources.append(McpToolSource(spec, self._mcp_client, grade_overrides=overrides))
+        return sources
+
+    def close(self) -> None:
+        """Release background resources (the MCP client thread). Idempotent.
+
+        Best-effort: the MCP client runs on a daemon thread, so a one-shot
+        process (e.g. a CLI command) exits cleanly without calling this. Call it
+        for prompt cleanup in a long-lived host that creates many services.
+        """
+        if self._mcp_client is not None:
+            self._mcp_client.shutdown()
+            self._mcp_client = None
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"

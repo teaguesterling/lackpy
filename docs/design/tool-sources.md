@@ -1,10 +1,11 @@
 # RFC 0002 — Tool sources (config, MCP, virtual) & the sync↔async bridge
 
 !!! note "Status"
-    Increment 1 (config-defined source) is **implemented**. Increments 2–5
-    (MCP client, multi/host config, virtual tools, kits→profile) are **design-only**
-    here. Siblings: [Direction](direction.md), [Interpreter Types](interpreter-types.md),
-    RFC 0001 (the `lackpy-lang` leaf split).
+    Increment 1 (config-defined source) and increment 2 (async bridge + MCP client
+    for own `[mcp_servers]`) are **implemented**. Increments 3–5 (multi/host config
+    + namespacing, virtual tools, kits→profile) are **design-only** here. Siblings:
+    [Direction](direction.md), [Interpreter Types](interpreter-types.md), RFC 0001
+    (the `lackpy-lang` leaf split).
 
 ## 1. Problem & goals
 
@@ -160,6 +161,13 @@ the wrong cwd. Mitigations: spawn stdio servers eagerly (§3); single-flight exe
 per service instance for now; principled fix is dropping `os.chdir` for an explicit
 workspace root threaded into tool callables.
 
+**Implemented tradeoff:** the single-flight guard is a per-service `asyncio.Lock`
+held across *all* of `_execute` — including the pure-inline (no-async-tool) path. So
+a slow MCP-backed delegation serializes even non-MCP delegations on the same service.
+This is deliberate (it reproduces today's cwd-safety) but is a real throughput
+serialization in a long-lived MCP-server host; lifting it depends on the `os.chdir`
+removal above.
+
 ### 5.6 Errors — already solved
 `run/trace.py` `make_traced` already catches exceptions into a failed `TraceEntry` and
 re-raises into a failed `ExecutionResult`. The MCP callable just translates MCP failures
@@ -219,9 +227,12 @@ kibitzer chain is unchanged; new sources plug in by populating grades correctly.
 
 1. **Config-defined source** — *implemented* (this PR). `_BUILTIN_TOOLS` removed;
    builtins now data.
-2. **MCP client + bridge** — ships the `run_in_executor` change (§5.1); independently
-   testable (fake async tool: assert no deadlock + correct trace). Own `[mcp_servers]`.
-3. **Multi/host config + namespacing** (§3.4, §4).
+2. **MCP client + bridge** — *implemented*. 2a: `AsyncBridge` + async `_execute`
+   with the single-flight `asyncio.Lock` and lazy threaded path (`run/bridge.py`).
+   2b: dedicated-loop `McpClient` (loop-ownership decision = dedicated client
+   thread, so eager discovery + session reuse compose across the MCP-server and
+   per-command CLI contexts), `McpToolSource`, grade-from-hints; own `[mcp_servers]`.
+3. **Multi/host config + namespacing** (§3.4, §4) — *next*.
 4. **Virtual/harness tools** (§7).
 5. **kits→profile layer** on top of sources, retiring "kit" ([direction.md](direction.md) §2).
 

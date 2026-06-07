@@ -81,8 +81,32 @@ args = [{ name = "path", type = "str", description = "File path" }]
 
 The shipped builtins (`read_file`, `find_files`, `write_file`, `edit_file`) are
 themselves config-defined data (`lackpy/sources/default_tools.toml`), auto-loaded by
-default; a `[[tools]]` entry with the same name overrides one. MCP-discovered and
-virtual/harness sources are planned — see [Tool Sources (RFC 0002)](../design/tool-sources.md).
+default; a `[[tools]]` entry with the same name overrides one.
+
+### MCP-discovered tools
+
+With the optional `mcp` extra (`pip install lackpy[mcp]`), lackpy can connect to an
+MCP server as a client and expose its tools — full specs (params from the tool's
+input schema, docs from its description) and a security grade derived from the
+tool's MCP annotations (`readOnlyHint`/`destructiveHint`/…, conservative when
+absent). Declare servers under `[mcp_servers]`:
+
+```toml
+[mcp_servers.fs]
+transport = "stdio"          # or "http" with url = "..."
+command = "mcp-server-filesystem"
+args = ["--root", "."]
+
+# optional per-tool grade override
+[mcp_servers.fs.tools.read_file]
+grade = { w = 1, d = 0 }
+```
+
+MCP I/O runs on a dedicated client loop; an MCP-backed tool call from a (synchronous)
+lackpy program is bridged to that loop without blocking generation. A server that
+fails to connect is skipped (its tools simply don't appear), never breaking the
+others. Multi-server namespacing, host-config ingestion, and virtual/harness tools
+are planned — see [Tool Sources (RFC 0002)](../design/tool-sources.md).
 
 ---
 
