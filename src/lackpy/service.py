@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -21,6 +22,7 @@ from .policy.layer import PolicyLayer
 from .policy.sources.kit import KitPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
+from .run.bridge import AsyncBridge, is_async_callable
 from .run.runner import RestrictedRunner
 
 
@@ -78,6 +80,15 @@ class LackpyService:
         self._workspace = workspace or Path.cwd()
         self._config = config or load_config(self._workspace)
         self._runner = RestrictedRunner()
+        # Single-flight execution: serializes the process-global os.chdir in
+        # _execute so concurrent delegations can't race on cwd once an execution
+        # runs off the loop thread (the threaded/async path below).
+        self._exec_lock = asyncio.Lock()
+        # Bridge for execution-loop-local async tools. NB: MCP tools do NOT use
+        # this — they marshal to their own client-loop bridge (McpClient.bridge);
+        # this one is set per threaded run for any tool bound to the exec loop.
+        self._bridge = AsyncBridge()
+        self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
         # Resolution mechanisms for directly-registered specs (tools themselves
         # come from sources, not these). Kept for back-compat with callers that
@@ -109,7 +120,55 @@ class LackpyService:
         ]
         if self._config.tools:
             sources.append(ConfigToolSource(self._config.tools, name="config"))
+        sources.extend(self._build_mcp_sources())
         return sources
+
+    def _build_mcp_sources(self) -> list[Any]:
+        """One McpToolSource per configured [mcp_servers] entry (if mcp installed).
+
+        A server that fails to connect reports available()==False and is skipped
+        by add_source — one dead server never breaks the others.
+        """
+        if not self._config.mcp_servers:
+            return []
+        from .sources.mcp import mcp_available
+        if not mcp_available():
+            return []
+        from .sources.mcp.client import McpClient, McpServerSpec
+        from .sources.mcp.source import McpToolSource
+
+        if self._mcp_client is None:
+            self._mcp_client = McpClient()
+        sources: list[Any] = []
+        for server_id, cfg in self._config.mcp_servers.items():
+            spec = McpServerSpec(
+                server_id=server_id,
+                transport=cfg.get("transport", "stdio"),
+                command=cfg.get("command"),
+                args=cfg.get("args", []),
+                env=cfg.get("env"),
+                cwd=cfg.get("cwd"),
+                url=cfg.get("url"),
+                headers=cfg.get("headers"),
+            )
+            overrides = {
+                name: (g["w"], g["d"])
+                for name, t in (cfg.get("tools", {}) or {}).items()
+                if isinstance((g := (t or {}).get("grade")), dict) and "w" in g and "d" in g
+            }
+            sources.append(McpToolSource(spec, self._mcp_client, grade_overrides=overrides))
+        return sources
+
+    def close(self) -> None:
+        """Release background resources (the MCP client thread). Idempotent.
+
+        Best-effort: the MCP client runs on a daemon thread, so a one-shot
+        process (e.g. a CLI command) exits cleanly without calling this. Call it
+        for prompt cleanup in a long-lived host that creates many services.
+        """
+        if self._mcp_client is not None:
+            self._mcp_client.shutdown()
+            self._mcp_client = None
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"
@@ -311,13 +370,37 @@ class LackpyService:
             interpreter=interpreter, kibitzer_session=self._kibitzer,
         )
 
-    def _execute(self, program: str, callables: dict[str, Any],
-                 param_values: dict[str, Any], kibitzer_session: Any = None) -> ExecutionResult:
+    async def _execute(self, program: str, callables: dict[str, Any],
+                       param_values: dict[str, Any], kibitzer_session: Any = None) -> ExecutionResult:
         """Run a (already validated) program through the restricted runner.
 
-        The single execution path shared by ``run_program`` and ``delegate``:
-        switch into the workspace, run, and always restore the prior cwd.
+        The single execution path shared by ``run_program`` and ``delegate``.
+        Held under ``_exec_lock`` so the process-global ``os.chdir`` is
+        single-flight regardless of which path runs.
+
+        - **Inline** (default): no loop-bound tools in the kit — run the sync
+          runner directly, exactly as before.
+        - **Threaded**: a tool is flagged loop-bound (e.g. an MCP proxy) — run the
+          sync runner via ``run_in_executor`` so the event loop stays free to
+          service coroutines those tools marshal back via :class:`AsyncBridge`.
         """
+        needs_loop = any(is_async_callable(fn) for fn in callables.values())
+        async with self._exec_lock:
+            if not needs_loop:
+                return self._run_sync(program, callables, param_values, kibitzer_session)
+            loop = asyncio.get_running_loop()
+            self._bridge.loop = loop
+            try:
+                return await loop.run_in_executor(
+                    None,
+                    lambda: self._run_sync(program, callables, param_values, kibitzer_session),
+                )
+            finally:
+                self._bridge.loop = None
+
+    def _run_sync(self, program: str, callables: dict[str, Any],
+                  param_values: dict[str, Any], kibitzer_session: Any = None) -> ExecutionResult:
+        """Switch into the workspace, run the program, restore cwd. Always sync."""
         prev_cwd = os.getcwd()
         try:
             os.chdir(self._workspace)
@@ -353,7 +436,7 @@ class LackpyService:
         validation = validate(program, allowed_names=allowed, extra_rules=rules)
         if not validation.valid:
             return ExecutionResult(success=False, error=f"Validation failed: {'; '.join(validation.errors)}")
-        return self._execute(program, resolved.callables, param_values)
+        return await self._execute(program, resolved.callables, param_values)
 
     async def delegate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
@@ -427,7 +510,7 @@ class LackpyService:
                         "correction_attempts": gen_result.correction_attempts,
                     }
 
-        exec_result = self._execute(
+        exec_result = await self._execute(
             gen_result.program, resolved.callables, param_values,
             kibitzer_session=self._kibitzer,
         )
