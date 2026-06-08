@@ -18,6 +18,6 @@ results/prompt-eval-dry-run/
 !.bird/hooks/
 !.bird/config.toml
 !.bird/commands.toml
-# blq also generates these agent-facing files; keep them local (not committed)
+# blq generates a local MCP config; keep it local (don't force the blq server on
+# everyone). CLAUDE.md IS committed — it carries the project's agent guidance.
 /.mcp.json
-/CLAUDE.md
