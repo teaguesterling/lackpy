@@ -133,7 +133,15 @@ class InferenceDispatcher:
             )
 
         provider_names = [p.name for p in self._providers if p.available()]
+        hint = ""
+        if set(provider_names) <= {"templates", "rules"}:
+            hint = (
+                " No LLM inference tier is configured — only the deterministic "
+                "templates/rules tiers ran, and they don't cover compositional "
+                "intents. Run `lackpyctl init --ollama-url <url>` to wire a local "
+                "model (see `.lackpy/config.toml.example`)."
+            )
         raise RuntimeError(
             f"All {len(provider_names)} providers failed to produce a valid program. "
-            f"Tried: {', '.join(provider_names)}. Last errors: {errors_by_provider}"
+            f"Tried: {', '.join(provider_names)}. Last errors: {errors_by_provider}.{hint}"
         )
