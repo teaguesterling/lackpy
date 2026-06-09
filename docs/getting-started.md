@@ -10,7 +10,7 @@
     pip install lackpy
     ```
 
-    With the base install you can validate and run programs, manage kits and templates, and use the full Python API — but inference (`delegate`, `generate`) will only work via the built-in `templates` and `rules` tiers.
+    With the base install you can validate and run programs, manage kits and templates, and use the full Python API — but inference (delegate and `--generate`) will only work via the built-in `templates` and `rules` tiers. Compositional intents won't generate until you configure a local Ollama model with `lackpyctl init --ollama-model`.
 
 === "With Ollama"
 
@@ -20,7 +20,7 @@
     pip install "lackpy[ollama]"
     ```
 
-    Then pull a model:
+    Then pull whatever model your Ollama host serves best — the choice is per-machine, not a package default:
 
     ```bash
     ollama pull qwen2.5-coder:1.5b
@@ -56,11 +56,11 @@ Python 3.11+ ships `tomllib` in the standard library; `tomli` is only needed on 
 
 ## Initialize a workspace
 
-lackpy stores configuration, kits, and templates under `.lackpy/` in your workspace directory. Create this structure with:
+lackpy stores configuration, kits, and templates under `.lackpy/` in your workspace directory. Create this structure with `lackpyctl`:
 
 ```bash
 cd my-project
-lackpy init
+lackpyctl init
 ```
 
 This creates:
@@ -72,10 +72,10 @@ This creates:
   templates/        # .tmpl files for the ratchet pattern
 ```
 
-To configure a specific Ollama model at init time:
+The inference order wires in a local Ollama provider so compositional intents work once a model is served. The model choice is **per-machine** — configure it at init time:
 
 ```bash
-lackpy init --ollama-model codellama:7b
+lackpyctl init --ollama-model codellama:7b
 ```
 
 ### Config file
@@ -109,13 +109,13 @@ See [Concepts: Inference Pipeline](concepts/inference.md) for all config options
 Check what tools are available:
 
 ```bash
-lackpy toolbox list
+lackpyctl toolbox list
 ```
 
-Generate and run a program:
+Generate and run a program (delegate is the default `lackpy -c` mode):
 
 ```bash
-lackpy delegate "read the file README.md" --kit read_file
+lackpy -c "read the file README.md" --kit read_file
 ```
 
 The output is JSON with the generated program, trace, and result:
@@ -133,9 +133,13 @@ The output is JSON with the generated program, trace, and result:
     {"step": 0, "tool": "read_file", "args": {"path": "README.md"}, "result": "...", "duration_ms": 1.1, "success": true, "error": null}
   ],
   "output": "# My Project\n...",
+  "stdout": "",
   "error": null
 }
 ```
+
+!!! note "Printed output is captured"
+    When a generated program `print()`s its answer instead of leaving a bare final expression, the printed text is captured in `stdout` and surfaced as `output` (so `print(...)` no longer yields `output: null`).
 
 !!! tip "Check inference tier"
     The `generation_tier` field tells you which provider handled the request: `templates` (tier 0), `rules` (tier 1), `ollama` (tier 2), or `anthropic` (tier 3).

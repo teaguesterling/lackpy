@@ -128,26 +128,39 @@ The `order` list controls priority. Built-in providers (`templates`, `rules`) ar
 
 The ratchet pattern is a workflow built on top of the template tier:
 
-1. Issue `delegate` — the intent is handled by rules or an LLM on the first call.
+1. Delegate an intent (`lackpy -c "..."`) — handled by rules or an LLM on the first call.
 2. Verify the result is correct.
-3. Issue `create` to save the validated program as a template with an intent pattern.
-4. Subsequent `delegate` calls with matching intents hit tier 0 — zero latency, guaranteed valid.
+3. Save the validated program as a **`.tmpl` template** with an intent `pattern:`.
+4. Subsequent delegates with matching intents hit tier 0 — zero latency, guaranteed valid.
 
 Over time, the template library grows and LLM calls become less frequent. The template tier acts as a ratchet: once an intent is captured, it stays captured.
 
 ```bash
-# Step 1: first run (rules tier)
-lackpy delegate "read the file pyproject.toml" --kit read_file
+# Step 1: first run (rules or LLM tier)
+lackpy -c "read the file pyproject.toml" --kit read_file
+```
 
-# Step 2: save as template
-cat > read_pyproject.py << 'EOF'
-content = read_file('pyproject.toml')
-content
-EOF
-lackpy create read_pyproject.py --name read-pyproject --kit read_file
+```python
+# Step 2: capture it as a pattern-matched template (Python API).
+# The CLI's `--create` flag saves a run-by-path *Lackey file* instead — that's a
+# separate reuse mechanism and is NOT matched against future intents. Only `.tmpl`
+# files with a `pattern:` populate the tier-0 templates cache, and today the only
+# way to write one (other than authoring it by hand) is svc.create(pattern=...).
+import asyncio
+from lackpy.service import LackpyService
 
+svc = LackpyService()
+asyncio.run(svc.create(
+    program="content = read_file('pyproject.toml')\ncontent",
+    name="read-pyproject",
+    pattern="read the file pyproject.toml",
+    kit=["read_file"],
+))
+```
+
+```bash
 # Step 3: future runs hit tier 0
-lackpy delegate "read the file pyproject.toml" --kit read_file
+lackpy -c "read the file pyproject.toml" --kit read_file
 # generation_tier: "templates"
 ```
 

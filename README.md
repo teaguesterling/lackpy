@@ -9,10 +9,10 @@
 ## What it does
 
 ```bash
-$ lackpy delegate "read file main.py and count its lines" --kit read_file,find_files
+$ lackpy -c "read file main.py and count its lines" --kit read_file,find_files
 ```
 
-lackpy takes an intent, generates a restricted Python program using a local 1.5B model, validates it against a strict AST whitelist, and runs it with traced tool calls. One MCP call replaces N tool round-trips.
+lackpy takes an intent, generates a restricted Python program using a local model you configure (any Ollama-served coder model), validates it against a strict AST whitelist, and runs it with traced tool calls. One MCP call replaces N tool round-trips.
 
 ## Install
 
@@ -42,9 +42,13 @@ pip install -e ./packages/lackpy-lang -e ".[dev]"
 ## Quick start
 
 ```bash
-lackpy init --ollama-url http://localhost:11434
-lackpy delegate "find all python files" --kit read_file,find_files
+lackpyctl init --ollama-url http://localhost:11434   # writes .lackpy/config.toml
+lackpy -c "find all python files" --kit read_file,find_files
 ```
+
+`lackpyctl init` wires a local Ollama model into the inference order — pick the model
+with `--ollama-model` (the choice is per-machine, not a package default). Without it,
+only the deterministic templates/rules tiers run and compositional intents won't generate.
 
 ```python
 from lackpy.service import LackpyService
