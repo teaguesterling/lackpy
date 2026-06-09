@@ -46,7 +46,7 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.lang.validator` | AST walk + rule application → `ValidationResult` | `lang.grammar` |
 | `lackpy.lang.grader` | `Grade(w, d)` computation from tool specs | none |
 | `lackpy.lang.rules` | Built-in custom rule callables | `ast` |
-| `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpy spec`) | `lang.grammar` |
+| `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpyctl spec`) | `lang.grammar` |
 | `lackpy.kit.toolbox` | `Toolbox` — provider registry + tool resolution | none |
 | `lackpy.kit.registry` | `resolve_kit()` — name/list/dict → `ResolvedKit` | `kit.toolbox`, `lang.grader` |
 | `lackpy.kit.providers.builtin` | Built-in tools: `read_file`, `find_files`, `write_file`, `edit_file` | `pathlib` |

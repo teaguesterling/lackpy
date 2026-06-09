@@ -203,16 +203,16 @@ The `docs` path is relative to the workspace root. It is not loaded at resolutio
 
 ```bash
 # List all kits in .lackpy/kits/
-lackpy kit list
+lackpyctl kit list
 
 # Show tools and grade for a kit
-lackpy kit info filesystem
+lackpyctl kit info filesystem
 
 # Show tools and grade for an ad-hoc list
-lackpy kit info read_file,find_files,write_file
+lackpyctl kit info read_file,find_files,write_file
 
 # Create a new kit
-lackpy kit create mykit --tools read_file find_files --description "Read-only tools"
+lackpyctl kit create mykit --tools read_file find_files --description "Read-only tools"
 ```
 
 ---

@@ -20,18 +20,21 @@ intent → restricted Python → validation → traced execution → result
 
 ## Quick start — CLI
 
+lackpy ships two binaries: `lackpy` (flag-based inference on a single `-c` intent —
+delegate is the default mode) and `lackpyctl` (workspace management).
+
 ```bash
 # Initialize a workspace
-lackpy init
+lackpyctl init
 
-# Generate and run a program from natural language
-lackpy delegate "read the file README.md" --kit read_file,find_files
+# Generate and run a program from natural language (delegate is the default mode)
+lackpy -c "read the file README.md" --kit read_file,find_files
 
 # Just generate — don't run
-lackpy generate "find all Python files" --kit find_files
+lackpy -c "find all Python files" --generate --kit find_files
 
-# Validate a hand-written program
-lackpy validate my_program.py --kit read_file,find_files
+# Validate a hand-written program file
+lackpy my_program.py --validate --kit read_file,find_files
 ```
 
 ## Quick start — Python API
@@ -58,13 +61,19 @@ asyncio.run(main())
 
 ## Rigged Suite
 
-The "rigged suite" is the property that lackpy's inference pipeline can be made deterministic for any intent that has been seen before. Save a validated program as a template:
+The "rigged suite" is the property that lackpy's inference pipeline can be made deterministic for any intent that has been seen before. There are two complementary mechanisms:
+
+**Lackey files.** Generate a program from an intent and save it as a reusable **Lackey file** (a Python class) under `.lackpy/templates/`, then invoke it by path:
 
 ```bash
-lackpy create my_program.py --name read-file --pattern "read the file {path}" --kit read_file
+lackpy -c "read the file README.md" --create --name ReadFile --kit read_file
+# → Created .lackpy/templates/ReadFile.py
+lackpy .lackpy/templates/ReadFile.py
 ```
 
-On the next `delegate` call with a matching intent, the template tier fires at tier 0 — before any LLM is consulted. The program is guaranteed valid because it was validated when it was saved.
+The saved program is guaranteed valid because it was validated when it was created, and running it by path skips inference entirely.
+
+**Templates.** For intent-driven deterministic matching, save a `.tmpl` template with a `pattern` (via the `svc.create(pattern=...)` Python API). The template tier (tier 0) then matches future intents by pattern and instantiates the stored program — before any LLM is consulted.
 
 ---
 

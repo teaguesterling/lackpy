@@ -2,7 +2,29 @@
 
 import pytest
 
+from lackpy.run.base import ExecutionResult
 from lackpy.run.runner import RestrictedRunner
+
+
+class TestEffectiveOutput:
+    def test_typed_output_wins_over_stdout(self):
+        # A present typed value is never overridden or coerced by captured stdout.
+        r = ExecutionResult(success=True, output=42, stdout="ignored\n")
+        assert r.effective_output == 42
+
+    def test_falls_back_to_stripped_stdout(self):
+        r = ExecutionResult(success=True, output=None, stdout="50\n")
+        assert r.effective_output == "50"
+
+    def test_none_when_no_output_and_no_stdout(self):
+        r = ExecutionResult(success=True, output=None, stdout="")
+        assert r.effective_output is None
+
+    def test_falsy_typed_output_is_preserved(self):
+        # output=0 / "" / [] are real values, not "missing" — keep them, don't
+        # fall through to stdout.
+        r = ExecutionResult(success=True, output=0, stdout="99\n")
+        assert r.effective_output == 0
 
 
 @pytest.fixture
@@ -45,6 +67,39 @@ class TestBasicExecution:
         result = runner.run("x = read_file('f.py')", mock_namespace)
         assert result.success
         assert result.output is None
+
+
+class TestPrintCapture:
+    def test_print_captured_to_stdout(self, runner, mock_namespace):
+        result = runner.run("print('hello')", mock_namespace)
+        assert result.success
+        assert result.stdout == "hello\n"
+
+    def test_print_does_not_escape_as_output(self, runner, mock_namespace):
+        # A trailing print(...) is a call returning None, so the typed output
+        # stays None — the value is recoverable from stdout instead.
+        result = runner.run("x = find_files('*.py')\nprint(len(x))", mock_namespace)
+        assert result.success
+        assert result.output is None
+        assert result.stdout == "2\n"
+
+    def test_print_multiple_args_and_calls(self, runner, mock_namespace):
+        result = runner.run("print('a', 'b')\nprint('c')", mock_namespace)
+        assert result.success
+        assert result.stdout == "a b\nc\n"
+
+    def test_no_print_means_empty_stdout(self, runner, mock_namespace):
+        result = runner.run("files = find_files('*.py')\nlen(files)", mock_namespace)
+        assert result.success
+        assert result.stdout == ""
+
+    def test_partial_stdout_on_runtime_error(self, runner):
+        def bad_read(path):
+            raise FileNotFoundError("no such file")
+        ns = {"read_file": bad_read}
+        result = runner.run("print('before')\nread_file('missing.py')", ns)
+        assert not result.success
+        assert result.stdout == "before\n"
 
 
 class TestParams:

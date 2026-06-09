@@ -149,7 +149,7 @@ This prevents `__` strings from being used as arguments to reflection functions,
 The current grammar is also available as JSON:
 
 ```bash
-lackpy spec
+lackpyctl spec
 ```
 
 ```json
