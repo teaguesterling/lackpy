@@ -627,7 +627,12 @@ class LackpyService:
                        for e in exec_result.trace.entries],
             "files_read": exec_result.trace.files_read,
             "files_modified": exec_result.trace.files_modified,
-            "output": exec_result.output,
+            # Prefer the typed last-expression value; if the program instead
+            # printed its answer (a common small-model habit), fall back to the
+            # captured stdout so the result isn't silently dropped. stdout is
+            # always surfaced so the caller can see it regardless.
+            "output": exec_result.effective_output,
+            "stdout": exec_result.stdout,
             "error": exec_result.error,
             "correction_strategy": gen_result.correction_strategy,
             "correction_attempts": gen_result.correction_attempts,
