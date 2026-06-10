@@ -53,3 +53,23 @@ async def test_per_call_key_and_base_url_forwarded(calls):
     await p.generate("x", "ns")
     call = calls[-1]
     assert call["kw"]["api_key"] == "sk-x" and call["kw"]["base_url"] == "http://proxy/v1"
+
+
+def test_woollama_plugin_registered_from_config(tmp_path):
+    """The `woollama` plugin wires a WoollamaProvider into the service's inference
+    tiers (config-driven, alongside the deterministic templates/rules tiers)."""
+    from lackpy.config import LackpyConfig
+    from lackpy.service import LackpyService
+
+    cfg = LackpyConfig(
+        inference_order=["woollama"],
+        inference_providers={"woollama": {
+            "plugin": "woollama", "model": "ollama/qwen2.5-coder:1.5b",
+            "temperature": 0.1}},
+    )
+    svc = LackpyService(workspace=tmp_path, config=cfg)
+    woollama_tiers = [p for p in svc._inference_providers
+                      if type(p).__name__ == "WoollamaProvider"]
+    assert len(woollama_tiers) == 1
+    assert woollama_tiers[0]._model == "ollama/qwen2.5-coder:1.5b"
+    assert woollama_tiers[0]._temperature == 0.1
