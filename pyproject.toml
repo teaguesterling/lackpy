@@ -12,10 +12,8 @@ requires-python = ">=3.12"
 # halves version together.
 dependencies = [
     "markdown-it-py>=3.0",
-    # lackpy-lang==0.12.0 — MASKED on the woollama-core-integration branch: it's not
-    # published yet (its packaging is a follow-up); its code is provided via the
-    # pytest pythonpath (packages/lackpy-lang/src), so tests run without it as a dist.
-    "woollama",   # the extracted model-management core (path source below)
+    "lackpy-lang==0.12.0",   # the pure-language leaf — resolved locally (sources below)
+    "woollama",              # the extracted model-management core (sources below)
 ]
 
 [project.optional-dependencies]
@@ -39,9 +37,13 @@ docs = [
 Documentation = "https://lackpy.readthedocs.io"
 Repository = "https://github.com/teague/lackpy"
 
-# woollama.core is consumed as a local editable path during the integration; once
-# woollama's core-extraction releases, this becomes a normal version requirement.
+# Local sources so the monorepo resolves under `uv sync` without publishing:
+#  - lackpy-lang is the in-tree language leaf (status quo; un-masked — resolved
+#    from packages/ rather than the registry, where it isn't published).
+#  - woollama is the extracted core, an editable sibling worktree during the
+#    integration; becomes a normal version requirement once it releases.
 [tool.uv.sources]
+lackpy-lang = { path = "packages/lackpy-lang", editable = true }
 woollama = { path = "../woollama-core-extraction", editable = true }
 
 [project.scripts]
