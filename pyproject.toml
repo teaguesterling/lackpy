@@ -6,19 +6,25 @@ build-backend = "hatchling.build"
 name = "lackpy"
 version = "0.12.0"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 # lackpy is the runtime dist; lackpy-lang is the pure-language leaf. They share the
 # `lackpy` namespace (PEP 420 — neither ships lackpy/__init__.py). Pinned so the two
 # halves version together.
 dependencies = [
     "markdown-it-py>=3.0",
-    "lackpy-lang==0.12.0",   # the pure-language leaf — resolved locally (sources below)
-    "woollama",              # the extracted model-management core (sources below)
+    "lackpy-lang==0.12.0",   # the pure-language leaf (CI installs it from packages/)
+    # woollama's model-management core. Pinned to a git rev until it cuts a release
+    # with woollama.core (the published 0.3.0 predates the extraction); then this
+    # becomes a normal version requirement. A PEP 508 direct URL, so pip AND uv
+    # resolve it identically (CI uses pip).
+    "woollama @ git+https://github.com/teaguesterling/woollama.git@2e6204b87ce19fc37fb06bc47bbf62ae1428b0c2",
 ]
 
 [project.optional-dependencies]
 ollama = ["ollama>=0.4", "httpx>=0.27"]
-sandbox = ["nsjail-python"]
+# nsjail-python has no <3.12 wheel; marker keeps the project installable on 3.11
+# (CI tests 3.11) while the sandbox extra is available on 3.12.
+sandbox = ["nsjail-python ; python_version >= '3.12'"]
 anthropic = ["anthropic>=0.40"]
 mcp = ["mcp[cli]"]
 fledgling = ["fledgling"]
@@ -37,14 +43,11 @@ docs = [
 Documentation = "https://lackpy.readthedocs.io"
 Repository = "https://github.com/teague/lackpy"
 
-# Local sources so the monorepo resolves under `uv sync` without publishing:
-#  - lackpy-lang is the in-tree language leaf (status quo; un-masked — resolved
-#    from packages/ rather than the registry, where it isn't published).
-#  - woollama is the extracted core, an editable sibling worktree during the
-#    integration; becomes a normal version requirement once it releases.
+# Resolve the in-tree language leaf locally for `uv` users (it isn't on PyPI yet);
+# CI uses pip and installs it explicitly. (woollama is a PEP 508 git URL in
+# dependencies above — no source entry needed; pip and uv both honor it.)
 [tool.uv.sources]
 lackpy-lang = { path = "packages/lackpy-lang", editable = true }
-woollama = { path = "../woollama-core-extraction", editable = true }
 
 [project.scripts]
 lackpy = "lackpy.cli:main"
@@ -52,6 +55,12 @@ lackpyctl = "lackpy.ctl:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lackpy"]
+
+# Allow the woollama `@ git+...` direct reference in dependencies (hatchling rejects
+# direct URLs by default, as PyPI forbids them). Temporary — drops out when woollama
+# becomes a normal version requirement.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 # Both namespace halves on the path: core runtime (src) + the lackpy-lang leaf.
