@@ -6,11 +6,17 @@ build-backend = "hatchling.build"
 name = "lackpy"
 version = "0.12.0"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 # lackpy is the runtime dist; lackpy-lang is the pure-language leaf. They share the
 # `lackpy` namespace (PEP 420 — neither ships lackpy/__init__.py). Pinned so the two
 # halves version together.
-dependencies = ["markdown-it-py>=3.0", "lackpy-lang==0.12.0"]
+dependencies = [
+    "markdown-it-py>=3.0",
+    # lackpy-lang==0.12.0 — MASKED on the woollama-core-integration branch: it's not
+    # published yet (its packaging is a follow-up); its code is provided via the
+    # pytest pythonpath (packages/lackpy-lang/src), so tests run without it as a dist.
+    "woollama",   # the extracted model-management core (path source below)
+]
 
 [project.optional-dependencies]
 ollama = ["ollama>=0.4", "httpx>=0.27"]
@@ -32,6 +38,11 @@ docs = [
 [project.urls]
 Documentation = "https://lackpy.readthedocs.io"
 Repository = "https://github.com/teague/lackpy"
+
+# woollama.core is consumed as a local editable path during the integration; once
+# woollama's core-extraction releases, this becomes a normal version requirement.
+[tool.uv.sources]
+woollama = { path = "../woollama-core-extraction", editable = true }
 
 [project.scripts]
 lackpy = "lackpy.cli:main"
