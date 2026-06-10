@@ -223,6 +223,18 @@ class LackpyService:
                 self._inference_providers.append(AnthropicProvider(
                     model=provider_cfg.get("model", "claude-haiku-4-5-20251001"),
                 ))
+            elif plugin == "woollama" and name not in ("templates", "rules"):
+                # Consolidated model management: one provider routes to ANY
+                # woollama-known backend (ollama, anthropic, openai, …) via a
+                # "<provider>/<model>" string — lackpy stops doing per-vendor HTTP.
+                from .infer.providers.woollama import WoollamaProvider
+                self._inference_providers.append(WoollamaProvider(
+                    model=provider_cfg.get("model", "ollama/qwen2.5-coder:1.5b"),
+                    temperature=provider_cfg.get("temperature", 0.2),
+                    retry_temperature=provider_cfg.get("retry_temperature", 0.6),
+                    api_key=provider_cfg.get("api_key"),
+                    base_url=provider_cfg.get("base_url"),
+                ))
             elif plugin == "cascade" and name not in ("templates", "rules"):
                 from .infer.providers.cascade import CascadeProvider
                 self._inference_providers.append(CascadeProvider(
