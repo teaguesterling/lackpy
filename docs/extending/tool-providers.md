@@ -24,7 +24,16 @@ class MyProvider:
         ...
 ```
 
-There is no abstract base class — Python duck typing is used. `available()` is not called by the current toolbox implementation, but it is good practice to implement it in case a future version adds lazy provider activation.
+There is no abstract base class — Python duck typing is used.
+
+!!! note "Providers vs. tool sources"
+    A **provider** does *resolution only* (`ToolSpec` → callable). A **tool source**
+    (`lackpy.sources`, [Tool Sources RFC](../design/tool-sources.md)) is the higher-level
+    abstraction that *also* **discovers** the specs — it owns the tool names, so nothing
+    is hard-coded. Sources are how tools enter the toolbox (`Toolbox.add_source`), and a
+    source's `available()` **is** consulted (an unavailable source is skipped). For
+    config-defined tools you usually don't need a custom provider at all — declare them
+    under `[[tools]]` and the built-in `python` provider resolves them.
 
 ---
 
