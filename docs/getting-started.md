@@ -14,10 +14,12 @@
 
 === "With Ollama"
 
-    For local LLM inference using [Ollama](https://ollama.com):
+    Local LLM inference using [Ollama](https://ollama.com) works with the base
+    install — model calls route through woollama's core (a dependency), no extra
+    needed:
 
     ```bash
-    pip install "lackpy[ollama]"
+    pip install lackpy
     ```
 
     Then pull whatever model your Ollama host serves best — the choice is per-machine, not a package default:
@@ -84,12 +86,12 @@ The generated `.lackpy/config.toml` looks like:
 
 ```toml
 [inference]
-order = ["templates", "rules", "ollama-local"]
+order = ["templates", "rules", "local"]
 
-[inference.providers.ollama-local]
-plugin = "ollama"
-host = "http://localhost:11434"
-model = "qwen2.5-coder:1.5b"
+[inference.providers.local]
+plugin = "woollama"
+model = "ollama/qwen2.5-coder:1.5b"
+base_url = "http://localhost:11434/v1"
 
 [kit]
 default = "debug"

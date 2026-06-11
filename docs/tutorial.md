@@ -257,25 +257,29 @@ files
 
     The rules tier uses keyword-based matching for common patterns. It handles intents like "read file X", "find definitions of Y", "glob Z".
 
-=== "Tier 2: Ollama"
+=== "Tier 2: Local model"
 
-    If templates and rules fail, Ollama is tried. Requires `pip install lackpy[ollama]` and a running Ollama server.
+    If templates and rules fail, the LLM tier is tried. Model calls go through
+    woollama's core (a built-in dependency); a local model just needs a running
+    Ollama server.
 
     ```toml
     # .lackpy/config.toml
-    [inference.providers.ollama-local]
-    plugin = "ollama"
-    model = "qwen2.5-coder:1.5b"
+    [inference.providers.local]
+    plugin = "woollama"
+    model = "ollama/qwen2.5-coder:1.5b"
+    base_url = "http://localhost:11434/v1"
     ```
 
-=== "Tier 3: Anthropic"
+=== "Tier 2: Cloud fallback"
 
-    Cloud fallback. Requires `pip install lackpy[full]` and `ANTHROPIC_API_KEY`.
+    Same provider, a cloud model. Just needs the relevant API key in the
+    environment (e.g. `ANTHROPIC_API_KEY`).
 
     ```toml
-    [inference.providers.anthropic-fallback]
-    plugin = "anthropic"
-    model = "claude-haiku-4-5-20251001"
+    [inference.providers.cloud-fallback]
+    plugin = "woollama"
+    model = "anthropic/claude-haiku-4-5"
     ```
 
 ### Python API
