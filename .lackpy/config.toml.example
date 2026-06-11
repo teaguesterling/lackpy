@@ -6,16 +6,34 @@
 # here. (On the maintainer's host that has been a qwen3 14b-class model.)
 
 [inference]
-# Provider order: cheap deterministic tiers first, local LLM last.
-order = ["templates", "rules", "ollama-local"]
+# Provider order: cheap deterministic tiers first, the LLM tier last.
+order = ["templates", "rules", "local"]
 
-[inference.providers.ollama-local]
-plugin = "ollama"
-host = "http://localhost:11434"
-# Local choice — set to the best model your Ollama host serves.
-model = "qwen2.5-coder:1.5b"
+# The LLM tier. Model calls go through woollama's model-management core: one
+# provider routes to any woollama-known backend via a "<provider>/<model>"
+# string — lackpy no longer does per-vendor HTTP. Examples:
+#   model = "ollama/qwen2.5-coder:3b"        (local Ollama)
+#   model = "anthropic/claude-haiku-4-5"     (needs ANTHROPIC_API_KEY)
+#   model = "openai/gpt-4o-mini"             (needs OPENAI_API_KEY)
+[inference.providers.local]
+plugin = "woollama"
+# Local choice — set to the best model your host serves.
+model = "ollama/qwen2.5-coder:1.5b"
+# OpenAI-compat base for the backend (Ollama wants the /v1 suffix). Omit to use
+# woollama's defaults (Ollama at http://localhost:11434, cloud providers built in).
+base_url = "http://localhost:11434/v1"
 temperature = 0.2
-keep_alive = "30m"
+
+# Optional: a raw-completion cascade strategy for small coder models. This is NOT a
+# vendor backend — it uses Ollama's /api/generate (raw, pattern-completion) which
+# often beats chat-template prompting for tiny models. Add "fast" to `order` to use.
+# [inference.providers.fast]
+# plugin = "cascade"
+# host = "http://localhost:11434"
+# tiers = [
+#     {model = "qwen2.5-coder:3b", max_tokens = 80, timeout = 15},
+#     {model = "qwen2.5-coder:7b", max_tokens = 120, timeout = 60},
+# ]
 
 [kit]
 default = "debug"

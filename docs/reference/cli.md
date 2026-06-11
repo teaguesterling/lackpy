@@ -172,8 +172,8 @@ lackpyctl init [--ollama-url URL] [--ollama-model MODEL]
 
 **Creates:**
 
-- `.lackpy/config.toml` — inference order (`templates`, `rules`, `ollama-local`), kit
-  default, sandbox settings
+- `.lackpy/config.toml` — inference order (`templates`, `rules`, `local`), the `local`
+  woollama tier (`model = "ollama/<model>"`), kit default, sandbox settings
 - `.lackpy/templates/` — directory for saved Lackey files / `.tmpl` files
 - `.lackpy/kits/` — directory for `.kit` files
 

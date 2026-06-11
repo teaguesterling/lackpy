@@ -21,16 +21,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ollama = ["ollama>=0.4", "httpx>=0.27"]
+# Local + cloud model inference is built in now: model calls go through woollama
+# (a core dependency, which brings httpx). No per-vendor SDK extras — pick the
+# backend with a "<provider>/<model>" string in config. Cloud backends just need
+# the relevant API key in the environment (ANTHROPIC_API_KEY, OPENAI_API_KEY, …).
 # nsjail-python has no <3.12 wheel; marker keeps the project installable on 3.11
 # (CI tests 3.11) while the sandbox extra is available on 3.12.
 sandbox = ["nsjail-python ; python_version >= '3.12'"]
-anthropic = ["anthropic>=0.40"]
 mcp = ["mcp[cli]"]
 fledgling = ["fledgling"]
 blq = ["blq-cli"]
 kibitzer = ["kibitzer>=0.3"]
-full = ["lackpy[ollama,sandbox,anthropic,mcp,fledgling,blq,kibitzer]"]
+full = ["lackpy[sandbox,mcp,fledgling,blq,kibitzer]"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 docs = [
     "mkdocs-material>=9",
