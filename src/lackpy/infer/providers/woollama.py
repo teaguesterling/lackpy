@@ -1,0 +1,84 @@
+"""woollama-backed inference: delegate the model call to ``woollama.core``.
+
+lackpy keeps everything that makes it lackpy — prompt construction, the few-shot
+error-correction conversation, and the dispatcher / validation / CorrectionChain
+around generation. It only stops doing its OWN per-provider model HTTP: the raw
+"send these messages, get text" call goes to :func:`woollama.core.complete`,
+which owns provider/model routing, config, transport, ollama-native ``num_ctx``,
+and per-call key/base-url overrides.
+
+One ``model`` string of the form ``"<provider>/<model>"`` (e.g.
+``"ollama/qwen2.5-coder:1.5b"`` or ``"anthropic/claude-haiku-4-5"``) reaches every
+woollama-known backend — so lackpy gets multi-provider model management without
+maintaining a provider per vendor. Implements the same ``InferenceProvider``
+protocol (``name`` / ``available`` / ``generate``) as the other tiers.
+"""
+from __future__ import annotations
+
+from ..prompt import build_system_prompt
+
+
+class WoollamaProvider:
+    def __init__(self, model: str = "ollama/qwen2.5-coder:1.5b",
+                 temperature: float = 0.2, retry_temperature: float = 0.6,
+                 api_key: str | None = None, base_url: str | None = None) -> None:
+        self._model = model
+        self._temperature = temperature
+        self._retry_temperature = retry_temperature
+        self._api_key = api_key
+        self._base_url = base_url
+
+    @property
+    def name(self) -> str:
+        return "woollama"
+
+    def available(self) -> bool:
+        try:
+            import woollama.core  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    async def generate(self, intent: str, namespace_desc: str,
+                       config: dict | None = None, error_feedback: list[str] | None = None,
+                       system_prompt_override: str | None = None,
+                       interpreter: object | None = None) -> str | None:
+        if not self.available():
+            return None
+        from woollama.core import complete
+
+        system = system_prompt_override or build_system_prompt(
+            namespace_desc, interpreter=interpreter)
+
+        is_retry = error_feedback and self._last_output
+        if is_retry:
+            # Few-shot error correction: show the model its bad output and the
+            # correction as a conversation (mirrors the OllamaProvider tier).
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": intent},
+                {"role": "assistant", "content": self._last_output},
+                {"role": "user", "content": (
+                    "That code won't work in this environment. "
+                    + " ".join(h for h in error_feedback if h != "--- Suggestions ---")
+                    + " Rewrite using only the kernel namespace.")},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": intent},
+            ]
+
+        temperature = self._retry_temperature if is_retry else self._temperature
+        try:
+            content = await complete(
+                self._model, messages,
+                params={"temperature": temperature},
+                api_key=self._api_key, base_url=self._base_url)
+            self._last_output = content.strip() if content else None
+            return self._last_output
+        except Exception:
+            self._last_output = None
+            return None
+
+    _last_output: str | None = None

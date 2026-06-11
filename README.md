@@ -9,21 +9,24 @@
 ## What it does
 
 ```bash
-$ lackpy delegate "read file main.py and count its lines" --kit read_file,find_files
+$ lackpy -c "read file main.py and count its lines" --kit read_file,find_files
 ```
 
-lackpy takes an intent, generates a restricted Python program using a local 1.5B model, validates it against a strict AST whitelist, and runs it with traced tool calls. One MCP call replaces N tool round-trips.
+lackpy takes an intent, generates a restricted Python program using a local model you configure (any Ollama-served coder model), validates it against a strict AST whitelist, and runs it with traced tool calls. One MCP call replaces N tool round-trips.
 
 ## Install
 
 ```bash
-pip install lackpy            # runtime (pulls in lackpy-lang automatically)
-pip install lackpy[ollama]    # + local model inference
-pip install lackpy[full]      # + all optional features
+pip install lackpy            # runtime + local/cloud model inference (via woollama)
+pip install lackpy[full]      # + all optional features (sandbox, mcp, blq, …)
 
 pip install lackpy-lang       # JUST the language (grammar/validator/grader/spec),
                               # no runtime — for tools that only reason about programs
 ```
+
+Model inference is built in — calls route through woollama's core (a dependency), so
+local Ollama and cloud backends (Anthropic, OpenAI, …) all work without a per-vendor
+extra; cloud backends just need the relevant API key in your environment.
 
 `lackpy` and `lackpy-lang` share the `lackpy` namespace ([PEP 420](https://peps.python.org/pep-0420/));
 neither ships a top-level `lackpy/__init__.py`, so import from submodules
@@ -42,9 +45,13 @@ pip install -e ./packages/lackpy-lang -e ".[dev]"
 ## Quick start
 
 ```bash
-lackpy init --ollama-url http://localhost:11434
-lackpy delegate "find all python files" --kit read_file,find_files
+lackpyctl init --ollama-url http://localhost:11434   # writes .lackpy/config.toml
+lackpy -c "find all python files" --kit read_file,find_files
 ```
+
+`lackpyctl init` wires a local Ollama model into the inference order — pick the model
+with `--ollama-model` (the choice is per-machine, not a package default). Without it,
+only the deterministic templates/rules tiers run and compositional intents won't generate.
 
 ```python
 from lackpy.service import LackpyService

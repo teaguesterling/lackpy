@@ -2,7 +2,7 @@
 
 This walkthrough covers every major feature of lackpy. Follow along in order, or jump to any section.
 
-**Prerequisites:** lackpy installed, workspace initialized with `lackpy init`. See [Getting Started](getting-started.md).
+**Prerequisites:** lackpy installed, workspace initialized with `lackpyctl init`. See [Getting Started](getting-started.md).
 
 ---
 
@@ -13,13 +13,13 @@ Create a project directory and initialize:
 ```bash
 mkdir my-lackpy-project && cd my-lackpy-project
 echo "# Hello from lackpy" > README.md
-lackpy init
+lackpyctl init
 ```
 
 Confirm the setup:
 
 ```bash
-lackpy status
+lackpyctl status
 ```
 
 ```json
@@ -86,7 +86,7 @@ count = len(files)
 count
 EOF
 
-lackpy validate check.py --kit find_files
+lackpy check.py --validate --kit find_files
 ```
 
 ```json
@@ -107,7 +107,7 @@ import sys
 sys.version
 EOF
 
-lackpy validate bad.py --kit find_files
+lackpy bad.py --validate --kit find_files
 ```
 
 ```json
@@ -158,19 +158,19 @@ A **kit** is a named subset of tools from the toolbox. Kits control which functi
 ### List available tools
 
 ```bash
-lackpy toolbox list
+lackpyctl toolbox list
 ```
 
 ### Use a comma-separated kit
 
 ```bash
-lackpy delegate "read the file README.md" --kit read_file,find_files
+lackpy -c "read the file README.md" --kit read_file,find_files
 ```
 
 ### Create a named kit
 
 ```bash
-lackpy kit create filesystem --tools read glob write --description "File system tools"
+lackpyctl kit create filesystem --tools read glob write --description "File system tools"
 ```
 
 This creates `.lackpy/kits/filesystem.kit`:
@@ -188,13 +188,13 @@ write
 ### Use the named kit
 
 ```bash
-lackpy delegate "find all Python files" --kit filesystem
+lackpy -c "find all Python files" --kit filesystem
 ```
 
 ### Kit info
 
 ```bash
-lackpy kit info filesystem
+lackpyctl kit info filesystem
 ```
 
 ```json
@@ -231,10 +231,10 @@ result = await svc.delegate(
 
 ## 5. Generating programs
 
-`generate` runs the inference pipeline without executing the result:
+The `--generate` flag runs the inference pipeline without executing the result:
 
 ```bash
-lackpy generate "find all Python files" --kit find_files
+lackpy -c "find all Python files" --generate --kit find_files
 ```
 
 ```python
@@ -249,7 +249,7 @@ files
     Templates are matched first. If a template pattern matches the intent, the stored program is returned — no LLM required.
 
     ```bash
-    lackpy generate "read the file config.toml" --kit read_file
+    lackpy -c "read the file config.toml" --generate --kit read_file
     # → matched by rules tier: content = read_file('config.toml')
     ```
 
@@ -257,25 +257,29 @@ files
 
     The rules tier uses keyword-based matching for common patterns. It handles intents like "read file X", "find definitions of Y", "glob Z".
 
-=== "Tier 2: Ollama"
+=== "Tier 2: Local model"
 
-    If templates and rules fail, Ollama is tried. Requires `pip install lackpy[ollama]` and a running Ollama server.
+    If templates and rules fail, the LLM tier is tried. Model calls go through
+    woollama's core (a built-in dependency); a local model just needs a running
+    Ollama server.
 
     ```toml
     # .lackpy/config.toml
-    [inference.providers.ollama-local]
-    plugin = "ollama"
-    model = "qwen2.5-coder:1.5b"
+    [inference.providers.local]
+    plugin = "woollama"
+    model = "ollama/qwen2.5-coder:1.5b"
+    base_url = "http://localhost:11434/v1"
     ```
 
-=== "Tier 3: Anthropic"
+=== "Tier 2: Cloud fallback"
 
-    Cloud fallback. Requires `pip install lackpy[full]` and `ANTHROPIC_API_KEY`.
+    Same provider, a cloud model. Just needs the relevant API key in the
+    environment (e.g. `ANTHROPIC_API_KEY`).
 
     ```toml
-    [inference.providers.anthropic-fallback]
-    plugin = "anthropic"
-    model = "claude-haiku-4-5-20251001"
+    [inference.providers.cloud-fallback]
+    plugin = "woollama"
+    model = "anthropic/claude-haiku-4-5"
     ```
 
 ### Python API
@@ -291,7 +295,7 @@ print(result.generation_time_ms)
 
 ## 6. Running programs directly
 
-Use `run` when you already have a program file:
+When you already have a program file, pass its path as the first positional argument (there is no `run` subcommand). A plain program file needs `--kit` or `--tools` to supply its namespace; a Lackey file carries its own tools and needs neither:
 
 ```bash
 cat > list_py.py << 'EOF'
@@ -299,7 +303,7 @@ files = find_files("**/*.py")
 files
 EOF
 
-lackpy run list_py.py --kit find_files
+lackpy list_py.py --kit find_files
 ```
 
 ```json
@@ -357,23 +361,47 @@ content
 
 ---
 
-## 8. Creating templates (the ratchet)
+## 8. Saving programs for reuse (the ratchet)
 
-Once you have a working program, save it as a template to make future matching deterministic:
+lackpy gives you two ways to reuse a validated program. They're distinct mechanisms:
+
+### Lackey files (saved program, run by path)
+
+The `--create` flag generates a program from your intent and saves it as a **Lackey file** — a Python class wrapping the program, plus its tools — under `.lackpy/templates/`:
 
 ```bash
-cat > read_file.py << 'EOF'
-content = read_file('{path}')
-content
-EOF
-
-lackpy create read_file.py \
-  --name read-file \
-  --pattern "read the file {path}" \
-  --kit read_file
+lackpy -c "read the file README.md" --create --name ReadFile --kit read_file
 ```
 
-This creates `.lackpy/templates/read-file.tmpl`:
+The output is plain text:
+
+```
+Created .lackpy/templates/ReadFile.py
+```
+
+A Lackey file carries its own tools and a validated program. You run it by path — this skips inference entirely:
+
+```bash
+lackpy .lackpy/templates/ReadFile.py
+```
+
+A Lackey file is **not** matched against future intents; it's a saved program you invoke directly.
+
+### Templates (pattern-matched at tier 0)
+
+To make *intent matching* deterministic, save a `.tmpl` template with a `pattern`. This is exposed through the Python API (`svc.create`), which writes a `.tmpl` file with frontmatter:
+
+```python
+result = await svc.create(
+    program="content = read_file('{path}')\ncontent",
+    kit=["read_file"],
+    name="read-file",
+    pattern="read the file {path}",
+)
+print(result["path"])  # .lackpy/templates/read-file.tmpl
+```
+
+This writes `.lackpy/templates/read-file.tmpl`:
 
 ```
 ---
@@ -386,19 +414,7 @@ content = read_file('{path}')
 content
 ```
 
-Now `lackpy delegate "read the file README.md"` matches at tier 0, with `{path}` substituted to `README.md`. No LLM is called.
-
-### Python API
-
-```python
-result = await svc.create(
-    program="content = read_file('{path}')\ncontent",
-    kit=["read_file"],
-    name="read-file",
-    pattern="read the file {path}",
-)
-print(result["path"])  # .lackpy/templates/read-file.tmpl
-```
+Now a delegate call (the default `lackpy -c` mode) for `"read the file README.md"` matches the template at tier 0, with `{path}` substituted to `README.md`. No LLM is called.
 
 ---
 

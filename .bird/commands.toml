@@ -1,0 +1,12 @@
+[commands.test]
+cmd = "python -m pytest tests/ -q"
+description = "Run the full pytest suite"
+format = "pytest_text"
+lines = "+25-"
+sandbox = "none"
+
+[commands.lint]
+cmd = "ruff check src tests"
+description = "Lint source and tests with ruff"
+format = "generic_lint"
+sandbox = "none"

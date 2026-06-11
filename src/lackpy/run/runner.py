@@ -45,6 +45,17 @@ class RestrictedRunner:
         trace = Trace()
         param_names = set(params.keys()) if params else set()
 
+        # Capture print() into a per-run buffer rather than letting it escape to
+        # the process stdout. Binding the buffer here (not redirecting the global
+        # sys.stdout) keeps capture thread-safe under the threaded execution path
+        # and lets the caller recover a value when a generated program ends in
+        # ``print(x)`` instead of a bare last expression.
+        captured: list[str] = []
+
+        def _capturing_print(*args: Any, sep: str = " ", end: str = "\n",
+                             file: Any = None, flush: bool = False) -> None:
+            captured.append(sep.join(str(a) for a in args) + end)
+
         traced_ns: dict[str, Any] = {}
         for name, fn in namespace.items():
             traced_ns[name] = make_traced(name, fn, trace, kibitzer_session=kibitzer_session)
@@ -52,6 +63,8 @@ class RestrictedRunner:
         for name in ALLOWED_BUILTINS:
             if name == "sort_by":
                 traced_ns[name] = _sort_by
+            elif name == "print":
+                traced_ns[name] = _capturing_print
             else:
                 traced_ns[name] = getattr(_builtins_mod, name)
 
@@ -84,7 +97,8 @@ class RestrictedRunner:
         try:
             _run_validated_code(code, exec_globals)
         except Exception as e:
-            return ExecutionResult(success=False, error=str(e), trace=trace)
+            return ExecutionResult(success=False, error=str(e), trace=trace,
+                                   stdout="".join(captured))
 
         output = exec_globals.get("__result__")
         variables = {
@@ -92,7 +106,8 @@ class RestrictedRunner:
             if k not in traced_ns and not k.startswith("_") and k not in param_names
         }
 
-        return ExecutionResult(success=True, output=output, trace=trace, variables=variables)
+        return ExecutionResult(success=True, output=output, trace=trace,
+                               variables=variables, stdout="".join(captured))
 
 
 def _run_validated_code(code: object, globals_dict: dict[str, Any]) -> None:

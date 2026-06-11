@@ -6,10 +6,16 @@
 |------|----------|--------|---------|----------|
 | 0 | `TemplatesProvider` | built-in | ~0 ms | `.lackpy/templates/*.tmpl` files |
 | 1 | `RulesProvider` | built-in | ~0 ms | nothing |
-| 2 | `OllamaProvider` | `ollama` | 200–2000 ms | `pip install lackpy[ollama]`, running Ollama |
-| 3 | `AnthropicProvider` | `anthropic` | 500–3000 ms | `pip install lackpy[full]`, `ANTHROPIC_API_KEY` |
+| 2 | `WoollamaProvider` | `woollama` | 200–3000 ms | a `"<provider>/<model>"` model in config (local Ollama, or a cloud key) |
+| — | `CascadeProvider` | `cascade` | 200–2000 ms | optional; a raw-completion strategy for small Ollama coder models |
 
-The dispatcher tries each available provider in priority order. A provider is skipped if `available()` returns `False` (e.g. the `ollama` package is not installed). If a provider returns a syntactically valid program that fails AST validation, the dispatcher feeds the errors back for one retry before moving on.
+The LLM tier is a single `WoollamaProvider`: model calls go through woollama's
+model-management core, which routes a `"<provider>/<model>"` string to any
+woollama-known backend (Ollama, Anthropic, OpenAI, …). lackpy no longer ships a
+provider per vendor. `CascadeProvider` is a separate, optional *strategy* (not a
+vendor backend) — see [Tier 2](#tier-2-the-llm).
+
+The dispatcher tries each available provider in priority order. A provider is skipped if `available()` returns `False` (e.g. `woollama.core` is not importable). If a provider returns a syntactically valid program that fails AST validation, the dispatcher feeds the errors back for one retry before moving on.
 
 ---
 
@@ -48,22 +54,28 @@ Rules are only applied if the corresponding tool name appears in the namespace d
 
 ---
 
-## Tier 2 — Ollama
+## Tier 2 — The LLM
 
-The Ollama provider sends a structured system prompt + user intent to a local model. The system prompt describes:
+The `WoollamaProvider` sends a structured system prompt + user intent to a model. The system prompt describes:
 
 - The available tools and their signatures
 - The `ALLOWED_BUILTINS`
 - Any pre-set parameter variables
 - The constraints (no `import`, `def`, `class`, etc.)
 
-If the first generation fails validation, the errors are appended to the user message and the model is called again once.
+If the first generation fails validation, the errors are appended as a few-shot correction message and the model is called again once.
 
----
+The raw model call is delegated to woollama's `complete()`, which routes a
+`"<provider>/<model>"` string to the right backend — `ollama/…` for a local model,
+`anthropic/…` / `openai/…` / etc. for a cloud model (with the relevant API key in
+the environment). One provider, any backend; lackpy stops doing per-vendor HTTP.
 
-## Tier 3 — Anthropic
-
-The Anthropic provider works identically to the Ollama provider but calls the Anthropic Messages API. It is intended as a high-quality fallback for intents that a small local model cannot handle.
+**Optional — the cascade strategy.** `CascadeProvider` (`plugin = "cascade"`) is a
+*different way to generate*, not a different vendor: it uses Ollama's raw
+`/api/generate` completion endpoint with pattern-completion prompting, which often
+beats chat-template prompting for very small coder models. It tries several models in
+speed order and returns the first that validates. Add it to `order` as an extra tier
+when you're driving tiny local models.
 
 ---
 
@@ -98,18 +110,17 @@ raise RuntimeError("All providers failed")
 
 ```toml
 [inference]
-order = ["templates", "rules", "ollama-local", "anthropic-fallback"]
+order = ["templates", "rules", "local", "cloud-fallback"]
 
-[inference.providers.ollama-local]
-plugin = "ollama"
-host = "http://localhost:11434"
-model = "qwen2.5-coder:1.5b"
+[inference.providers.local]
+plugin = "woollama"
+model = "ollama/qwen2.5-coder:1.5b"
+base_url = "http://localhost:11434/v1"
 temperature = 0.2
-keep_alive = "30m"
 
-[inference.providers.anthropic-fallback]
-plugin = "anthropic"
-model = "claude-haiku-4-5-20251001"
+[inference.providers.cloud-fallback]
+plugin = "woollama"
+model = "anthropic/claude-haiku-4-5"   # needs ANTHROPIC_API_KEY in the environment
 ```
 
 The `order` list controls priority. Built-in providers (`templates`, `rules`) are always prepended regardless of their position in `order`.
@@ -128,26 +139,39 @@ The `order` list controls priority. Built-in providers (`templates`, `rules`) ar
 
 The ratchet pattern is a workflow built on top of the template tier:
 
-1. Issue `delegate` — the intent is handled by rules or an LLM on the first call.
+1. Delegate an intent (`lackpy -c "..."`) — handled by rules or an LLM on the first call.
 2. Verify the result is correct.
-3. Issue `create` to save the validated program as a template with an intent pattern.
-4. Subsequent `delegate` calls with matching intents hit tier 0 — zero latency, guaranteed valid.
+3. Save the validated program as a **`.tmpl` template** with an intent `pattern:`.
+4. Subsequent delegates with matching intents hit tier 0 — zero latency, guaranteed valid.
 
 Over time, the template library grows and LLM calls become less frequent. The template tier acts as a ratchet: once an intent is captured, it stays captured.
 
 ```bash
-# Step 1: first run (rules tier)
-lackpy delegate "read the file pyproject.toml" --kit read_file
+# Step 1: first run (rules or LLM tier)
+lackpy -c "read the file pyproject.toml" --kit read_file
+```
 
-# Step 2: save as template
-cat > read_pyproject.py << 'EOF'
-content = read_file('pyproject.toml')
-content
-EOF
-lackpy create read_pyproject.py --name read-pyproject --kit read_file
+```python
+# Step 2: capture it as a pattern-matched template (Python API).
+# The CLI's `--create` flag saves a run-by-path *Lackey file* instead — that's a
+# separate reuse mechanism and is NOT matched against future intents. Only `.tmpl`
+# files with a `pattern:` populate the tier-0 templates cache, and today the only
+# way to write one (other than authoring it by hand) is svc.create(pattern=...).
+import asyncio
+from lackpy.service import LackpyService
 
+svc = LackpyService()
+asyncio.run(svc.create(
+    program="content = read_file('pyproject.toml')\ncontent",
+    name="read-pyproject",
+    pattern="read the file pyproject.toml",
+    kit=["read_file"],
+))
+```
+
+```bash
 # Step 3: future runs hit tier 0
-lackpy delegate "read the file pyproject.toml" --kit read_file
+lackpy -c "read the file pyproject.toml" --kit read_file
 # generation_tier: "templates"
 ```
 

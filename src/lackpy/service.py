@@ -210,18 +210,28 @@ class LackpyService:
         for name in self._config.inference_order:
             provider_cfg = self._config.inference_providers.get(name, {})
             plugin = provider_cfg.get("plugin", "")
-            if plugin == "ollama" and name not in ("templates", "rules"):
-                from .infer.providers.ollama import OllamaProvider
-                self._inference_providers.append(OllamaProvider(
-                    host=provider_cfg.get("host", "http://localhost:11434"),
-                    model=provider_cfg.get("model", "qwen2.5-coder:1.5b"),
+            if plugin in ("ollama", "anthropic") and name not in ("templates", "rules"):
+                # Retired in the woollama consolidation: lackpy no longer does
+                # per-vendor model HTTP. Route these through the `woollama` plugin
+                # with a "<provider>/<model>" model string instead.
+                logger.warning(
+                    "inference plugin %r was retired; use plugin = \"woollama\" with "
+                    "model = \"%s/<model>\" (run `lackpyctl init` to regenerate "
+                    "config). Skipping inference tier %r.",
+                    plugin, plugin, name,
+                )
+                continue
+            if plugin == "woollama" and name not in ("templates", "rules"):
+                # Consolidated model management: one provider routes to ANY
+                # woollama-known backend (ollama, anthropic, openai, …) via a
+                # "<provider>/<model>" string — lackpy stops doing per-vendor HTTP.
+                from .infer.providers.woollama import WoollamaProvider
+                self._inference_providers.append(WoollamaProvider(
+                    model=provider_cfg.get("model", "ollama/qwen2.5-coder:1.5b"),
                     temperature=provider_cfg.get("temperature", 0.2),
-                    keep_alive=provider_cfg.get("keep_alive", "30m"),
-                ))
-            elif plugin == "anthropic" and name not in ("templates", "rules"):
-                from .infer.providers.anthropic import AnthropicProvider
-                self._inference_providers.append(AnthropicProvider(
-                    model=provider_cfg.get("model", "claude-haiku-4-5-20251001"),
+                    retry_temperature=provider_cfg.get("retry_temperature", 0.6),
+                    api_key=provider_cfg.get("api_key"),
+                    base_url=provider_cfg.get("base_url"),
                 ))
             elif plugin == "cascade" and name not in ("templates", "rules"):
                 from .infer.providers.cascade import CascadeProvider
@@ -627,7 +637,12 @@ class LackpyService:
                        for e in exec_result.trace.entries],
             "files_read": exec_result.trace.files_read,
             "files_modified": exec_result.trace.files_modified,
-            "output": exec_result.output,
+            # Prefer the typed last-expression value; if the program instead
+            # printed its answer (a common small-model habit), fall back to the
+            # captured stdout so the result isn't silently dropped. stdout is
+            # always surfaced so the caller can see it regardless.
+            "output": exec_result.effective_output,
+            "stdout": exec_result.stdout,
             "error": exec_result.error,
             "correction_strategy": gen_result.correction_strategy,
             "correction_attempts": gen_result.correction_attempts,

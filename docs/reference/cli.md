@@ -1,32 +1,185 @@
 # CLI Reference
 
+lackpy ships **two** command-line entry points:
+
+| Command | Purpose |
+|---------|---------|
+| `lackpy` | Run inference: delegate / generate / validate / create from intent, and run program files. |
+| `lackpyctl` | Manage the workspace: init, status, kits, toolbox, templates, providers, MCP server. |
+
 ```
-lackpy [--workspace PATH] <command> [args]
+lackpy    [--workspace PATH] -c "<intent>" [flags]      # or: lackpy <file> [flags]
+lackpyctl [--workspace PATH] <command> [args]
 ```
 
-All commands accept `--workspace PATH` to set the project root (default: current directory).
+Both accept `--workspace PATH` to set the project root (default: current directory).
+
+> **Note:** `lackpy` is **flag-based**, not subcommand-based. The mode is selected by
+> flags on a single intent (`-c`): the default is *delegate* (generate + run);
+> `--generate`, `--validate`, and `--create` select the other modes.
 
 ---
 
-## `lackpy init`
+# `lackpy` — inference
+
+## delegate (default)
+
+Generate a program from a natural-language intent and run it immediately.
+
+```bash
+lackpy -c "<intent>" [--kit KIT] [--tools TOOLS] [--param k=v ...] [--mode MODE]
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `-c "<intent>"` | yes | Natural-language description of the task |
+| `--kit` | no | Kit name, comma-separated tool list, or `@file` |
+| `--tools` | no | Extra tool names (comma-separated) to add on top of the kit |
+| `--param` | no | Parameter `key=value` (repeatable) |
+| `--mode` | no | Inference mode: `1-shot`, `spm` (default: from config) |
+
+**Output:** JSON with `success`, `program`, `grade`, `generation_tier`, timing fields,
+`trace`, `output`, `stdout`, and `error`. (`output` falls back to captured `stdout`
+when the generated program `print()`s its answer instead of leaving a bare final
+expression.)
+
+**Exit code:** 0 on success, 1 on failure.
+
+**Examples:**
+
+```bash
+lackpy -c "read the file README.md" --kit read_file
+lackpy -c "find all Python files" --kit read_file,find_files
+```
+
+---
+
+## generate (`--generate`)
+
+Run the inference pipeline and print the generated program **without executing it**.
+
+```bash
+lackpy -c "<intent>" --generate [--kit KIT]
+```
+
+**Output:** The program text (not JSON).
+
+**Exit code:** 0 on success; 1 if generation fails.
+
+**Example:**
+
+```bash
+lackpy -c "find all Python files" --generate --kit find_files
+```
+
+---
+
+## validate (`--validate`)
+
+Validate a program against the AST whitelist without running it. Validate either an
+inline code string (with `-c`) or a file (as a positional argument).
+
+```bash
+lackpy -c "<program source>" --validate [--kit KIT]
+lackpy <file> --validate [--kit KIT]
+```
+
+**Output:** JSON with `valid` (bool), `errors` (list), `calls` (list).
+
+**Exit code:** 0 if valid, 1 if invalid.
+
+**Examples:**
+
+```bash
+lackpy my_program.py --validate --kit read_file
+lackpy -c "read_file('x.py')" --validate --kit read_file
+```
+
+---
+
+## create (`--create`)
+
+Generate a program from an intent and save it as a reusable **Lackey file**
+(a Python class wrapping the program) under `.lackpy/templates/`.
+
+```bash
+lackpy -c "<intent>" --create --name NAME [--kit KIT] [--tools TOOLS]
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `-c "<intent>"` | yes | Intent to generate the saved program from |
+| `--create` | yes | Select create mode |
+| `--name` | no | Class name for the Lackey file (default: `Generated`) |
+| `--kit` / `--tools` | no | Tools available to the generated program |
+
+**Output:** `Created <path>` (plain text).
+
+**Exit code:** 0 on success.
+
+**Example:**
+
+```bash
+lackpy -c "read the file README.md" --create --name ReadReadme --kit read_file
+```
+
+---
+
+## Running a program file
+
+Pass a file path as the first positional argument. Lackey files (a `Lackey` class with
+a `run` method) are detected and run directly; plain program files need `--kit` or
+`--tools` to supply a namespace.
+
+```bash
+lackpy <file.py> --kit KIT          # run a plain program file
+lackpy <file.py> --tools read_file  # ...with ad-hoc tools
+lackpy my_lackey.py                 # run a Lackey file (tools come from the file)
+```
+
+**Output:** JSON with `success`, `output`, `error`.
+
+**Exit code:** 0 on success, 1 on failure or validation error.
+
+You can also pipe a program on stdin:
+
+```bash
+echo "find_files('*.py')" | lackpy --kit find_files
+```
+
+---
+
+# `lackpyctl` — workspace management
+
+## `lackpyctl init`
 
 Initialize a `.lackpy/` workspace in the current directory.
 
 ```bash
-lackpy init [--ollama-model MODEL]
+lackpyctl init [--ollama-url URL] [--ollama-model MODEL]
 ```
 
 **Arguments**
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--ollama-model` | `qwen2.5-coder:1.5b` | Default Ollama model to write into config |
+| `--ollama-url` | `http://localhost:11434` | Ollama server URL written into config |
+| `--ollama-model` | `qwen2.5-coder:1.5b` | Ollama model written into config |
 
 **Creates:**
 
-- `.lackpy/config.toml` — inference order, kit defaults, sandbox settings
-- `.lackpy/templates/` — directory for `.tmpl` files
+- `.lackpy/config.toml` — inference order (`templates`, `rules`, `local`), the `local`
+  woollama tier (`model = "ollama/<model>"`), kit default, sandbox settings
+- `.lackpy/templates/` — directory for saved Lackey files / `.tmpl` files
 - `.lackpy/kits/` — directory for `.kit` files
+
+The generated config wires the Ollama provider into the inference order, so
+compositional intents work out of the box once a model is served. The model choice is
+**per-machine** — pick whatever your Ollama host serves best with `--ollama-model`.
 
 If `config.toml` already exists, `init` prints a warning and does nothing.
 
@@ -34,201 +187,58 @@ If `config.toml` already exists, `init` prints a warning and does nothing.
 
 ```bash
 cd my-project
-lackpy init --ollama-model codellama:7b
+lackpyctl init --ollama-url http://localhost:11434 --ollama-model qwen2.5-coder:3b
 ```
 
 ---
 
-## `lackpy delegate`
-
-Generate a program from natural language intent and run it immediately.
-
-```bash
-lackpy delegate <intent> [--kit KIT] [--sandbox PROFILE]
-```
-
-**Arguments**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `intent` | yes | Natural language description of the task |
-| `--kit` | no | Kit name, comma-separated tool list, or `@file` |
-| `--sandbox` | no | Sandbox profile name (v2, not yet active) |
-
-**Output:** JSON with `success`, `program`, `grade`, `generation_tier`, timing fields, `trace`, `output`, and `error`.
-
-**Exit code:** 0 on success, 1 on failure.
-
-**Examples:**
-
-```bash
-lackpy delegate "read the file README.md" --kit read_file
-lackpy delegate "find all Python files" --kit read_file,find_files
-```
-
----
-
-## `lackpy generate`
-
-Run the inference pipeline and print the generated program, without executing it.
-
-```bash
-lackpy generate <intent> [--kit KIT]
-```
-
-**Arguments**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `intent` | yes | Natural language description |
-| `--kit` | no | Kit name or comma-separated tool list |
-
-**Output:** The program text (not JSON).
-
-**Exit code:** Always 0.
-
-**Example:**
-
-```bash
-lackpy generate "find all Python files" --kit find_files
-```
-
----
-
-## `lackpy run`
-
-Validate and run a program from a file.
-
-```bash
-lackpy run <file> [--kit KIT]
-```
-
-**Arguments**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `file` | yes | Path to the program file |
-| `--kit` | no | Kit name or comma-separated tool list |
-
-**Output:** JSON with `success`, `output`, `error`.
-
-**Exit code:** 0 on success, 1 on failure or validation error.
-
-**Example:**
-
-```bash
-lackpy run my_program.py --kit read_file,find_files
-```
-
----
-
-## `lackpy validate`
-
-Validate a program file without running it.
-
-```bash
-lackpy validate <file> [--kit KIT]
-```
-
-**Arguments**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `file` | yes | Path to the program file |
-| `--kit` | no | Kit name or comma-separated tool list |
-
-**Output:** JSON with `valid` (bool), `errors` (list), `calls` (list).
-
-**Exit code:** 0 if valid, 1 if invalid.
-
-**Example:**
-
-```bash
-lackpy validate my_program.py --kit read_file
-```
-
----
-
-## `lackpy create`
-
-Validate a program and save it as a template.
-
-```bash
-lackpy create <file> --name NAME [--kit KIT] [--pattern PATTERN]
-```
-
-**Arguments**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `file` | yes | Path to the program file |
-| `--name` | yes | Template name (used as filename: `{name}.tmpl`) |
-| `--kit` | no | Kit name or comma-separated tool list |
-| `--pattern` | no | Intent pattern with `{placeholder}` variables |
-
-**Output:** JSON with `success`, `path` (or `errors`).
-
-**Exit code:** 0 on success, 1 on validation failure.
-
-**Example:**
-
-```bash
-lackpy create read_file.py --name read-file --pattern "read the file {path}" --kit read_file
-```
-
----
-
-## `lackpy spec`
-
-Print the language grammar as JSON.
-
-```bash
-lackpy spec
-```
-
-**Output:** JSON with `allowed_nodes`, `forbidden_nodes`, `forbidden_names`, `allowed_builtins`.
-
-**Exit code:** Always 0.
-
----
-
-## `lackpy status`
+## `lackpyctl status`
 
 Show the current workspace configuration.
 
 ```bash
-lackpy status
+lackpyctl status
 ```
 
-**Output:** JSON with `workspace`, `config_dir`, `inference_order`, `kit_default`, `sandbox_enabled`, `tools`.
-
-**Exit code:** Always 0.
+**Output:** JSON with `workspace`, `config_dir`, `inference_order`, `kit_default`,
+`sandbox_enabled`, `tools`.
 
 ---
 
-## `lackpy kit`
+## `lackpyctl spec`
+
+Print the language grammar as JSON.
+
+```bash
+lackpyctl spec
+```
+
+**Output:** JSON with `allowed_nodes`, `forbidden_nodes`, `forbidden_names`,
+`allowed_builtins`.
+
+---
+
+## `lackpyctl kit`
 
 Manage kit files.
 
-### `lackpy kit list`
+### `lackpyctl kit list`
 
 List all `.kit` files in `.lackpy/kits/`.
 
 ```bash
-lackpy kit list
+lackpyctl kit list
 ```
 
 **Output:** JSON array of `{name, path}`.
 
-### `lackpy kit info`
+### `lackpyctl kit info`
 
 Show the tools and grade for a kit.
 
 ```bash
-lackpy kit info <name> [--tools TOOL ...]
+lackpyctl kit info <name> [--tools TOOL ...]
 ```
-
-**Arguments**
 
 | Argument | Description |
 |----------|-------------|
@@ -237,15 +247,13 @@ lackpy kit info <name> [--tools TOOL ...]
 
 **Output:** JSON with `tools`, `grade`, `description`.
 
-### `lackpy kit create`
+### `lackpyctl kit create`
 
 Create a new kit file.
 
 ```bash
-lackpy kit create <name> --tools TOOL [TOOL ...] [--description TEXT]
+lackpyctl kit create <name> --tools TOOL [TOOL ...] [--description TEXT]
 ```
-
-**Arguments**
 
 | Argument | Required | Description |
 |----------|----------|-------------|
@@ -253,69 +261,88 @@ lackpy kit create <name> --tools TOOL [TOOL ...] [--description TEXT]
 | `--tools` | yes | One or more tool names |
 | `--description` | no | Human-readable description |
 
-**Output:** JSON with `name`, `path`, `tools`.
-
 **Example:**
 
 ```bash
-lackpy kit create readonly --tools read_file find_files --description "Read-only filesystem tools"
+lackpyctl kit create readonly --tools read_file find_files --description "Read-only filesystem tools"
 ```
 
 ---
 
-## `lackpy toolbox`
+## `lackpyctl toolbox`
 
 Inspect the registered tool catalog.
 
-### `lackpy toolbox list`
+### `lackpyctl toolbox list`
 
 List all registered tools.
 
 ```bash
-lackpy toolbox list
+lackpyctl toolbox list
 ```
 
 **Output:** JSON array of `{name, provider, description, grade_w, effects_ceiling}`.
 
-### `lackpy toolbox show`
+### `lackpyctl toolbox show`
 
 Show details for a single tool.
 
 ```bash
-lackpy toolbox show <name>
+lackpyctl toolbox show <name>
 ```
-
-**Arguments**
-
-| Argument | Description |
-|----------|-------------|
-| `name` | Tool name |
 
 **Output:** JSON object for the tool.
 
 ---
 
-## `lackpy template`
+## `lackpyctl template`
 
 Manage template files.
 
-### `lackpy template list`
+### `lackpyctl template list`
 
 List all `.tmpl` files in `.lackpy/templates/`.
 
 ```bash
-lackpy template list
+lackpyctl template list
 ```
 
 **Output:** JSON array of `{name, path}`.
 
-### `lackpy template test`
+### `lackpyctl template test`
 
 Test a template against an intent (not yet implemented).
 
 ```bash
-lackpy template test <name>
+lackpyctl template test <name>
 ```
+
+---
+
+## `lackpyctl mcp`
+
+Manage the MCP server.
+
+### `lackpyctl mcp serve`
+
+Start the lackpy MCP server over stdio transport.
+
+```bash
+lackpyctl mcp serve
+```
+
+### `lackpyctl mcp init`
+
+Add lackpy to `.mcp.json`.
+
+```bash
+lackpyctl mcp init [--name NAME] [--force]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--name` | `lackpy` | Server name in `.mcp.json` |
+| `--force` | off | Overwrite an existing entry |
 
 ---
 
@@ -334,7 +361,8 @@ Any command that accepts `--kit` supports these forms:
 
 ## Extra tools (`--tools`)
 
-Any command that accepts `--kit` also accepts `--tools` to add individual tools on top of the kit:
+Any inference invocation that accepts `--kit` also accepts `--tools` to add individual
+tools on top of the kit:
 
 ```bash
 # Add edit_file to a named kit

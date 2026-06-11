@@ -57,6 +57,17 @@ class TestRunProgram:
         result = await service.run_program("import os", kit=["read_file"])
         assert not result.success
 
+    @pytest.mark.asyncio
+    async def test_run_program_print_recovered_via_effective_output(self, service):
+        # A program that prints its answer (instead of a bare last expression)
+        # must not silently drop the value: the typed output is None, but the
+        # printed text is captured and surfaced via effective_output.
+        result = await service.run_program("print(read_file('test.txt'))", kit=["read_file"])
+        assert result.success
+        assert result.output is None
+        assert result.stdout == "hello world\n"
+        assert result.effective_output == "hello world"
+
 
 class TestDelegate:
     @pytest.mark.asyncio
@@ -64,6 +75,13 @@ class TestDelegate:
         result = await service.delegate("read file test.txt", kit=["read_file"])
         assert result["success"]
         assert "read_file" in result["program"]
+
+    @pytest.mark.asyncio
+    async def test_delegate_result_carries_stdout(self, service):
+        # The delegate contract surfaces captured stdout so a printed answer is
+        # never lost, even when the typed output is populated.
+        result = await service.delegate("read file test.txt", kit=["read_file"])
+        assert "stdout" in result
 
     @pytest.mark.asyncio
     async def test_delegate_with_params(self, service):

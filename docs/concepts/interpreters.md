@@ -9,7 +9,7 @@ string, validates it, and executes it against an
 !!! note "Library-only in v0.5.x"
 
     The interpreter plugin system is currently a **library API**, not yet
-    plumbed through `LackpyService.delegate()` or the `lackpy delegate`
+    plumbed through `LackpyService.delegate()` or the `lackpy -c`
     CLI. To use any non-default interpreter, import it and call
     `run_interpreter()` directly (see the examples below). CLI and service
     integration is planned for a future release — when it lands, the

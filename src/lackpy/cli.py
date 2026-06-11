@@ -72,7 +72,8 @@ async def _run_file(svc: Any, path: Path, kit: list[str] | None, params: dict[st
         return await svc.run_lackey(path, params=params, sandbox=sandbox)
     elif kit or extra_tools:
         exec_result = await svc.run_program(content, kit=kit, params=params, extra_tools=extra_tools)
-        return {"success": exec_result.success, "output": exec_result.output, "error": exec_result.error}
+        return {"success": exec_result.success, "output": exec_result.effective_output,
+                "stdout": exec_result.stdout, "error": exec_result.error}
     else:
         return {"success": False, "error": "Specify --kit or --tools for plain program files, or use a Lackey file."}
 
@@ -193,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
             svc = LackpyService(workspace=workspace)
             kit = _parse_kit(args.kit) if args.kit else None
             exec_result = asyncio.run(svc.run_program(program, kit=kit, extra_tools=extra_tools))
-            out_dict = {"success": exec_result.success, "output": exec_result.output, "error": exec_result.error}
+            out_dict = {"success": exec_result.success, "output": exec_result.effective_output,
+                        "stdout": exec_result.stdout, "error": exec_result.error}
             print(json.dumps(out_dict, indent=2, default=str))
             return 0 if exec_result.success else 1
 

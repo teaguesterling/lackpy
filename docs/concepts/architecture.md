@@ -57,7 +57,7 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.lang.validator` | AST walk + rule application → `ValidationResult` | `lang.grammar` |
 | `lackpy.lang.grader` | `Grade(w, d)` computation from tool specs | none |
 | `lackpy.lang.rules` | Built-in custom rule callables | `ast` |
-| `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpy spec`) | `lang.grammar` |
+| `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpyctl spec`) | `lang.grammar` |
 | `lackpy.kit.toolbox` | `Toolbox` — tool registry; `add_source()` merge with precedence + resolution | none |
 | `lackpy.kit.registry` | `resolve_kit()` — name/list/dict → `ResolvedKit` | `kit.toolbox`, `lang.grader` |
 | `lackpy.kit.providers.python` | Resolve a `ToolSpec` to an importable function | `importlib` |
@@ -72,7 +72,7 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.infer.dispatch` | `InferenceDispatcher` — priority-ordered provider loop | `lang.validator`, `infer.sanitize` |
 | `lackpy.infer.prompt` | `build_system_prompt()`, `format_params_description()` | `lang.grammar` |
 | `lackpy.infer.sanitize` | Strip model artifacts (markdown fences, preambles) | none |
-| `lackpy.infer.providers.*` | `TemplatesProvider`, `RulesProvider`, `OllamaProvider`, `AnthropicProvider` | `infer.prompt` |
+| `lackpy.infer.providers.*` | `TemplatesProvider`, `RulesProvider`, `WoollamaProvider`, `CascadeProvider` | `infer.prompt` |
 | `lackpy.cli` | `argparse`-based CLI; calls `LackpyService` | `service` |
 | `lackpy.mcp` | MCP server exposing the service as tools | `service` |
 
