@@ -24,12 +24,15 @@ def _init_config(workspace: Path, ollama_model: str, ollama_url: str = "http://l
         return
     config_file.write_text(f"""\
 [inference]
-order = ["templates", "rules", "ollama-local"]
+order = ["templates", "rules", "local"]
 
-[inference.providers.ollama-local]
-plugin = "ollama"
-host = "{ollama_url}"
-model = "{ollama_model}"
+# Model calls go through woollama's model-management core: one provider routes to
+# any woollama-known backend via a "<provider>/<model>" string (ollama/…,
+# anthropic/…, openai/…). The model choice is per-machine — set it here.
+[inference.providers.local]
+plugin = "woollama"
+model = "ollama/{ollama_model}"
+base_url = "{ollama_url}/v1"
 
 [kit]
 default = "debug"
