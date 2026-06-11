@@ -210,20 +210,18 @@ class LackpyService:
         for name in self._config.inference_order:
             provider_cfg = self._config.inference_providers.get(name, {})
             plugin = provider_cfg.get("plugin", "")
-            if plugin == "ollama" and name not in ("templates", "rules"):
-                from .infer.providers.ollama import OllamaProvider
-                self._inference_providers.append(OllamaProvider(
-                    host=provider_cfg.get("host", "http://localhost:11434"),
-                    model=provider_cfg.get("model", "qwen2.5-coder:1.5b"),
-                    temperature=provider_cfg.get("temperature", 0.2),
-                    keep_alive=provider_cfg.get("keep_alive", "30m"),
-                ))
-            elif plugin == "anthropic" and name not in ("templates", "rules"):
-                from .infer.providers.anthropic import AnthropicProvider
-                self._inference_providers.append(AnthropicProvider(
-                    model=provider_cfg.get("model", "claude-haiku-4-5-20251001"),
-                ))
-            elif plugin == "woollama" and name not in ("templates", "rules"):
+            if plugin in ("ollama", "anthropic") and name not in ("templates", "rules"):
+                # Retired in the woollama consolidation: lackpy no longer does
+                # per-vendor model HTTP. Route these through the `woollama` plugin
+                # with a "<provider>/<model>" model string instead.
+                logger.warning(
+                    "inference plugin %r was retired; use plugin = \"woollama\" with "
+                    "model = \"%s/<model>\" (run `lackpyctl init` to regenerate "
+                    "config). Skipping inference tier %r.",
+                    plugin, plugin, name,
+                )
+                continue
+            if plugin == "woollama" and name not in ("templates", "rules"):
                 # Consolidated model management: one provider routes to ANY
                 # woollama-known backend (ollama, anthropic, openai, …) via a
                 # "<provider>/<model>" string — lackpy stops doing per-vendor HTTP.

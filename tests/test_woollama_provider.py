@@ -73,3 +73,25 @@ def test_woollama_plugin_registered_from_config(tmp_path):
     assert len(woollama_tiers) == 1
     assert woollama_tiers[0]._model == "ollama/qwen2.5-coder:1.5b"
     assert woollama_tiers[0]._temperature == 0.1
+
+
+@pytest.mark.parametrize("retired", ["ollama", "anthropic"])
+def test_retired_plugins_register_no_provider(tmp_path, caplog, retired):
+    """The per-vendor `ollama`/`anthropic` plugins were retired in the woollama
+    consolidation: they register no inference tier and warn with the migration."""
+    import logging
+
+    from lackpy.config import LackpyConfig
+    from lackpy.service import LackpyService
+
+    cfg = LackpyConfig(
+        inference_order=[retired],
+        inference_providers={retired: {"plugin": retired, "model": "m"}},
+    )
+    with caplog.at_level(logging.WARNING):
+        svc = LackpyService(workspace=tmp_path, config=cfg)
+
+    # Only the deterministic tiers remain — no model provider was registered.
+    names = {p.name for p in svc._inference_providers}
+    assert names == {"templates", "rules"}
+    assert "woollama" in caplog.text and retired in caplog.text
