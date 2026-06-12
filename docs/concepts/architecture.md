@@ -75,6 +75,7 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.infer.providers.*` | `TemplatesProvider`, `RulesProvider`, `WoollamaProvider`, `CascadeProvider` | `infer.prompt` |
 | `lackpy.cli` | `argparse`-based CLI; calls `LackpyService` | `service` |
 | `lackpy.mcp` | MCP server exposing the service as tools | `service` |
+| `lackpy.observ` | `record_delegation()` — best-effort write of a delegation into blq's invocation DB | `blq` (optional) |
 
 ---
 
@@ -85,6 +86,14 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 - The MCP server and CLI always have identical behaviour.
 - Third-party code using the Python API benefits from the same validation, tracing, and grade computation as the built-in interfaces.
 - Configuration is loaded once at `LackpyService.__init__` and propagated automatically.
+
+---
+
+## Delegation traces (blq)
+
+When the workspace has a `.bird/` (i.e. [blq](https://github.com/teaguesterling/blq) is in use) and `blq-cli` is installed, each `delegate()` is recorded as a blq **invocation** under the `delegate` source — queryable alongside build/test runs (`blq history`, `blq query`, `blq output`). The generated program is stored as the run's output; the structured summary (grade, generation tier, timings, tool names) rides in the invocation's `environment.lackpy` JSON; a failed delegation adds one `error` event.
+
+Recording is **best-effort** (`lackpy.observ.record_delegation`): a missing blq, no `.bird/`, or a concurrent writer holding the single-writer DuckDB lock is a silent no-op — it never affects the delegation result. (Replaces the older `.lackpy/traces.jsonl` sink.)
 
 ---
 
