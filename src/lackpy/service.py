@@ -649,6 +649,12 @@ class LackpyService:
         }
         if kibitzer_suggestions:
             result["kibitzer_suggestions"] = kibitzer_suggestions
+
+        # Best-effort: record this delegation as a blq invocation when the
+        # workspace uses blq (.bird/ present). No-op otherwise; never raises.
+        from .observ import record_delegation
+        record_delegation(self._workspace, intent, result)
+
         return result
 
     def parse_lackey(self, path: Path) -> Any:
