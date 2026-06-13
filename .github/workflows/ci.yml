@@ -5,6 +5,12 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_lang_only:
+        description: "Build & publish ONLY lackpy-lang (out-of-band leaf release; lackpy core is skipped)"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -28,7 +34,7 @@ jobs:
         run: pytest tests/ -v -m "not ollama" --ignore=tests/eval
 
   build:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -39,6 +45,9 @@ jobs:
       - name: Install build tools
         run: pip install hatch
       - name: Build lackpy (core)
+        # Skipped on a lang-only manual publish: lackpy core still carries the
+        # woollama git-URL dependency, which PyPI rejects until woollama releases.
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.publish_lang_only) }}
         run: hatch build
       - name: Build lackpy-lang
         # Emit lackpy-lang's sdist+wheel into the same dist/ so both are published
@@ -73,3 +82,7 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent: a re-run — or this lang-only publish landing before the
+          # eventual v0.12.0 bundle — must not fail on an already-present file.
+          skip-existing: true

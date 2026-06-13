@@ -2,7 +2,7 @@
 
 The **lackpy language** as a standalone, dependency-free distribution: the grammar
 (allowed/forbidden AST nodes, builtins, names), the validator, the grader, and the
-language spec. This is the pure-language leaf of [lackpy](https://github.com/teague/lackpy) —
+language spec. This is the pure-language leaf of [lackpy](https://github.com/teaguesterling/lackpy) —
 it has **no runtime dependencies** and pulls in none of lackpy's interpreters, policy
 layer, service, or MCP surface.
 

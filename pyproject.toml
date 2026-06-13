@@ -43,7 +43,7 @@ docs = [
 
 [project.urls]
 Documentation = "https://lackpy.readthedocs.io"
-Repository = "https://github.com/teague/lackpy"
+Repository = "https://github.com/teaguesterling/lackpy"
 
 # Resolve the in-tree language leaf locally for `uv` users (it isn't on PyPI yet);
 # CI uses pip and installs it explicitly. (woollama is a PEP 508 git URL in
