@@ -6,18 +6,20 @@ build-backend = "hatchling.build"
 name = "lackpy"
 version = "0.12.0"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Teague Sterling" }]
 requires-python = ">=3.11"
 # lackpy is the runtime dist; lackpy-lang is the pure-language leaf. They share the
 # `lackpy` namespace (PEP 420 — neither ships lackpy/__init__.py). Pinned so the two
 # halves version together.
 dependencies = [
     "markdown-it-py>=3.0",
-    "lackpy-lang==0.12.0",   # the pure-language leaf (CI installs it from packages/)
-    # woollama's model-management core. Pinned to a git rev until it cuts a release
-    # with woollama.core (the published 0.3.0 predates the extraction); then this
-    # becomes a normal version requirement. A PEP 508 direct URL, so pip AND uv
-    # resolve it identically (CI uses pip).
-    "woollama @ git+https://github.com/teaguesterling/woollama.git@2e6204b87ce19fc37fb06bc47bbf62ae1428b0c2",
+    "lackpy-lang==0.12.0",   # the pure-language leaf (its own dist, also on PyPI)
+    # woollama's model-management core (provides the `woollama.core` namespace):
+    # provider/model routing, transport, recipe orchestration. Self-contained wheel,
+    # no extra deps. lackpy uses only `woollama.core`, not the full woollama router.
+    "woollama-core>=0.5.2",
 ]
 
 [project.optional-dependencies]
@@ -45,9 +47,8 @@ docs = [
 Documentation = "https://lackpy.readthedocs.io"
 Repository = "https://github.com/teaguesterling/lackpy"
 
-# Resolve the in-tree language leaf locally for `uv` users (it isn't on PyPI yet);
-# CI uses pip and installs it explicitly. (woollama is a PEP 508 git URL in
-# dependencies above — no source entry needed; pip and uv both honor it.)
+# For `uv` users, resolve the in-tree language leaf locally (editable) for monorepo
+# dev instead of the published wheel. (woollama-core is a normal PyPI dependency.)
 [tool.uv.sources]
 lackpy-lang = { path = "packages/lackpy-lang", editable = true }
 
@@ -57,12 +58,6 @@ lackpyctl = "lackpy.ctl:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lackpy"]
-
-# Allow the woollama `@ git+...` direct reference in dependencies (hatchling rejects
-# direct URLs by default, as PyPI forbids them). Temporary — drops out when woollama
-# becomes a normal version requirement.
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.pytest.ini_options]
 # Both namespace halves on the path: core runtime (src) + the lackpy-lang leaf.
