@@ -13,11 +13,10 @@ requires-python = ">=3.11"
 dependencies = [
     "markdown-it-py>=3.0",
     "lackpy-lang==0.12.0",   # the pure-language leaf (CI installs it from packages/)
-    # woollama's model-management core. Pinned to a git rev until it cuts a release
-    # with woollama.core (the published 0.3.0 predates the extraction); then this
-    # becomes a normal version requirement. A PEP 508 direct URL, so pip AND uv
-    # resolve it identically (CI uses pip).
-    "woollama @ git+https://github.com/teaguesterling/woollama.git@2e6204b87ce19fc37fb06bc47bbf62ae1428b0c2",
+    # woollama's model-management core (provides `woollama.core.complete`). The
+    # native PyO3 wheel — no server stack (FastAPI/MCP), just provider/model
+    # routing, transport, ollama-native num_ctx, and per-call key/base-url overrides.
+    "woollama-core>=0.5.3",
 ]
 
 [project.optional-dependencies]
@@ -44,8 +43,8 @@ Documentation = "https://lackpy.readthedocs.io"
 Repository = "https://github.com/teague/lackpy"
 
 # Resolve the in-tree language leaf locally for `uv` users (it isn't on PyPI yet);
-# CI uses pip and installs it explicitly. (woollama is a PEP 508 git URL in
-# dependencies above — no source entry needed; pip and uv both honor it.)
+# CI uses pip and installs it explicitly. (woollama-core resolves from PyPI as a
+# normal dependency — no source entry needed.)
 [tool.uv.sources]
 lackpy-lang = { path = "packages/lackpy-lang", editable = true }
 
@@ -55,12 +54,6 @@ lackpyctl = "lackpy.ctl:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lackpy"]
-
-# Allow the woollama `@ git+...` direct reference in dependencies (hatchling rejects
-# direct URLs by default, as PyPI forbids them). Temporary — drops out when woollama
-# becomes a normal version requirement.
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.pytest.ini_options]
 # Both namespace halves on the path: core runtime (src) + the lackpy-lang leaf.
