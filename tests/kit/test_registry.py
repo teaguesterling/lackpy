@@ -29,8 +29,14 @@ class TestResolveFromList:
         assert kit.grade.w == 1
 
     def test_unknown_tool_in_list_raises(self, toolbox):
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError) as ei:
             resolve_kit(["read_file", "nonexistent"], toolbox)
+        # Actionable failure: names the tool, explains where tools come from, and
+        # lists what's available — not a bare "Unknown tool".
+        msg = str(ei.value)
+        assert "nonexistent" in msg
+        assert "configured source" in msg
+        assert "read_file" in msg          # available tools surfaced
 
 
 class TestResolveFromName:
