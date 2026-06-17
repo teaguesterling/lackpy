@@ -27,8 +27,9 @@ source-populated toolbox above):
   │     ──► InferenceDispatcher                                    │
   │          tier 0: TemplatesProvider (regex pattern match)       │
   │          tier 1: RulesProvider    (keyword rules)              │
-  │          tier 2: OllamaProvider   (local LLM, optional)        │
-  │          tier 3: AnthropicProvider (cloud LLM, optional)       │
+  │          tier 2: WoollamaProvider (LLM via woollama-core;      │
+  │                  ollama/anthropic/openai by "<provider>/<m>")  │
+  │          tier —: CascadeProvider  (raw-completion, optional)   │
   │     ◄── GenerationResult (program + provider_name + time_ms)  │
   │                                                                │
   │  3. Validation                                                 │

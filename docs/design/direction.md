@@ -41,18 +41,26 @@ The "literate" style — the agent writes a markdown-style document that is rend
 as it executes, then the rendered result is opened (e.g. via `xdg-open`) — is
 considered valuable on its own, not just a presentation mode.
 
-## Integration: cosmic-fabric
+## Integration: woollama (and cosmic-fabric)
 
-lackpy is meant to plug into **cosmic-fabric** (`cosmic-fabricd`), a canonical Rust
-router that handles several routes to an inferencer consistently:
+!!! note "Updated 2026-06 — the router is woollama, not a Rust cosmic-fabric"
+    The original direction named **cosmic-fabric** as a *canonical Rust router with no
+    Python dependencies*. That isn't how it landed: the router is **woollama** — a
+    Python/FastAPI daemon (OpenAI-compatible + MCP) — and cosmic-fabric is a Python
+    daemon + Rust *UI* that is itself a **client** of woollama. The integration intent
+    below still holds; only which component plays "router" changed.
 
-- cosmic-fabric is the canonical router and must have **no Python dependencies**.
-- lackpy is invoked as a **subprocess** (for now) or **via its MCP server** — not
-  linked in. The handoff seam is lackpy's **`delegate` tool**; lackpy may also
-  expose its templates.
-- lackpy works with both cosmic-fabric and raw Ollama. Tools handed across the seam
-  should carry full specs (params, docs), and lackpy-specific terminology (e.g.
-  "kit") should not bleed into cosmic-fabric.
+- **woollama is the model-routing substrate.** lackpy already embeds `woollama.core`
+  (the `WoollamaProvider` inference tier) for its model calls — multi-provider routing
+  via a `"<provider>/<model>"` string, so lackpy does no per-vendor HTTP itself.
+- **lackpy plugs into an orchestrator via the `delegate` seam.** It is invoked as a
+  **subprocess** (for now) or **via its MCP server** — not linked in. The handoff is
+  lackpy's `delegate` tool; lackpy may also expose its templates.
+- **lackpy works with woollama and with raw Ollama.** Tools handed across the seam
+  should carry full specs (params, docs), and lackpy-specific terminology (e.g. "kit")
+  should not bleed into the orchestrator.
+- **cosmic-fabric is a *peer* consumer of woollama** (a desktop frontend), not lackpy's
+  router — a sibling integration, not a dependency.
 
 ## Model choice is local, not a default
 
