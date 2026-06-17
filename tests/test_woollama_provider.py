@@ -66,6 +66,25 @@ async def test_options_and_params_forwarded(calls):
     assert call["kw"]["params"] == {"max_tokens": 256, "temperature": 0.2}
 
 
+async def test_backend_error_is_logged_not_silently_swallowed(monkeypatch, caplog):
+    # A failed backend call still returns None (control passes to the next tier),
+    # but the reason must be logged — not vanish into "all providers failed".
+    import logging
+
+    import woollama.core as wc
+
+    async def boom_complete(model, messages, **kw):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(wc, "complete", boom_complete)
+    p = WoollamaProvider(model="ollama/m")
+    with caplog.at_level(logging.WARNING):
+        out = await p.generate("count rows", "ns")
+    assert out is None
+    assert "woollama.core.complete failed" in caplog.text
+    assert "connection refused" in caplog.text
+
+
 async def test_complete_accepts_lackpy_kwargs():
     """Guard the real woollama.core.complete contract lackpy depends on.
 

@@ -21,7 +21,11 @@ fields (e.g. ``max_tokens``, ``top_p``). ``temperature`` is managed here (a high
 """
 from __future__ import annotations
 
+import logging
+
 from ..prompt import build_system_prompt
+
+logger = logging.getLogger(__name__)
 
 
 class WoollamaProvider:
@@ -90,7 +94,14 @@ class WoollamaProvider:
                 api_key=self._api_key, base_url=self._base_url)
             self._last_output = content.strip() if content else None
             return self._last_output
-        except Exception:
+        except Exception as e:
+            # Returning None hands control to the next tier, but the *reason* must
+            # not vanish: a misconfigured backend (bad model string, missing key,
+            # unreachable host) otherwise surfaces only as the dispatcher's generic
+            # "all providers failed". woollama raises InferenceError with a useful
+            # kind/status/message; log it so the failure is diagnosable.
+            logger.warning("woollama.core.complete failed (model=%r): %s: %s",
+                           self._model, type(e).__name__, e)
             self._last_output = None
             return None
 
