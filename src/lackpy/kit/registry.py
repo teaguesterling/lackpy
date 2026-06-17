@@ -126,7 +126,13 @@ def _resolve_tool_names(tool_names: list[str], alias_names: list[str], toolbox: 
     tool_docs: list[str] = []
     for alias, name in zip(alias_names, tool_names):
         if name not in toolbox.tools:
-            raise KeyError(f"Unknown tool: '{name}'")
+            available = sorted(toolbox.tools)
+            shown = ", ".join(available[:20]) + (" …" if len(available) > 20 else "")
+            raise KeyError(
+                f"Unknown tool {name!r}: no configured source provides it. Tools come "
+                f"from builtins, config [[tools]], or an MCP server — confirm the kit's "
+                f"names match a configured source. Available now: {shown or '(none)'}"
+            )
         spec = toolbox.tools[name]
         tools[alias] = spec
         callables[alias] = toolbox.resolve(name)
