@@ -251,5 +251,6 @@ kibitzer chain is unchanged; new sources plug in by populating grades correctly.
    `mcpServers` files at descending precedence (§3.4).
 4. **Virtual/harness tools** — *implemented* (§7).
 5. **kits→profile layer** on top of sources, retiring "kit" ([direction.md](direction.md) §2).
+   Designed in [Kits → Profiles](kits-to-profiles.md).
 
 Throughout: keep `tests/lang/test_no_upward_deps.py` green.
