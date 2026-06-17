@@ -55,6 +55,44 @@ async def test_per_call_key_and_base_url_forwarded(calls):
     assert call["kw"]["api_key"] == "sk-x" and call["kw"]["base_url"] == "http://proxy/v1"
 
 
+async def test_options_and_params_forwarded(calls):
+    # options (ollama-native, e.g. num_ctx) + params (OpenAI top-level) flow through;
+    # the provider's temperature is merged into params and wins.
+    p = WoollamaProvider(model="ollama/m", temperature=0.2,
+                         options={"num_ctx": 8192}, params={"max_tokens": 256})
+    await p.generate("x", "ns")
+    call = calls[-1]
+    assert call["kw"]["options"] == {"num_ctx": 8192}
+    assert call["kw"]["params"] == {"max_tokens": 256, "temperature": 0.2}
+
+
+async def test_complete_accepts_lackpy_kwargs():
+    """Guard the real woollama.core.complete contract lackpy depends on.
+
+    woollama-core is pre-1.0 and fast-moving, AND it's a compiled (Rust/pyo3)
+    extension — so `inspect`-based signature checks don't work and the mocked tests
+    above (which use a `**kw`-swallowing fake) would miss a breaking change. Instead
+    we CALL the real function exactly as the provider does, against an unreachable
+    endpoint: it must return an awaitable and fail on TRANSPORT, not reject a kwarg
+    with TypeError. Runs in CI (woollama-core is a core dependency); fails loudly on
+    drift in the (model, messages, options, params, api_key, base_url) contract.
+    """
+    import inspect
+
+    core = pytest.importorskip("woollama.core")
+    coro = core.complete(
+        "ollama/contract-probe", [{"role": "user", "content": "x"}],
+        options={"num_ctx": 8}, params={"temperature": 0},
+        api_key=None, base_url="http://127.0.0.1:9/v1",   # unreachable → transport error
+    )
+    assert inspect.isawaitable(coro), "complete(...) must return an awaitable (lackpy awaits it)"
+    with pytest.raises(Exception) as excinfo:
+        await coro
+    assert not isinstance(excinfo.value, TypeError), (
+        f"woollama.core.complete rejected a kwarg lackpy passes: {excinfo.value}"
+    )
+
+
 def test_woollama_plugin_registered_from_config(tmp_path):
     """The `woollama` plugin wires a WoollamaProvider into the service's inference
     tiers (config-driven, alongside the deterministic templates/rules tiers)."""

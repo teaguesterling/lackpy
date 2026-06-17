@@ -232,6 +232,8 @@ class LackpyService:
                     retry_temperature=provider_cfg.get("retry_temperature", 0.6),
                     api_key=provider_cfg.get("api_key"),
                     base_url=provider_cfg.get("base_url"),
+                    options=provider_cfg.get("options"),
+                    params=provider_cfg.get("params"),
                 ))
             elif plugin == "cascade" and name not in ("templates", "rules"):
                 from .infer.providers.cascade import CascadeProvider
