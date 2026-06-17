@@ -4,8 +4,10 @@
     This is the increment-5 writeup deferred by [RFC 0002 §10](tool-sources.md#10-migration--sequencing):
     the **kits→profile layer that sits on top of sources**, retiring "kit" per
     [direction.md §2](direction.md#directions). Increments 1–4 (the source substrate) are
-    implemented. This doc is a plan to react to — decisions are marked
-    **`Decision needed (rec: …)`** for the maintainer to redline. Nothing here is built.
+    implemented. The headline design decisions are **resolved** (maintainer, 2026-06 — see
+    §10): thin profile, config tables, hard removal of "kit" (no alias), MCP-routed
+    provider-agnostic tools, profiles before the rename. A few items remain open (§10.7–10).
+    Nothing here is built yet — this is the plan the implementation phases (§8) follow.
 
 ---
 
@@ -115,7 +117,7 @@ A profile **must**:
 
 ### 3.1 Headline decision — thin vs fat
 
-> **Decision needed (rec: THIN).** A profile is a **named bundle of *references*** —
+> **Decided: THIN** (maintainer, 2026-06). A profile is a **named bundle of *references*** —
 > not a new fat resolved object. It references (a) a tool selection (the existing
 > kit grammar: name/list/dict), (b) an inference config (model/mode/order/temperature),
 > (c) an interpreter/language, and (d) optional policy defaults. It **composes from pieces
@@ -158,12 +160,29 @@ mode  = "spm"
 
 ### 3.3 Where profiles live
 
-> **Decision needed (rec: config tables, with `.kit`/`.profile` files as a *named tool-set*
-> sub-case).** A profile bundles config, so `[profiles.<name>]` TOML tables are the natural
-> home (vs. the line-list `.kit` file, which can only express a tool list). Keep `.kit`/
-> `.profile` *files* as a way to name a **tool-set** that a profile's `tools =` can reference
-> — i.e. files describe tool sets; config tables describe profiles. This preserves the
-> existing `.kit` files as the degenerate (tools-only) case.
+> **Decided: config tables, with `.profile` files as a *named tool-set* sub-case**
+> (maintainer, 2026-06). A profile bundles config, so `[profiles.<name>]` TOML tables are the
+> natural home (vs. a line-list file, which can only express a tool list). A `.profile` *file*
+> names a **tool-set** that a profile's `tools =` can reference — files describe tool sets;
+> config tables describe profiles.
+
+### 3.3a Tools are provider-agnostic — route, don't reimplement
+
+> **Decided: a profile's tools come from *any* source kind, and routing favors MCP**
+> (maintainer, 2026-06). Tools must **not** be python-function-centric. The source substrate
+> (increments 1–4) already discovers tools from `ConfigToolSource` (python), `McpToolSource`
+> (MCP), and `VirtualToolSource` (harness); a profile references tool *names*, and resolution
+> goes through whichever source owns each name — invariant 1 unchanged. The design bias is
+> **MCP-as-the-routing-mechanism**: prefer expressing tools as MCP (or MCP-shaped) endpoints
+> over hand-written python providers.
+>
+> **Forward consideration — route tool calls through woollama (open, see §10.8).** woollama is
+> already lackpy's *model* substrate **and** an MCP/OpenAI router with its own tool-orchestration
+> loop. Rather than lackpy maintaining a second MCP client (`sources/mcp/`) indefinitely, a
+> profile could route tool execution through woollama's MCP router — consolidating model **and**
+> tool routing onto one substrate. Out of v1 scope (v1 uses the existing `McpToolSource`), but
+> the profile/source seam should not preclude swapping the router underneath. Flagged for the
+> maintainer; not designed here.
 
 ### 3.4 How it threads through (no new resolution path)
 
@@ -180,14 +199,20 @@ policy, validation, and the source substrate are untouched.
 
 ---
 
-## 4. Backward compatibility
+## 4. Backward compatibility — hard removal, no alias
 
-> **Decision needed (rec: deprecated alias, not hard cutover).** Unlike the internal
-> woollama provider cutover, `kit=` is on **four public methods** (`delegate`/`generate`/
-> `validate`/`run_program`) **and the MCP tool surface** (`delegate`, `kit_info`, …) — these
-> are external clients. Keep `kit=` working as a deprecated alias for `profile=` for ≥1
-> release (a bare kit value = a tools-only profile), with a deprecation warning. Hard-cutover
-> only the internal call sites.
+> **Decided: remove "kit" entirely; no alias** (maintainer, 2026-06; overrides the earlier
+> "deprecated alias" recommendation). `kit` is replaced by `profile` everywhere — the public
+> params, the CLI, the MCP surface, the config field, the file extension. There is **no
+> `kit=` compatibility alias**.
+>
+> This is a **breaking change to the MCP tool surface**: `delegate(kit=…)`/`generate(kit=…)`
+> become `profile=`, and `kit_info`/`kit_list`/`kit_create` become `profile_info`/`profile_list`/
+> `profile_create`. lackpy is pre-1.0 (0.13.x); the maintainer accepts the break. Ship it under
+> a clear release note (a minor bump), and update the lackpy MCP plugin manifest in lockstep.
+>
+> Internally the move still uses shims **within a phase** to keep the suite green during the
+> rename (e.g. `ResolvedKit` → `ResolvedTools`), but no shim survives into the public API.
 
 **Reconcile the CLI while here (two real bugs, see §2.1.9 / research):**
 
@@ -204,13 +229,13 @@ policy, validation, and the source substrate are untouched.
 1. `Profile` input type + a `resolve_profile()` that yields `(ResolvedKit, inference-config,
    interpreter, policy-seed)` by composing existing machinery.
 2. `[profiles.<name>]` config parsing in `LackpyConfig` (raw dicts, like `[[tools]]`).
-3. `profile=` parameter on `delegate`/`generate`/`validate`/`run_program`, with `kit=` kept
-   as a deprecated alias. `profile_default` config field (alias of `kit_default`).
+3. `profile=` parameter replacing `kit=` on `delegate`/`generate`/`validate`/`run_program`
+   and the MCP surface — **no `kit=` alias** (§4). `kit_default` → `profile_default`.
 4. Per-profile inference (`model`/`mode`/`temperature`) and `interpreter` pass-through wired
    into the `StepContext`/`PolicyContext` that already exist (delete the `getattr(p,"_model")`
    reflection — invariant/surprise #8).
-5. CLI/`lackpyctl`: `--profile` + `lackpyctl profile {list,info,create}` (keep `kit`
-   subcommands as deprecated aliases). Fix the `@file`/grammar gaps.
+5. CLI/`lackpyctl`: `--profile` + `lackpyctl profile {list,info,create}` replacing the `kit`
+   flag/subcommands (no alias). Fix the `@file`/grammar gaps while reworking the surface.
 6. Docs: a "Profiles" concept page; deprecate "kit" language; `config.toml.example` profile.
 
 Everything in v1 is **composition over existing pieces** — no change to sources, grade,
@@ -256,9 +281,10 @@ checklist each phase must keep green.**
    `interpreter` into `StepContext`/`PolicyContext`; delete the `_model` reflection. *Green:
    delegate with a profile selecting a model/mode behaves identically to today's global
    config when the profile omits them (invariant 8).*
-3. **`profile=` public param + `kit=` deprecated alias** on the 4 methods + MCP surface;
-   `profile_default`. *Green: every existing `kit=` call still works (alias) with a
-   deprecation warning; MCP contract unchanged.*
+3. **`profile=` replaces `kit=`** on the 4 methods + the MCP surface (no alias);
+   `kit_default`→`profile_default`; `kit_info/list/create`→`profile_*`. *Breaking MCP change
+   — bump + release note + update the MCP plugin manifest. Green: full suite migrated to
+   `profile=`; MCP server advertises the new tool names.*
 4. **CLI/ctl `--profile` + `profile` subcommands** (kit aliases retained); fix `@file` +
    the grammar gap. *Green: CLI reference doc matches the real interface.*
 5. **Docs + terminology deprecation.** "Profiles" concept page; mark "kit" deprecated.
@@ -268,7 +294,7 @@ checklist each phase must keep green.**
 
 Each phase ships independently and keeps the suite green.
 
-> **Sequencing decision needed (rec: profiles BEFORE the lacklangster rename).** Both touch
+> **Decided: profiles BEFORE the lacklangster rename** (maintainer, 2026-06). Both touch
 > most of the tree; running them concurrently is a merge nightmare. Profiles is the
 > behavioral change; the [rename](rename-to-lacklangster.md) is mechanical and should follow.
 
@@ -288,21 +314,35 @@ Each migration PR must keep all of these green:
 - [ ] Bare profile (no policy/kibitzer) costs no more than today's kit-only path.
 - [ ] No "one profile = one delegation" assumption baked into the type.
 - [ ] Grade carried accurately; enforcement left to Kibitzer/policy.
-- [ ] `kit=` / `--kit` / MCP `kit_*` still work (deprecated alias) for ≥1 release.
+- [ ] "kit" fully removed by the final phase — no `kit=` / `--kit` / MCP `kit_*` / `.kit`
+      remain (no alias); the only public vocabulary is "profile".
 
 ---
 
-## 10. Open questions / decisions for the maintainer
+## 10. Decisions & open questions
 
-1. **Thin vs fat profile** (§3.1) — rec: thin. *Headline.*
-2. **Where profiles live** (§3.3) — rec: config tables; files = named tool-sets.
-3. **`kit=` deprecation** (§4) — rec: alias for ≥1 release, not hard cutover.
-4. **Sequencing vs rename** (§8) — rec: profiles first.
-5. **`ResolvedKit` rename** (§7) — `ResolvedTools`, or keep the name and only retire the
-   user-facing "kit"?
-6. **`interpreter`/language in v1** — pass-through only (rec), or design the registry now?
-7. **Profile inheritance/composition** — do profiles compose (`extends = "fast"`)? Likely
-   Phase N+, but the config shape should not preclude it.
+**Resolved (maintainer, 2026-06):**
+
+1. **Thin vs fat profile** (§3.1) — ✅ **thin** (references, not a fat resolved object).
+2. **Where profiles live** (§3.3) — ✅ **config tables**; `.profile` files = named tool-sets.
+3. **Tools are provider-agnostic** (§3.3a) — ✅ tools come from any source kind; **route via
+   MCP**, not python-function-centric.
+4. **`kit` removal** (§4) — ✅ **hard removal, no alias** (breaking MCP change accepted, pre-1.0).
+5. **Sequencing vs rename** (§8) — ✅ **profiles before** the lacklangster rename.
+6. **CLI reconciliation** (§4) — ✅ rework to `--profile`; fix the `@file`/grammar gaps.
+
+**Still open:**
+
+7. **`ResolvedKit` rename** (§7) — `ResolvedTools`, or keep the internal name and only retire
+   the user-facing "kit"?
+8. **Route tool calls through woollama?** (§3.3a) — woollama is already the model substrate
+   *and* an MCP router; should profiles route tool execution through it instead of lackpy's
+   own `sources/mcp/` client, consolidating model + tool routing? Out of v1; needs a maintainer
+   decision before the source seam ossifies.
+9. **`interpreter`/language in v1** — pass-through only (rec), or design the interpreter
+   registry now?
+10. **Profile inheritance/composition** — do profiles compose (`extends = "fast"`)? Likely
+    Phase N+, but the config shape should not preclude it.
 
 ---
 
