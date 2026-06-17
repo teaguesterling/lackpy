@@ -12,6 +12,12 @@ One ``model`` string of the form ``"<provider>/<model>"`` (e.g.
 woollama-known backend — so lackpy gets multi-provider model management without
 maintaining a provider per vendor. Implements the same ``InferenceProvider``
 protocol (``name`` / ``available`` / ``generate``) as the other tiers.
+
+Sampling and context knobs flow through from config: ``options`` carries
+ollama-native fields (notably ``num_ctx``, which routes the turn to the native
+``/api/chat`` endpoint that honors it), and ``params`` carries OpenAI top-level
+fields (e.g. ``max_tokens``, ``top_p``). ``temperature`` is managed here (a higher
+``retry_temperature`` is used on a correction pass).
 """
 from __future__ import annotations
 
@@ -21,12 +27,17 @@ from ..prompt import build_system_prompt
 class WoollamaProvider:
     def __init__(self, model: str = "ollama/qwen2.5-coder:1.5b",
                  temperature: float = 0.2, retry_temperature: float = 0.6,
-                 api_key: str | None = None, base_url: str | None = None) -> None:
+                 api_key: str | None = None, base_url: str | None = None,
+                 options: dict | None = None, params: dict | None = None) -> None:
         self._model = model
         self._temperature = temperature
         self._retry_temperature = retry_temperature
         self._api_key = api_key
         self._base_url = base_url
+        # ollama-native knobs (e.g. num_ctx — setting it routes ollama/* to the
+        # native /api/chat path); and extra OpenAI top-level fields (e.g. max_tokens).
+        self._options = options
+        self._params = params
 
     @property
     def name(self) -> str:
@@ -70,10 +81,12 @@ class WoollamaProvider:
             ]
 
         temperature = self._retry_temperature if is_retry else self._temperature
+        # temperature (with retry override) wins over any temperature in config params.
+        call_params = {**(self._params or {}), "temperature": temperature}
         try:
             content = await complete(
                 self._model, messages,
-                params={"temperature": temperature},
+                options=self._options, params=call_params,
                 api_key=self._api_key, base_url=self._base_url)
             self._last_output = content.strip() if content else None
             return self._last_output

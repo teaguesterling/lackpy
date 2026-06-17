@@ -19,7 +19,10 @@ dependencies = [
     # woollama's model-management core (provides the `woollama.core` namespace):
     # provider/model routing, transport, recipe orchestration. Self-contained wheel,
     # no extra deps. lackpy uses only `woollama.core`, not the full woollama router.
-    "woollama-core>=0.5.2",
+    # Upper bound: woollama-core is pre-1.0 and fast-moving — cap the minor so a
+    # breaking `complete()` change can't silently land. (A contract test guards the
+    # signature within the allowed range; see tests/test_woollama_provider.py.)
+    "woollama-core>=0.5.2,<0.6",
 ]
 
 [project.optional-dependencies]

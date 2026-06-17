@@ -23,6 +23,12 @@ model = "ollama/qwen2.5-coder:1.5b"
 # woollama's defaults (Ollama at http://localhost:11434, cloud providers built in).
 base_url = "http://localhost:11434/v1"
 temperature = 0.2
+# Extra knobs, all optional:
+#   options = ollama-native fields. Setting num_ctx routes ollama/* through the
+#             native /api/chat endpoint (which honors it) instead of /v1.
+#   params  = OpenAI top-level request fields (max_tokens, top_p, …).
+# options = { num_ctx = 8192 }
+# params = { max_tokens = 512, top_p = 0.9 }
 
 # Optional: a raw-completion cascade strategy for small coder models. This is NOT a
 # vendor backend — it uses Ollama's /api/generate (raw, pattern-completion) which
