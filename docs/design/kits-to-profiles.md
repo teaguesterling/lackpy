@@ -335,14 +335,57 @@ Each migration PR must keep all of these green:
 
 7. **`ResolvedKit` rename** (§7) — `ResolvedTools`, or keep the internal name and only retire
    the user-facing "kit"?
-8. **Route tool calls through woollama?** (§3.3a) — woollama is already the model substrate
-   *and* an MCP router; should profiles route tool execution through it instead of lackpy's
-   own `sources/mcp/` client, consolidating model + tool routing? Out of v1; needs a maintainer
-   decision before the source seam ossifies.
+8. **woollama ↔ lackpy direction** (§3.3a) — ✅ **resolved: B (woollama uses lackpy)**
+   (maintainer, 2026-06). lackpy **keeps its own `sources/mcp/` client** for its own tool
+   execution (its program-driven model doesn't fit woollama's LLM orchestrate loop). The
+   integration seam is the **inverse**: lackpy's **existing MCP server** is registered as a
+   woollama backend — once woollama gains MCP-client dispatch, woollama can call lackpy's
+   `delegate` (etc.) as a peer node. *A* (lackpy routing its tool calls *through* woollama)
+   is deferred pending a woollama raw-dispatch **proxy** endpoint — a separate, larger bet.
+   **Consequence:** lackpy's MCP tool surface becomes the integration contract → re-examine it
+   (rename `kit_*`→`profile_*`, split actions-vs-data into tools-vs-resources, add tool
+   annotations). See §11.
 9. **`interpreter`/language in v1** — pass-through only (rec), or design the interpreter
    registry now?
 10. **Profile inheritance/composition** — do profiles compose (`extends = "fast"`)? Likely
     Phase N+, but the config shape should not preclude it.
+
+---
+
+## 11. MCP surface re-examination (consequence of §10.8 = B)
+
+With **B** decided, lackpy's MCP server is the integration contract a woollama-class
+orchestrator consumes — an LLM picks tools from names + descriptions + schemas + annotations.
+The current surface (`mcp/server.py`, 14 flat tools) was built as a thin dev wrapper and
+isn't fit for that. Re-examination findings:
+
+1. **Rename `kit`→`profile` (forced by §4).** `kit_info`/`kit_list`/`kit_create` →
+   `profile_*`; the `kit=` param on `delegate`/`generate`/`run_program`/`validate`/`create` →
+   `profile=`. No alias. This rides the §8 migration.
+2. **Split actions (tools) from data (resources).** ~9 of the 14 are read-only introspection
+   that clutter the model-facing tool list and invite mis-selection. Move the *data* to MCP
+   **resources**: `config`, `language_spec`, `toolbox_list`, `provider_list`, `docs_index`,
+   `resolve_doc`. Keep as **tools** only the *actions*: `delegate`, `generate`, `run_program`,
+   `validate`, `create`, `profile_create`. Shrinks the tool surface ~14 → ~6 — the headline
+   for an orchestrator is `delegate`.
+3. **Add tool annotations (`readOnly`/`destructive`/`idempotent`).** Today none. `validate`/
+   `generate` are read-only; `delegate`/`run_program` **execute generated code** and are
+   non-readonly + potentially destructive (depends on the profile's tools); `create` writes a
+   file. This is the same `annotations`→grade mapping lackpy *consumes* from other MCP servers
+   (RFC §6) — lackpy should *produce* it on its own surface so woollama/grade-mapping can gate.
+4. **Write descriptions/schemas for an LLM, not a dev.** Tool docstrings should say *when to
+   use* + inputs + outputs; params (`profile`, `params`, `rules`, `extra_tools`) currently have
+   **no schema descriptions** (FastMCP derives bare types) — an orchestrator can't use them
+   correctly. Give each a `Field(description=…)`.
+5. **Trim the `delegate` result payload.** It returns the full service dict (program + entire
+   trace + stdout) — heavy for an orchestrator. Default to a lean result (success/output/grade),
+   trace opt-in.
+6. **Drop or implement the `sandbox` param.** It's exposed on `delegate`/`run_program`/`create`
+   but is reserved/unwired in the service — a misleading contract; remove until real.
+
+These land **with the §8 migration** (the rename is shared) plus the tools-vs-resources +
+annotations work as its own MCP-contract PR. Tracking: this supersedes the surface a future
+`woollama`-registers-`lackpy` integration depends on.
 
 ---
 
