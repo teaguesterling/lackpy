@@ -137,25 +137,34 @@ existing `ResolvedKit` **plus** carry its inference/interpreter selection into t
 ```toml
 # .lackpy/config.toml
 [profiles.fast]
-tools = ["read_file", "find_files"]      # the kit grammar: name | list | dict | "none"
+tools = ["read_file", "find_files"]      # the tool grammar: name | list | dict | "none"
 model = "ollama/qwen2.5-coder:3b"        # was service-global inference; now per-profile
 mode  = "1-shot"                         # 1-shot | spm
-# interpreter = "python"                 # python | ast-select | plucker | … (language × model)
+# language  = "restricted-python"        # grammar/validator/spec: lackpy-lang | shlack (§3.5)
+# execution = "one-shot"                 # one-shot | literate (composite/incremental) (§3.5)
 # temperature = 0.2
 # sandbox = "subprocess"                 # deferred constraints — §6
 
 [profiles.careful]
-tools = "filesystem"                     # a named tool-set (today's .kit file, see §7)
+tools = "filesystem"                     # a named tool-set (a .profile file, see §7)
 model = "ollama/qwen2.5-coder:7b"
 mode  = "spm"
+
+[profiles.notebook]                      # both axes set — a literate run of a shlack document
+tools     = "filesystem"
+language  = "shlack"                     # the other language; same toolbox (§3.5)
+execution = "literate"                   # session-scoped, incremental (§3.5)
 ```
 
 - **`tools`** is exactly today's `kit=` grammar (name/list/dict/`"none"`), resolved against
   the toolbox — invariant 1 holds by construction.
 - **inference fields** (`model`/`mode`/`order`/`temperature`) are the service-global knobs,
   now per-profile; absent → fall back to the service default (invariant 8: zero overhead).
-- **`interpreter`** names the language×execution-model. v1: pass-through to the existing
-  per-call `interpreter` arg; auto-selection deferred (§6).
+- **`language` × `execution`** are the **two orthogonal axes** an interpreter is built from
+  (per [interpreter-types.md](interpreter-types.md)): the *language profile*
+  (grammar/validator/spec) and the *execution model* (one-shot / incremental / composite —
+  *literate* is the latter). Kept as separate fields so the combinations fall out (§3.5).
+  v1 accepts only the defaults (`restricted-python`, `one-shot`); the fields exist from day one.
 - **policy defaults** (optional): the default `PolicyContext` seed; absent → today's behavior.
 
 ### 3.3 Where profiles live
@@ -176,26 +185,77 @@ mode  = "spm"
 > **MCP-as-the-routing-mechanism**: prefer expressing tools as MCP (or MCP-shaped) endpoints
 > over hand-written python providers.
 >
-> **Forward consideration — route tool calls through woollama (open, see §10.8).** woollama is
-> already lackpy's *model* substrate **and** an MCP/OpenAI router with its own tool-orchestration
-> loop. Rather than lackpy maintaining a second MCP client (`sources/mcp/`) indefinitely, a
-> profile could route tool execution through woollama's MCP router — consolidating model **and**
-> tool routing onto one substrate. Out of v1 scope (v1 uses the existing `McpToolSource`), but
-> the profile/source seam should not preclude swapping the router underneath. Flagged for the
-> maintainer; not designed here.
+> **Resolved (§10.8 = B): lackpy keeps its own MCP client; it does *not* route through woollama.**
+> Investigation showed `woollama-core`'s only tool path is an LLM *orchestrate* loop where the
+> caller provides dispatch — a category mismatch with lackpy's program-driven execution — and
+> the MCP machinery lives in the woollama *daemon*, not the importable core. So v1 uses the
+> existing `McpToolSource`, unchanged. The woollama seam is the **inverse** (B): lackpy's MCP
+> server is registered as a woollama backend (§10.8, §11). Routing *through* woollama (option A)
+> is deferred pending a woollama raw-dispatch proxy.
 
 ### 3.4 How it threads through (no new resolution path)
 
 ```
 profile name/inline
-   ├─ tools      → resolve_kit(tools, toolbox) → ResolvedKit (tools, callables, grade, desc, docs)   [unchanged]
-   ├─ model/mode → StepContext / PolicyContext  (already per-call; profile just supplies them)        [removes the getattr(p,"_model") reflection]
-   ├─ interpreter→ existing per-call interpreter selection                                            [pass-through in v1]
-   └─ policy     → default PolicyContext seed                                                          [optional]
+   ├─ tools             → resolve_kit(tools, toolbox) → ResolvedKit (tools, callables, grade, desc, docs)  [unchanged; language-agnostic]
+   ├─ model/mode        → StepContext / PolicyContext  (already per-call; profile supplies them)            [removes the getattr(p,"_model") reflection]
+   ├─ language×execution→ interpreter registry → concrete interpreter (+ language spec → prompt/tiers)      [v1: defaults only — §3.5]
+   └─ policy            → default PolicyContext seed                                                        [optional]
 ```
 
 The profile is resolved **before** `_resolve_kit`/`_gate_kit`, feeding their inputs. Grade,
 policy, validation, and the source substrate are untouched.
+
+### 3.5 Languages, execution models, and sessions — handling literate & shlack
+
+The plan must hold up for **literate lackpy** (a document driven cell-by-cell through a
+persistent kernel) and **shlack** (a sibling lack-language). It does — because the profile
+keeps the **two interpreter axes orthogonal** ([interpreter-types.md](interpreter-types.md):
+*interpreter = language profile × execution model*):
+
+- **`language`** — the language profile (grammar/validator/grader/spec): `restricted-python`
+  (lackpy-lang) today, `shlack` later.
+- **`execution`** — the execution model: `one-shot` today; `literate` = composite-decomposing
+  over the incremental kernel; `spm`/others slot in here too.
+
+A concrete interpreter is `(language × execution)`, resolved via the interpreter registry.
+
+**Why two axes is the elegance.** Keeping them independent makes every combination *fall out*
+for free: `literate × restricted-python`, `one-shot × shlack`, and **`literate × shlack`** all
+work with no new profile shape — you register an interpreter and (for a new language) a spec.
+A single flat `interpreter = "plucker"` string would instead force a named interpreter per
+combination, and shlack-in-a-notebook would be a retrofit.
+
+**What is language-agnostic vs language-specific** (the seam that makes shlack cheap):
+
+| Shared across *all* languages | Selected by the profile's `language` |
+|---|---|
+| toolbox / sources, tool specs, **grade** (derived from tools), policy. *A tool is a callable; the language is only how a program composes the calls.* One toolbox serves lackpy **and** shlack. | grammar / validator / spec, the **generation prompt** (`build_system_prompt` from that language's spec), and the deterministic template/rules tiers (shlack needs shlack templates). |
+
+So adding shlack adds a language profile + its prompt/tiers; it touches **none** of the
+profile/tool/grade/policy machinery. Invariants 1–3 hold unchanged across languages.
+
+**Sessions (literate / incremental).** For an incremental `execution`, the profile scopes a
+**session** (the whole document run), not one call:
+
+- The profile is the session's **ground truth** — max tool scope, grade *ceiling*, policy seed
+  (invariant 2). It supplies session **defaults**; it does **not** answer per-cell
+  re-resolution — that's the interpreter's job.
+- The incremental interpreter owns the per-cell concerns: validation against the *live*
+  namespace, optional per-cell narrowing (the "Pick" pattern lowers the *effective* set without
+  raising the ceiling), and the open per-cell-vs-session policy/sandbox question
+  (interpreter-types.md). The profile doesn't pre-decide these.
+- This is exactly why **invariant 9** ("no 'one profile = one call'") exists: `resolve_profile`
+  must yield something an interpreter can run *once* (one-shot) **or** drive *across cells*
+  (literate). Concretely: resolution returns the session ground-truth (ResolvedKit + grade +
+  inference/policy seed); a one-shot interpreter consumes it once, a literate interpreter holds
+  it across cells. (A *cell* naming a narrower profile is a possible later refinement, not v1.)
+
+**v1 stays tight, the type stays open.** v1 implements only `language = restricted-python`,
+`execution = one-shot`, call-scoped — today's path. But the profile **type carries both axes
+and session-capability from day one** (defaulted), so literate and shlack land by registering
+interpreters + per-language specs/tiers, with **no reshaping of the profile or
+`resolve_profile`**. That is the elegance test this section exists to pass.
 
 ---
 
@@ -248,8 +308,9 @@ policy, or validation.
 | Deferred | Why later | What v1 must not preclude |
 |---|---|---|
 | **Quartermaster** (intent→profile) | Already a scored prototype (`scripts/pluckit-quartermaster.py`, `qm-*.json`); generalizes tools→profile selection. | A profile must be *inferable* — keep the input shape model-producible (names, not opaque objects). |
-| **Multi-language / interpreter auto-selection** | Needs the interpreter registry (`interpreter-types.md`) and the lacklangster rename. | The `interpreter`/language field exists in the model from v1 (pass-through). |
-| **Session-scoped policy/sandbox** (literate/incremental) | Open question in `interpreter-types.md`; breaks "one profile = one call". | Invariant 9 — don't bake call-scoping into the type. |
+| **shlack (a 2nd language)** | Needs the shlack language profile (grammar/validator/spec) + its prompt/tiers. *The profile machinery is ready* — adding a language touches no profile/tool/grade/policy code (§3.5). | The `language` axis exists from v1 (defaulted `restricted-python`); the per-language prompt/tier seam is identified. |
+| **Interpreter auto-selection** (intent → execution model) | Needs the interpreter registry (`interpreter-types.md`); related to Quartermaster. | The `execution` axis exists from v1 (defaulted `one-shot`). |
+| **Literate / session-scoped policy/sandbox** | The session model is sketched (§3.5) but the per-cell-vs-session policy/sandbox question is open in `interpreter-types.md`. | Invariant 9 — `resolve_profile` yields a session ground-truth a literate interpreter can drive across cells, not a call-locked object (§3.5). |
 | **Backward-derivation** (Pick → least-privilege profile) | "Pick" derives a kit from output; a profile-capture API is a separate feature. | Resolution stays one-directional in v1; the type allows a derived profile later. |
 | **Auto sandbox-strategy** | Constrained by interpreter serializability + bridged tools (nsjail design). | Carry an explicit `sandbox` field; don't auto-pick yet. |
 | **Grade-ceiling enforcement** | Lives in Kibitzer/policy, not lackpy core. | Carry an accurate tool-derived grade (invariant 10). |
