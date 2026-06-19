@@ -105,8 +105,11 @@ A profile **must**:
    a withdrawn (virtual/MCP) tool fails cleanly.
 8. **Keep zero overhead for the bare case.** A profile with no policy/kibitzer must cost no
    more than today's kit-only path.
-9. **Not assume one kit per delegation.** Per-step kits differ (Pick); incremental/literate
-   sessions are session-scoped. The abstraction must not bake in "one profile = one call."
+9. **Lifecycle-agnostic — not "one profile = one synchronous call."** Per-step kits differ
+   (Pick); literate sessions are session-scoped; and the *same* profile must be drivable
+   one-shot, conversational, eventful, scheduled, background, or fanned-out (§3.6).
+   `resolve_profile` yields a driver-agnostic, emit-capable, session-able unit — never a
+   call-locked or sync-return-locked object.
 10. **Carry, not enforce, the grade.** Grade is informational in stock lackpy; enforcement
     (mode→max-grade) lives in the Kibitzer/policy layer. The profile's job is an accurate,
     tool-derived grade — not gating.
@@ -257,6 +260,55 @@ and session-capability from day one** (defaulted), so literate and shlack land b
 interpreters + per-language specs/tiers, with **no reshaping of the profile or
 `resolve_profile`**. That is the elegance test this section exists to pass.
 
+### 3.6 Execution is an open registry — lackpy owns *steps*, the harness owns *lifecycle*
+
+`one-shot` and `incremental` are not the whole `execution` space. Surveying the harnesses
+(Claude Code, woollama, cosmic-fabric) and runtime features against it surfaces at least nine
+modes, each adding a dimension the one-shot baseline lacks:
+
+| Mode | New dimension | Grounded in |
+|---|---|---|
+| one-shot *(have)* | — (sync, stateless, single program) | `delegate` |
+| incremental / literate *(have)* | **state** (persistent namespace) | literate kernel |
+| **conversational / REPL** | continuation = a **live turn** (arrives at runtime) | woollama conversation handles (`/v1/responses`); cosmic-fabric sessions |
+| **eventful / reactive** | lifecycle = **persistent watcher** on a signal | Monitor; hooks; webhooks; MCP `notification` |
+| **scheduled / recurring** | lifecycle = **time-trigger** | cron / `/schedule` / `/loop` |
+| **background / long job** | lifecycle = **submit → poll → complete** | background tasks |
+| **streaming** | output = a **stream**, not a value | woollama `complete_stream`; literate render |
+| **parallel / fan-out** | **concurrency** → merge | Workflow `parallel`/`pipeline`; subagent fan-out |
+| **agentic loop** | continuation = the **model** picks next | woollama `orchestrate`; cosmic-fabric tool-loop |
+
+The `execution` axis spans six dimensions: *state, lifecycle, continuation-driver, concurrency,
+output, emission.*
+
+**The boundary (load-bearing):** lackpy owns the **step-execution primitives** — `one-shot`
+and `incremental` (run a program/cell safely, with optional persistent state). Everything else
+is an **orchestration lifecycle a harness composes** from those primitives — and that's exactly
+what Claude Code / woollama / cosmic-fabric already do. This *generalizes §10.8 = B*: the harness
+drives; lackpy provides the safe step + the profile. "Eventful lackpy" = Monitor fires → harness
+runs a profile; "scheduled" = cron → same; "conversational" = the harness holds the session and
+feeds turns; "parallel" = a Workflow fans out N profile invocations. **lackpy should not *become*
+eventful/scheduled/agentic — it should be a clean unit a harness drives in any of those modes.**
+
+**Three requirements this puts on the model (bake in before Phase 1):**
+
+1. **`execution` is an open registry, not a closed enum.** `one-shot`/`incremental` are
+   lackpy-native; conversation/streaming may become native later; the rest resolve to
+   "harness-driven". Never branch on a fixed `execution in {…}` set.
+2. **The profile is lifecycle-decoupled.** The *same* profile (tools + language + inference +
+   policy) must run one-shot, in a conversation, on a trigger, as a job, or fanned-out — only the
+   **driver** changes. So `resolve_profile` must **not** assume `delegate`'s synchronous
+   return-a-value contract; it yields a **driver-agnostic, session-able unit** (invariant 9,
+   generalized from "not call-locked" to "not *lifecycle*-locked").
+3. **Name the emission seam.** conversation, eventful, and streaming need the run to **emit**
+   mid-execution (a partial result, an event, a notification) — not only return a final value.
+   literate's render-as-execute is the existing case. The execution result must be an
+   **event/emit channel**, not only a return — so those drivers have a hook.
+
+**v1 still ships only `one-shot × restricted-python`** — but its `Profile` + `resolve_profile`
+contract is **driver-agnostic, emit-capable, and registry-backed**, so the other eight modes
+plug in as drivers (mostly harness-side) without touching the profile.
+
 ---
 
 ## 4. Backward compatibility — hard removal, no alias
@@ -310,6 +362,7 @@ policy, or validation.
 | **Quartermaster** (intent→profile) | Already a scored prototype (`scripts/pluckit-quartermaster.py`, `qm-*.json`); generalizes tools→profile selection. | A profile must be *inferable* — keep the input shape model-producible (names, not opaque objects). |
 | **shlack (a 2nd language)** | Needs the shlack language profile (grammar/validator/spec) + its prompt/tiers. *The profile machinery is ready* — adding a language touches no profile/tool/grade/policy code (§3.5). | The `language` axis exists from v1 (defaulted `restricted-python`); the per-language prompt/tier seam is identified. |
 | **Interpreter auto-selection** (intent → execution model) | Needs the interpreter registry (`interpreter-types.md`); related to Quartermaster. | The `execution` axis exists from v1 (defaulted `one-shot`). |
+| **Harness-driven execution modes** (conversation, eventful, scheduled, background, parallel, agentic — §3.6) | These are *orchestration lifecycles a harness owns* (Claude Code / woollama / cosmic-fabric), not lackpy step-execution. lackpy supplies the profile + safe step; the harness drives. | The three §3.6 requirements: `execution` is an open registry; the profile is lifecycle-decoupled; the execution result is an emit/event channel (invariant 9). |
 | **Literate / session-scoped policy/sandbox** | The session model is sketched (§3.5) but the per-cell-vs-session policy/sandbox question is open in `interpreter-types.md`. | Invariant 9 — `resolve_profile` yields a session ground-truth a literate interpreter can drive across cells, not a call-locked object (§3.5). |
 | **Backward-derivation** (Pick → least-privilege profile) | "Pick" derives a kit from output; a profile-capture API is a separate feature. | Resolution stays one-directional in v1; the type allows a derived profile later. |
 | **Auto sandbox-strategy** | Constrained by interpreter serializability + bridged tools (nsjail design). | Carry an explicit `sandbox` field; don't auto-pick yet. |
