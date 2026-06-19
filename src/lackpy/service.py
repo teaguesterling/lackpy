@@ -104,6 +104,9 @@ class LackpyService:
         for source, precedence in self._build_tool_sources():
             self.toolbox.add_source(source, precedence)
         self._inference_providers: list = []
+        # The configured LLM model (set by _init_inference_providers from the woollama
+        # tier) — recorded explicitly instead of reflecting `getattr(p, "_model")`.
+        self._llm_model: str | None = None
         self._init_inference_providers()
         self._policy = PolicyLayer()
         self._policy.add_source(KitPolicySource(self.toolbox))
@@ -226,8 +229,10 @@ class LackpyService:
                 # woollama-known backend (ollama, anthropic, openai, …) via a
                 # "<provider>/<model>" string — lackpy stops doing per-vendor HTTP.
                 from .infer.providers.woollama import WoollamaProvider
+                model = provider_cfg.get("model", "ollama/qwen2.5-coder:1.5b")
+                self._llm_model = model  # recorded for PolicyContext (no _model reflection)
                 self._inference_providers.append(WoollamaProvider(
-                    model=provider_cfg.get("model", "ollama/qwen2.5-coder:1.5b"),
+                    model=model,
                     temperature=provider_cfg.get("temperature", 0.2),
                     retry_temperature=provider_cfg.get("retry_temperature", 0.6),
                     api_key=provider_cfg.get("api_key"),
@@ -241,6 +246,22 @@ class LackpyService:
                     host=provider_cfg.get("host", "http://localhost:11434"),
                     tiers=provider_cfg.get("tiers"),
                 ))
+
+    def _providers_for(self, model: str | None, temperature: float | None) -> list:
+        """The inference providers for one call, applying a per-call model/temperature.
+
+        No override → the shared global list (zero allocation, identical behavior —
+        invariant 8). With an override → a copy where each tier that supports it (the
+        woollama LLM tier, via ``with_overrides``) is cloned to the requested
+        model/temperature; deterministic tiers (templates/rules) pass through unchanged.
+        """
+        if model is None and temperature is None:
+            return self._inference_providers
+        return [
+            p.with_overrides(model=model, temperature=temperature)
+            if hasattr(p, "with_overrides") else p
+            for p in self._inference_providers
+        ]
 
     def _init_kibitzer(self) -> None:
         """Initialize Kibitzer session if available."""
@@ -352,7 +373,9 @@ class LackpyService:
     async def generate(self, intent: str, kit: str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None,
                        mode: str | None = None, interpreter: Any = None,
-                       extra_tools: list[str] | None = None) -> GenerationResult:
+                       extra_tools: list[str] | None = None,
+                       model: str | None = None,
+                       temperature: float | None = None) -> GenerationResult:
         """Generate a lackpy program from a natural language intent.
 
         Args:
@@ -365,6 +388,11 @@ class LackpyService:
                 is forwarded to the prompt builder. When present, the inference
                 prompt uses interpreter-specialized framing instead of the
                 generic Jupyter-cell template.
+            model: Per-call LLM model override (``"<provider>/<model>"``). When set, the
+                woollama tier is cloned to this model for this call only; when omitted,
+                the service-configured model is used (identical to prior behavior). This
+                is how a profile selects a per-task model (RFC 0002 incr. 5).
+            temperature: Per-call temperature override for the LLM tier.
 
         Returns:
             A GenerationResult with the generated program and provider metadata.
@@ -378,12 +406,16 @@ class LackpyService:
         resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
         _, params_desc, param_names = self._resolve_params(params, resolved)
 
+        # Per-call providers: the global set, or a copy with the LLM tier's model/temperature
+        # overridden when the caller (a profile) supplies one. Omitted → identical to before.
+        providers = self._providers_for(model, temperature)
+
         effective_mode = mode or self._config.inference_mode
 
         if effective_mode and effective_mode in STRATEGIES:
             strategy_cls = STRATEGIES[effective_mode]
             strategy = strategy_cls()
-            dispatcher = InferenceDispatcher(providers=self._inference_providers)
+            dispatcher = InferenceDispatcher(providers=providers)
             # SPM needs an LLM provider (skip deterministic templates/rules)
             if effective_mode == "spm":
                 llm_providers = [p for p in dispatcher.get_providers()
@@ -413,17 +445,14 @@ class LackpyService:
             )
 
         # Default: legacy dispatcher path
-        dispatcher = InferenceDispatcher(providers=self._inference_providers)
+        dispatcher = InferenceDispatcher(providers=providers)
         allowed = set(resolved.tools.keys()) | param_names
 
-        # Resolve policy — kit baseline + optional kibitzer hints + optional umwelt
+        # Resolve policy — kit baseline + optional kibitzer hints + optional umwelt.
+        # The active model is known explicitly (per-call override or the configured LLM
+        # model) — no more reflecting `getattr(provider, "_model")`.
         from .policy.types import PolicyContext, ModelSpec
-        model_name = None
-        for p in dispatcher.get_providers():
-            m = getattr(p, "_model", None)
-            if m:
-                model_name = m
-                break
+        model_name = model or self._llm_model
         policy_context: PolicyContext = {"kit": resolved}
         if model_name:
             policy_context["model"] = ModelSpec(name=model_name)
@@ -515,7 +544,9 @@ class LackpyService:
                        _program_override: str | None = None,
                        mode: str | None = None,
                        interpreter: Any = None,
-                       extra_tools: list[str] | None = None) -> dict[str, Any]:
+                       extra_tools: list[str] | None = None,
+                       model: str | None = None,
+                       temperature: float | None = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
 
         Combines generate and run_program: generates a program from intent, then
@@ -560,7 +591,8 @@ class LackpyService:
             )
         else:
             gen_result = await self.generate(intent, kit, params, rules, mode=mode,
-                                            interpreter=interpreter, extra_tools=extra_tools)
+                                            interpreter=interpreter, extra_tools=extra_tools,
+                                            model=model, temperature=temperature)
 
         # Kibitzer: validate planned calls before execution
         kibitzer_suggestions: list[str] = []

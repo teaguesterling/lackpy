@@ -43,6 +43,22 @@ class WoollamaProvider:
         self._options = options
         self._params = params
 
+    def with_overrides(self, *, model: str | None = None,
+                       temperature: float | None = None) -> "WoollamaProvider":
+        """Return a copy with ``model``/``temperature`` overridden (others preserved).
+
+        Lets a profile select a per-task model/temperature without rebuilding the
+        provider from config — the service swaps the LLM tier for this clone on calls
+        that override, and uses the original (this instance) otherwise.
+        """
+        return WoollamaProvider(
+            model=model or self._model,
+            temperature=temperature if temperature is not None else self._temperature,
+            retry_temperature=self._retry_temperature,
+            api_key=self._api_key, base_url=self._base_url,
+            options=self._options, params=self._params,
+        )
+
     @property
     def name(self) -> str:
         return "woollama"
