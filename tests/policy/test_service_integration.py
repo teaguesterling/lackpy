@@ -44,5 +44,5 @@ class TestServiceHasPolicyLayer:
 
 class TestServiceDelegateUsesPolicyLayer:
     def test_validate_still_works(self, service):
-        result = service.validate("x = read_file('test.txt')", kit=["read_file"])
+        result = service.validate("x = read_file('test.txt')", profile=["read_file"])
         assert result.valid

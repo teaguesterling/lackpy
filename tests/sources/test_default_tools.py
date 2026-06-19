@@ -27,7 +27,7 @@ def test_service_has_builtins_by_default(tmp_path):
 async def test_default_read_file_runs_end_to_end(tmp_path):
     (tmp_path / "hello.txt").write_text("world")
     svc = LackpyService(workspace=tmp_path)
-    res = await svc.run_program("content = read_file('hello.txt')\ncontent", kit=["read_file"])
+    res = await svc.run_program("content = read_file('hello.txt')\ncontent", profile=["read_file"])
     assert res.success
     assert res.output == "world"
 

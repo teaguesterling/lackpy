@@ -20,7 +20,7 @@ else:
 class LackpyConfig:
     inference_order: list[str] = field(default_factory=lambda: ["templates", "rules"])
     inference_providers: dict[str, dict[str, Any]] = field(default_factory=dict)
-    kit_default: str = "debug"
+    profile_default: str = "debug"
     sandbox_enabled: bool = False
     sandbox_timeout: int = 120
     sandbox_memory_mb: int = 512
@@ -46,7 +46,9 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
     with open(config_file, "rb") as f:
         data = tomllib.load(f)
     inference = data.get("inference", {})
-    kit = data.get("kit", {})
+    # [profile] default = "<name>" — the default profile when a call omits one.
+    # ([profiles.<name>] holds the profiles themselves; [profile] holds settings.)
+    profile_settings = data.get("profile", {})
     sandbox = data.get("sandbox", {})
     tool_providers = data.get("tool_providers", {})
     tools = data.get("tools", [])
@@ -61,7 +63,7 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
         inference_order=inference.get("order", ["templates", "rules"]),
         inference_providers=providers,
         inference_mode=inference.get("mode"),
-        kit_default=kit.get("default", "debug"),
+        profile_default=profile_settings.get("default", "debug"),
         sandbox_enabled=sandbox.get("enabled", False),
         sandbox_timeout=sandbox.get("timeout_seconds", 120),
         sandbox_memory_mb=sandbox.get("memory_mb", 512),

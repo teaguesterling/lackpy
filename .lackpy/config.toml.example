@@ -41,5 +41,14 @@ temperature = 0.2
 #     {model = "qwen2.5-coder:7b", max_tokens = 120, timeout = 60},
 # ]
 
-[kit]
+# The default profile used when a call omits one.
+[profile]
 default = "debug"
+
+# Named per-task profiles: a tool selection + optional inference (model/mode/temperature)
+# + language/execution axes. `tools` uses the same grammar as a kit (name | list | dict).
+# A profile that sets only `tools` is the degenerate "kit".
+# [profiles.fast]
+# tools = ["read_file", "find_files"]
+# model = "ollama/qwen2.5-coder:3b"
+# mode  = "1-shot"

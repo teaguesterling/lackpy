@@ -81,12 +81,12 @@ async def test_run_program_calls_mcp_tool_end_to_end(tmp_path):
         names = {t["name"] for t in svc.toolbox_list()}
         assert {"echo", "add"} <= names
 
-        res = await svc.run_program("r = echo(text='hi')\nr", kit=["echo"])
+        res = await svc.run_program("r = echo(text='hi')\nr", profile=["echo"])
         assert res.success, res.error
         assert res.output == "hi"
         assert res.trace.entries[0].tool == "echo"
 
-        res2 = await svc.run_program("s = add(a=2, b=3)\ns", kit=["add"])
+        res2 = await svc.run_program("s = add(a=2, b=3)\ns", profile=["add"])
         assert res2.success, res2.error
         assert res2.output == 5
     finally:

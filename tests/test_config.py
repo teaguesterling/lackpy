@@ -32,14 +32,14 @@ timeout_seconds = 60
 def test_load_config(config_dir):
     cfg = load_config(config_dir)
     assert cfg.inference_order == ["templates", "rules", "local"]
-    assert cfg.kit_default == "debug"
+    assert cfg.profile_default == "debug"
     assert cfg.sandbox_enabled is False
 
 
 def test_load_config_defaults(tmp_path):
     cfg = load_config(tmp_path)
     assert cfg.inference_order is not None
-    assert cfg.kit_default == "debug"
+    assert cfg.profile_default == "debug"
 
 
 def test_provider_config(config_dir):
