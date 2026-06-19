@@ -13,14 +13,14 @@ class TestParserFlags:
 
     def test_create_flag(self):
         parser = build_parser()
-        args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--kit", "read,glob"])
+        args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--profile", "read,glob"])
         assert args.intent == "find python files"
         assert args.create is True
         assert args.name == "FindPy"
 
     def test_generate_flag(self):
         parser = build_parser()
-        args = parser.parse_args(["-c", "read file main.py", "--generate", "--kit", "read_file"])
+        args = parser.parse_args(["-c", "read file main.py", "--generate", "--profile", "read_file"])
         assert args.intent == "read file main.py"
         assert args.generate is True
 
@@ -53,14 +53,14 @@ class TestParserFlags:
 
     def test_tools_flag_with_kit(self):
         parser = build_parser()
-        args = parser.parse_args(["-c", "do something", "--kit", "debug", "--tools", "edit_file"])
-        assert args.kit == "debug"
+        args = parser.parse_args(["-c", "do something", "--profile", "debug", "--tools", "edit_file"])
+        assert args.profile == "debug"
         assert args.tools == "edit_file"
 
     def test_tools_flag_without_kit(self):
         parser = build_parser()
         args = parser.parse_args(["-c", "do something", "--tools", "read_file"])
-        assert args.kit is None
+        assert args.profile is None
         assert args.tools == "read_file"
 
 

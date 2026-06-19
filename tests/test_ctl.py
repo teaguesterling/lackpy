@@ -18,9 +18,9 @@ def test_parser_status():
 
 def test_parser_kit_list():
     parser = build_parser()
-    args = parser.parse_args(["kit", "list"])
-    assert args.command == "kit"
-    assert args.kit_command == "list"
+    args = parser.parse_args(["profile", "list"])
+    assert args.command == "profile"
+    assert args.profile_command == "list"
 
 
 def test_parser_toolbox_list():
