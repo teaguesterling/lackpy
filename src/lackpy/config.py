@@ -30,6 +30,9 @@ class LackpyConfig:
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     mcp_host_configs: list[str] = field(default_factory=list)
     virtual_tools: list[dict[str, Any]] = field(default_factory=list)
+    # [profiles.<name>] tables — named per-task bundles (tools + inference + language/
+    # execution + policy). Raw dicts here, like `tools`; parsed into Profile on resolve.
+    profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     config_dir: Path = field(default_factory=lambda: Path(".lackpy"))
 
 
@@ -50,6 +53,7 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
     mcp_servers = data.get("mcp_servers", {})
     mcp_host_configs = data.get("mcp", {}).get("host_configs", [])
     virtual_tools = data.get("virtual_tools", [])
+    profiles = data.get("profiles", {})
     providers: dict[str, dict[str, Any]] = {}
     for name, cfg in inference.get("providers", {}).items():
         providers[name] = cfg
@@ -66,5 +70,6 @@ def load_config(workspace: Path | None = None) -> LackpyConfig:
         mcp_servers=mcp_servers,
         mcp_host_configs=mcp_host_configs,
         virtual_tools=virtual_tools,
+        profiles=profiles,
         config_dir=config_dir,
     )
