@@ -78,6 +78,7 @@ nav:
   - Design:
     - Direction (roadmap): design/direction.md
     - Tool Sources (RFC 0002): design/tool-sources.md
+    - Kits → Profiles (RFC 0002 incr. 5): design/kits-to-profiles.md
     - Interpreter Types: design/interpreter-types.md
   - Reference:
     - Python API: reference/api.md
