@@ -31,7 +31,7 @@ class PythonInterpreter:
 
     The program is a lackpy program — a subset of Python 3 with imports,
     function definitions, and dangerous builtins removed. It is validated
-    against the kit's allowed names and then executed with tool callables
+    against the tools's allowed names and then executed with tool callables
     injected into the namespace.
 
     Output shape: whatever the program's last expression evaluated to.
@@ -41,7 +41,7 @@ class PythonInterpreter:
     """
 
     name = "python"
-    description = "Restricted Python with tool callables from the kit"
+    description = "Restricted Python with tool callables from the tools"
 
     def __init__(self) -> None:
         self._runner = RestrictedRunner()
@@ -84,18 +84,18 @@ class PythonInterpreter:
         program: str,
         context: ExecutionContext,
     ) -> InterpreterValidationResult:
-        """Validate against the kit's allowed names and any extra rules.
+        """Validate against the tools's allowed names and any extra rules.
 
-        Allowed names are the union of the kit's tool names and any
+        Allowed names are the union of the tools's tool names and any
         parameter names injected into the context. This matches the
         original :meth:`LackpyService.run_program` behavior.
         """
-        if context.kit is None:
+        if context.tools is None:
             return InterpreterValidationResult(
                 valid=False,
-                errors=["PythonInterpreter requires a resolved kit in the execution context"],
+                errors=["PythonInterpreter requires a resolved tools in the execution context"],
             )
-        allowed = set(context.kit.tools.keys())
+        allowed = set(context.tools.tools.keys())
         if context.params:
             allowed |= set(context.params.keys())
         result = validate(program, allowed_names=allowed, extra_rules=context.extra_rules)
@@ -113,7 +113,7 @@ class PythonInterpreter:
 
         Runs the program with its working directory set to
         ``context.base_dir`` (restored on exit). Tool callables come from
-        the resolved kit; parameter values come from the context.
+        the resolved tools; parameter values come from the context.
         """
         start = time.perf_counter()
         validation = self.validate(program, context)
@@ -130,7 +130,7 @@ class PythonInterpreter:
             os.chdir(context.base_dir)
             exec_result = self._runner.run(
                 program,
-                context.kit.callables,
+                context.tools.callables,
                 params=context.params or None,
             )
         finally:

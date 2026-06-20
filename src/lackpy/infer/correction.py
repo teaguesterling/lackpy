@@ -23,7 +23,7 @@ def _infer_relevant_tool(
     errors: list[str],
     allowed_names: set[str],
 ) -> str | None:
-    """Guess which kit tool is relevant to a failure, for doc lookup."""
+    """Guess which tools tool is relevant to a failure, for doc lookup."""
     error_text = " ".join(errors).lower()
     if failure_mode in ("stdlib_leak", "implement_not_orchestrate"):
         for stdlib_name, tool_name in _STDLIB_TO_TOOL.items():

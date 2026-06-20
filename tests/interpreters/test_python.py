@@ -2,7 +2,7 @@
 
 These tests mirror the existing run_program behavior in LackpyService —
 the PythonInterpreter should be a drop-in for the same execution path,
-validated against the same kit and producing the same semantic output.
+validated against the same tools and producing the same semantic output.
 """
 
 import pytest
@@ -13,13 +13,13 @@ from lackpy.interpreters import (
     PythonInterpreter,
     run_interpreter,
 )
-from lackpy.kit.registry import ResolvedKit
-from lackpy.kit.toolbox import ArgSpec, ToolSpec
+from lackpy.tools.registry import ResolvedTools
+from lackpy.tools.toolbox import ArgSpec, ToolSpec
 from lackpy.lang.grader import Grade
 
 
 def _make_kit():
-    """Build a minimal ResolvedKit with one callable tool for tests."""
+    """Build a minimal ResolvedTools with one callable tool for tests."""
     def _count(items):
         return len(items)
 
@@ -34,7 +34,7 @@ def _make_kit():
             effects_ceiling=1,
         ),
     }
-    return ResolvedKit(
+    return ResolvedTools(
         tools=tools,
         callables={"count": _count},
         grade=Grade(w=1, d=1),
@@ -45,27 +45,27 @@ def _make_kit():
 class TestPythonValidation:
     def test_valid_program_passes(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = interp.validate("count([1, 2, 3])", ctx)
         assert result.valid
         assert result.errors == []
 
     def test_missing_kit_fails(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=None)
+        ctx = ExecutionContext(tools=None)
         result = interp.validate("1 + 1", ctx)
         assert not result.valid
-        assert any("kit" in e for e in result.errors)
+        assert any("tools" in e for e in result.errors)
 
     def test_import_rejected(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = interp.validate("import os", ctx)
         assert not result.valid
 
     def test_unknown_tool_rejected(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = interp.validate("delete_everything()", ctx)
         assert not result.valid
 
@@ -74,7 +74,7 @@ class TestPythonExecution:
     @pytest.mark.asyncio
     async def test_execute_simple_program(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = await run_interpreter(interp, "count([1, 2, 3])", ctx)
         assert result.success
         assert result.output == 3
@@ -84,7 +84,7 @@ class TestPythonExecution:
     async def test_execute_with_params(self):
         interp = PythonInterpreter()
         ctx = ExecutionContext(
-            kit=_make_kit(),
+            tools=_make_kit(),
             params={"data": [1, 2, 3, 4, 5]},
         )
         result = await run_interpreter(interp, "count(data)", ctx)
@@ -94,7 +94,7 @@ class TestPythonExecution:
     @pytest.mark.asyncio
     async def test_failed_validation_short_circuits(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = await run_interpreter(interp, "import sys", ctx)
         assert not result.success
         assert "Validation failed" in result.error
@@ -102,7 +102,7 @@ class TestPythonExecution:
     @pytest.mark.asyncio
     async def test_result_has_duration(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = await run_interpreter(interp, "count([])", ctx)
         assert result.success
         assert result.duration_ms >= 0
@@ -110,7 +110,7 @@ class TestPythonExecution:
     @pytest.mark.asyncio
     async def test_result_metadata_includes_trace(self):
         interp = PythonInterpreter()
-        ctx = ExecutionContext(kit=_make_kit())
+        ctx = ExecutionContext(tools=_make_kit())
         result = await run_interpreter(interp, "count([1, 2])", ctx)
         assert result.success
         assert "trace" in result.metadata

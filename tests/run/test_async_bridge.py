@@ -7,7 +7,7 @@ is tested deterministically.
 
 import asyncio
 
-from lackpy.kit.toolbox import ArgSpec, ToolSpec
+from lackpy.tools.toolbox import ArgSpec, ToolSpec
 from lackpy.run.bridge import mark_async
 from lackpy.service import LackpyService
 

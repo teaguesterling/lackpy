@@ -27,7 +27,7 @@ class FewShotCorrectStep:
             return ctx
 
         start = time.perf_counter()
-        namespace_desc = ctx.kit.description
+        namespace_desc = ctx.tools.description
         enriched = enrich_errors(ctx.current.errors, namespace_desc)
 
         raw = await self._provider.generate(
@@ -44,7 +44,7 @@ class FewShotCorrectStep:
         ctx.programs.append(ProgramState(
             program=program,
             intent=ctx.intent,
-            kit=ctx.current.kit,
+            tools=ctx.current.tools,
             valid=None,
             errors=[],
             trace=StepTrace(

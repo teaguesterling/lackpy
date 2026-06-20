@@ -52,8 +52,8 @@ class RestrictStep:
 
         start = time.perf_counter()
 
-        kit = ctx.current.kit or ctx.kit
-        namespace_desc = kit.description
+        tools = ctx.current.tools or ctx.tools
+        namespace_desc = tools.description
         builtins_str = ", ".join(sorted(ALLOWED_BUILTINS))
 
         system_prompt = _RESTRICT_SYSTEM_PROMPT.format(
@@ -74,7 +74,7 @@ class RestrictStep:
         ctx.programs.append(ProgramState(
             program=program,
             intent=ctx.intent,
-            kit=kit,
+            tools=tools,
             valid=None,
             errors=[],
             trace=StepTrace(

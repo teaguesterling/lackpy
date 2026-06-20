@@ -6,7 +6,7 @@ optional policy defaults. A **kit is the degenerate profile** that sets only ``t
 
 Thin by design (maintainer's decision): a ``Profile`` is a bundle of *references*, and
 resolving it **composes existing machinery** — the tool selection goes through the
-unchanged ``resolve_kit`` (so grade/policy/validation are untouched), and the rest is
+unchanged ``resolve_tools`` (so grade/policy/validation are untouched), and the rest is
 carried alongside. Resolution yields a ``ResolvedProfile`` that is **driver-agnostic**
 (one-shot, incremental, conversation, eventful, … all consume it — RFC §3.6) and never
 assumes a single synchronous call; results flow through the emit seam
@@ -20,8 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .kit.registry import ResolvedKit, resolve_kit
-from .kit.toolbox import Toolbox
+from .tools.registry import ResolvedTools, resolve_tools
+from .tools.toolbox import Toolbox
 from .lang.grader import Grade
 
 DEFAULT_LANGUAGE = "restricted-python"
@@ -73,12 +73,12 @@ class Profile:
 class ResolvedProfile:
     """A resolved profile — a driver-agnostic, session-able unit.
 
-    Holds the resolved tools (the existing ``ResolvedKit``, with its tool-derived grade)
+    Holds the resolved tools (the existing ``ResolvedTools``, with its tool-derived grade)
     plus the carried inference/language/execution/policy selections. Drivers consume this;
     nothing here assumes a single synchronous call (invariant 9).
     """
 
-    tools: ResolvedKit
+    tools: ResolvedTools
     model: str | None = None
     mode: str | None = None
     order: list[str] | None = None
@@ -108,7 +108,7 @@ def resolve_profile(
     defaults: dict[str, Any] | None = None,
     extra_tools: list[str] | None = None,
 ) -> ResolvedProfile:
-    """Resolve a profile into a ``ResolvedProfile``, composing the unchanged ``resolve_kit``.
+    """Resolve a profile into a ``ResolvedProfile``, composing the unchanged ``resolve_tools``.
 
     ``profile`` may be:
 
@@ -127,7 +127,7 @@ def resolve_profile(
     """
     prof = _coerce(profile, profiles)
     merged_extra = (prof.extra_tools or []) + (extra_tools or []) or None
-    resolved_tools = resolve_kit(
+    resolved_tools = resolve_tools(
         prof.tools, toolbox, kits_dir=kits_dir, extra_tools=merged_extra
     )
     d = defaults or {}

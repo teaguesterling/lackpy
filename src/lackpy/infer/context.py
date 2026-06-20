@@ -32,7 +32,7 @@ class ProgramState:
 
     program: str
     intent: str
-    kit: Any  # ResolvedKit, but Any to avoid circular imports
+    tools: Any  # ResolvedTools, but Any to avoid circular imports
     valid: bool | None
     errors: list[str]
     trace: StepTrace
@@ -42,13 +42,13 @@ class ProgramState:
 class StepContext:
     """The accumulator threaded through the inference pipeline fold.
 
-    Input fields (intent, kit, params_desc, extra_rules) are set at
+    Input fields (intent, tools, params_desc, extra_rules) are set at
     strategy entry and remain immutable across the fold. Steps read
     from `current` and push new ProgramState entries onto `programs`.
     """
 
     intent: str
-    kit: Any  # ResolvedKit
+    tools: Any  # ResolvedTools
     params_desc: str | None = None
     extra_rules: list | None = None
     programs: list[ProgramState] = field(default_factory=list)

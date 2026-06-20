@@ -49,7 +49,7 @@ class FreshFixStep:
             return ctx
 
         start = time.perf_counter()
-        namespace_desc = ctx.kit.description
+        namespace_desc = ctx.tools.description
         errors_text = "\n".join(ctx.current.errors)
 
         messages = build_fixer_messages(
@@ -74,7 +74,7 @@ class FreshFixStep:
         ctx.programs.append(ProgramState(
             program=program,
             intent=ctx.intent,
-            kit=ctx.current.kit,
+            tools=ctx.current.tools,
             valid=None,
             errors=[],
             trace=StepTrace(

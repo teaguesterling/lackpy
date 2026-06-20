@@ -77,7 +77,7 @@ def _build_completion_prompt(intent: str, examples: str | None = None,
                              context: str | None = None) -> str:
     """Build a completion-style prompt the model just finishes.
 
-    If *context* is provided (typically namespace_desc from the kit),
+    If *context* is provided (typically namespace_desc from the tools),
     it is prepended as reference material the model can consult.
     This is the integration point for tool documentation (e.g. selector
     syntax, parameter descriptions) and Kibitzer hints.

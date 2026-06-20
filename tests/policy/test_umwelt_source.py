@@ -12,7 +12,7 @@ import pytest
 
 from lackpy.policy.types import PolicyResult, PolicyContext, ToolConstraints
 from lackpy.policy.sources.umwelt import UmweltPolicySource
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.registry import ResolvedTools
 from lackpy.lang.grader import Grade
 
 
@@ -38,8 +38,8 @@ class FakePolicyEngine:
 
 
 @pytest.fixture
-def kit():
-    return ResolvedKit(
+def tools():
+    return ResolvedTools(
         tools={}, callables={}, grade=Grade(w=0, d=0), description="",
     )
 
@@ -50,7 +50,7 @@ class TestUmweltPolicySourceBasic:
         assert source.name == "umwelt"
         assert source.priority == 100
 
-    def test_restricts_to_kit_intersection(self, kit):
+    def test_restricts_to_kit_intersection(self, tools):
         engine = FakePolicyEngine([
             _tool("read_file", allow="true"),
             _tool("edit_file", allow="true"),
@@ -58,12 +58,12 @@ class TestUmweltPolicySourceBasic:
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file", "edit_file"}))
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert result.allowed_tools == frozenset({"read_file", "edit_file"})
         assert "bash" not in result.allowed_tools
 
-    def test_denies_tools_marked_not_allowed(self, kit):
+    def test_denies_tools_marked_not_allowed(self, tools):
         engine = FakePolicyEngine([
             _tool("read_file", allow="true"),
             _tool("edit_file", allow="false"),
@@ -72,32 +72,32 @@ class TestUmweltPolicySourceBasic:
         current = PolicyResult(
             allowed_tools=frozenset({"read_file", "edit_file"}),
         )
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert result.allowed_tools == frozenset({"read_file"})
         assert "edit_file" in result.denied_tools
 
-    def test_cannot_grant_tools_kit_lacks(self, kit):
+    def test_cannot_grant_tools_kit_lacks(self, tools):
         engine = FakePolicyEngine([
             _tool("read_file", allow="true"),
             _tool("bash", allow="true"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert result.allowed_tools == frozenset({"read_file"})
         assert "bash" not in result.allowed_tools
 
-    def test_never_marks_resolved(self, kit):
+    def test_never_marks_resolved(self, tools):
         source = UmweltPolicySource(FakePolicyEngine([]))
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(PolicyResult(), context)
         assert result.resolved is False
 
 
 class TestUmweltPolicySourceConstraints:
-    def test_sets_tool_constraints(self, kit):
+    def test_sets_tool_constraints(self, tools):
         engine = FakePolicyEngine([
             _tool(
                 "read_file",
@@ -109,7 +109,7 @@ class TestUmweltPolicySourceConstraints:
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert "read_file" in result.tool_constraints
         tc = result.tool_constraints["read_file"]
@@ -117,7 +117,7 @@ class TestUmweltPolicySourceConstraints:
         assert tc.allow_patterns == ("src/**/*.py",)
         assert tc.deny_patterns == ("*.secret",)
 
-    def test_comma_separated_patterns_split(self, kit):
+    def test_comma_separated_patterns_split(self, tools):
         """umwelt serializes list props as comma-separated strings — must split, not
         iterate per-character."""
         engine = FakePolicyEngine([
@@ -125,20 +125,20 @@ class TestUmweltPolicySourceConstraints:
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"edit_file"}))
-        result = source.resolve(current, {"kit": kit})
+        result = source.resolve(current, {"tools": tools})
         assert result.tool_constraints["edit_file"].allow_patterns == ("src/**", "tests/**")
 
-    def test_no_constraints_when_not_specified(self, kit):
+    def test_no_constraints_when_not_specified(self, tools):
         engine = FakePolicyEngine([
             _tool("read_file", allow="true"),
         ])
         source = UmweltPolicySource(engine)
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert "read_file" not in result.tool_constraints
 
-    def test_merges_denied_with_existing(self, kit):
+    def test_merges_denied_with_existing(self, tools):
         engine = FakePolicyEngine([
             _tool("bash", allow="false"),
         ])
@@ -147,14 +147,14 @@ class TestUmweltPolicySourceConstraints:
             allowed_tools=frozenset({"read_file", "bash"}),
             denied_tools=frozenset({"rm_rf"}),
         )
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert "rm_rf" in result.denied_tools
         assert "bash" in result.denied_tools
 
 
 class TestUmweltPolicySourcePreservesOtherFields:
-    def test_preserves_hints_and_docs(self, kit):
+    def test_preserves_hints_and_docs(self, tools):
         engine = FakePolicyEngine([
             _tool("read_file", allow="true"),
         ])
@@ -165,7 +165,7 @@ class TestUmweltPolicySourcePreservesOtherFields:
             docs=("docs/tools/read_file.md",),
             namespace_desc="read_file(path) -> str",
         )
-        context: PolicyContext = {"kit": kit}
+        context: PolicyContext = {"tools": tools}
         result = source.resolve(current, context)
         assert result.prompt_hints == ("use read_file for files",)
         assert result.docs == ("docs/tools/read_file.md",)

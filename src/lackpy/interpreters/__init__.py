@@ -1,11 +1,11 @@
 """Lackpy interpreter plugins.
 
-An interpreter executes a program against a resolved kit and returns an
+An interpreter executes a program against a resolved tools and returns an
 execution result. The restricted-Python interpreter that lackpy was
 originally built around is now one plugin among several:
 
 - :class:`~lackpy.interpreters.python.PythonInterpreter` — restricted
-  Python over the kit's callables (the original execution path)
+  Python over the tools's callables (the original execution path)
 - :class:`~lackpy.interpreters.ast_select.AstSelectInterpreter` — a
   single CSS selector evaluated against source code via pluckit,
   rendered as markdown with the selector as the heading identifier

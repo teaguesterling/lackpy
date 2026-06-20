@@ -10,9 +10,9 @@
         - run_program
         - delegate
         - create
-        - kit_info
-        - kit_list
-        - kit_create
+        - profile_info
+        - profile_list
+        - profile_create
         - toolbox_list
         - docs_index
         - resolve_doc
@@ -49,7 +49,7 @@
 
 ## Toolbox
 
-::: lackpy.kit.toolbox.Toolbox
+::: lackpy.tools.toolbox.Toolbox
     options:
       members:
         - register_provider
@@ -60,17 +60,17 @@
         - list_tools
         - format_description
 
-::: lackpy.kit.toolbox.ToolSpec
+::: lackpy.tools.toolbox.ToolSpec
 
-::: lackpy.kit.toolbox.ArgSpec
+::: lackpy.tools.toolbox.ArgSpec
 
 ---
 
 ## Kit registry
 
-::: lackpy.kit.registry.resolve_kit
+::: lackpy.tools.registry.resolve_tools
 
-::: lackpy.kit.registry.ResolvedKit
+::: lackpy.tools.registry.ResolvedTools
 
 ---
 
@@ -151,7 +151,7 @@
 
 ## Policy sources
 
-::: lackpy.policy.sources.kit.KitPolicySource
+::: lackpy.policy.sources.tools.ToolsPolicySource
     options:
       members:
         - resolve

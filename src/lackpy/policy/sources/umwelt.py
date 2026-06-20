@@ -30,8 +30,8 @@ def _split_patterns(value: Any) -> tuple[str, ...]:
 class UmweltPolicySource:
     """Restricts tools based on umwelt's resolved capability-taxon policy.
 
-    Highest priority. Can restrict the kit's tool set but cannot
-    grant tools the kit doesn't have. Kit resolution (S1) is the
+    Highest priority. Can restrict the tools's tool set but cannot
+    grant tools the tools doesn't have. Kit resolution (S1) is the
     ground truth for what's available.
     """
 

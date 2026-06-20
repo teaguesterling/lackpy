@@ -3,7 +3,7 @@
 !!! warning "This page describes intent, not current behavior"
     Everything below is **maintainer design direction** — where lackpy is *heading*,
     not what the code does today. For how lackpy actually works now, see
-    [Architecture](../concepts/architecture.md), [Kits & Toolbox](../concepts/kits.md),
+    [Architecture](../concepts/architecture.md), [Kits & Toolbox](../concepts/profiles.md),
     and the [Inference Pipeline](../concepts/inference.md). Treat this page as a
     roadmap to bias decisions toward; flag where current structure diverges.
 
@@ -33,7 +33,7 @@ the runtime uses*, rather than kits being separate components.
 
 !!! info "Current state"
     Kits are still **load-bearing today**: kit resolution is stage 1 of the
-    `delegate()` pipeline, `kit_default` is a config field, and `kit` is a parameter
+    `delegate()` pipeline, `profile_default` is a config field, and `kit` is a parameter
     on `delegate` / `run_program`. The generalization above is a goal, not done.
 
 ### 3. Literate lackpy as a first-class capability

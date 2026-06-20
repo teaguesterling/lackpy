@@ -4,8 +4,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from lackpy.infer.strategy import OneShotStrategy, SPMStrategy, STRATEGIES
 from lackpy.infer.context import StepContext
-from lackpy.kit.toolbox import ToolSpec
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.toolbox import ToolSpec
+from lackpy.tools.registry import ResolvedTools
 from lackpy.lang.grader import Grade
 
 
@@ -14,7 +14,7 @@ def _make_kit():
         "find_files": ToolSpec(name="find_files", provider="builtin", description="Find files",
                          args=[], returns="list[str]", grade_w=1, effects_ceiling=1),
     }
-    return ResolvedKit(
+    return ResolvedTools(
         tools=tools, callables={n: lambda *a: None for n in tools},
         grade=Grade(w=1, d=1), description="find_files(pattern) -> list[str]: Find files",
     )
@@ -42,7 +42,7 @@ class TestOneShotStrategy:
         provider = _make_provider("files = find_files('**/*.py')\nlen(files)")
         strategy = OneShotStrategy()
         step = strategy.build(provider)
-        ctx = StepContext(intent="find python files", kit=_make_kit())
+        ctx = StepContext(intent="find python files", tools=_make_kit())
         ctx = await step.run(ctx)
         assert ctx.current.valid is True
         assert "find_files" in ctx.current.program
@@ -52,7 +52,7 @@ class TestOneShotStrategy:
         provider = _make_provider("import os\nglob('**/*.py')")
         strategy = OneShotStrategy()
         step = strategy.build(provider)
-        ctx = StepContext(intent="find files", kit=_make_kit())
+        ctx = StepContext(intent="find files", tools=_make_kit())
         ctx = await step.run(ctx)
         # Cleanup should strip the import
         assert ctx.current.valid is True
@@ -90,7 +90,7 @@ class TestSPMStrategy:
 
         strategy = SPMStrategy()
         step = strategy.build(provider)
-        ctx = StepContext(intent="find python files and count them", kit=_make_kit())
+        ctx = StepContext(intent="find python files and count them", tools=_make_kit())
         ctx = await step.run(ctx)
 
         assert ctx.current.valid is True

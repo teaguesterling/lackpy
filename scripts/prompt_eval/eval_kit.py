@@ -13,12 +13,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from lackpy.kit.registry import ResolvedKit
-from lackpy.kit.toolbox import ArgSpec, ToolSpec
+from lackpy.tools.registry import ResolvedTools
+from lackpy.tools.toolbox import ArgSpec, ToolSpec
 from lackpy.lang.grader import compute_grade
 
 
-def build_eval_kit(base_dir: Path) -> ResolvedKit:
+def build_eval_kit(base_dir: Path) -> ResolvedTools:
     """Construct the eval kit rooted at `base_dir`.
 
     The kit exposes four tools:
@@ -124,7 +124,7 @@ def build_eval_kit(base_dir: Path) -> ResolvedKit:
         "",
         "All paths are relative to the workspace root (use 'app.py', not 'toybox/app.py').",
     ]
-    return ResolvedKit(
+    return ResolvedTools(
         tools=tools,
         callables=callables,
         grade=grade,

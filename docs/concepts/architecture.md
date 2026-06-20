@@ -8,7 +8,7 @@ hard-coded tool names in lackpy. Each source *discovers* full `ToolSpec`s and
 `default_tools.toml` builtins), MCP-discovered tools (`[mcp_servers]` + ingested
 host configs), and virtual/harness tools (`[[virtual_tools]]`). Sources merge by
 precedence (local config/builtins > own MCP > host); a shadowed name is dropped.
-See [Kits & Toolbox](kits.md) and the [Tool Sources RFC](../design/tool-sources.md).
+See [Kits & Toolbox](profiles.md) and the [Tool Sources RFC](../design/tool-sources.md).
 
 ## Pipeline
 
@@ -20,7 +20,7 @@ source-populated toolbox above):
   │  LackpyService                                                 │
   │                                                                │
   │  1. Kit resolution                                             │
-  │     kit name/list/dict ──► ResolvedKit (tools + callables)    │
+  │     kit name/list/dict ──► ResolvedTools (tools + callables)    │
   │                                                                │
   │  2. Inference                                                  │
   │     intent + namespace_desc                                    │
@@ -59,9 +59,9 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.lang.grader` | `Grade(w, d)` computation from tool specs | none |
 | `lackpy.lang.rules` | Built-in custom rule callables | `ast` |
 | `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpyctl spec`) | `lang.grammar` |
-| `lackpy.kit.toolbox` | `Toolbox` — tool registry; `add_source()` merge with precedence + resolution | none |
-| `lackpy.kit.registry` | `resolve_kit()` — name/list/dict → `ResolvedKit` | `kit.toolbox`, `lang.grader` |
-| `lackpy.kit.providers.python` | Resolve a `ToolSpec` to an importable function | `importlib` |
+| `lackpy.tools.toolbox` | `Toolbox` — tool registry; `add_source()` merge with precedence + resolution | none |
+| `lackpy.tools.registry` | `resolve_tools()` — name/list/dict → `ResolvedTools` | `kit.toolbox`, `lang.grader` |
+| `lackpy.tools.providers.python` | Resolve a `ToolSpec` to an importable function | `importlib` |
 | `lackpy.sources.base` | `ToolSource` protocol — discover (own the names) + resolve | `kit.toolbox` |
 | `lackpy.sources.config` | `ConfigToolSource` — tools fully defined in config; `default_tools.toml` ships the builtins as data | `kit.providers.python` |
 | `lackpy.sources.virtual` | `VirtualToolSource` — harness-provided tools (`[[virtual_tools]]` + resolver) | `kit.toolbox` |
@@ -142,6 +142,6 @@ Every kit has a `Grade(w, d)` computed from its tools:
 | `w` | World coupling | 0 = pure, 1 = pinhole read, 2 = scoped exec, 3 = scoped write |
 | `d` | Effects ceiling | 0–3, higher = more side effects |
 
-`compute_grade()` takes the element-wise maximum across all tools in the kit. The grade is reported in every `delegate()` result and `kit_info()` response so callers can decide whether a given kit is acceptable for their context.
+`compute_grade()` takes the element-wise maximum across all tools in the kit. The grade is reported in every `delegate()` result and `profile_info()` response so callers can decide whether a given kit is acceptable for their context.
 
 Tool authors set `grade_w` and `effects_ceiling` on their `ToolSpec`. The built-in tools default to `grade_w=3, effects_ceiling=3` (conservative).

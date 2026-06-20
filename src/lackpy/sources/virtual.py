@@ -15,7 +15,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable
 
-from ..kit.toolbox import ArgSpec, ToolSpec
+from ..tools.toolbox import ArgSpec, ToolSpec
 
 # A harness resolver maps a tool name to its current implementation, or None if
 # the harness does not currently offer it.

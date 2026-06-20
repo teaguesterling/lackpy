@@ -2,7 +2,7 @@
 
 An interpreter takes a program string (whose shape depends on the interpreter's
 language — restricted Python, a CSS selector, a fluent chain expression, etc.)
-and executes it against a resolved kit. Interpreters validate before execution
+and executes it against a resolved tools. Interpreters validate before execution
 and enforce restrictions during execution; the exact enforcement mechanism is
 the interpreter's own concern.
 
@@ -32,14 +32,14 @@ class ExecutionContext:
     """Execution context passed to an interpreter.
 
     Bundles everything an interpreter needs to validate and run a program:
-    the resolved kit (tools, callables, allowed names), named parameters,
+    the resolved tools (tools, callables, allowed names), named parameters,
     the workspace base directory, and an optional ``config`` dict for
     interpreter-specific knobs (e.g. ``mode="full"`` for ast-select).
 
     Attributes:
-        kit: The resolved kit the program runs against. Interpreters that
+        tools: The resolved tools the program runs against. Interpreters that
             don't use kits (e.g. ast-select) may ignore this, though most
-            will read the kit's description or tool list for validation.
+            will read the tools's description or tool list for validation.
         params: Named parameter values injected into the execution
             namespace. Interpreter-specific; the restricted-Python
             interpreter uses this for parameter substitution.
@@ -54,7 +54,7 @@ class ExecutionContext:
             the interpreter; restricted-Python uses them for AST checks.
     """
 
-    kit: Any = None
+    tools: Any = None
     params: dict[str, Any] = field(default_factory=dict)
     base_dir: Path = field(default_factory=Path.cwd)
     config: dict[str, Any] = field(default_factory=dict)

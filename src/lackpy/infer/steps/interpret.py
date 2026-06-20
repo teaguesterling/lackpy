@@ -53,7 +53,7 @@ class InterpretStep:
 
     def _make_exec_ctx(self, ctx: StepContext) -> ExecutionContext:
         return ExecutionContext(
-            kit=ctx.kit,
+            tools=ctx.tools,
             config=self._config,
             base_dir=self._base_dir,
         )
@@ -97,7 +97,7 @@ class InterpretStep:
             ctx.programs.append(ProgramState(
                 program="",
                 intent=ctx.intent,
-                kit=ctx.kit,
+                tools=ctx.tools,
                 valid=False,
                 errors=["no program to interpret"],
                 trace=StepTrace(
@@ -133,7 +133,7 @@ class InterpretStep:
         ctx.programs.append(ProgramState(
             program=output_text if result.success else program,
             intent=ctx.intent,
-            kit=ctx.kit,
+            tools=ctx.tools,
             valid=result.success,
             errors=[result.error] if result.error else [],
             trace=StepTrace(

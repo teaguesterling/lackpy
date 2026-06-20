@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable
 
-from ...kit.toolbox import ArgSpec, ToolSpec
+from ...tools.toolbox import ArgSpec, ToolSpec
 from ...run.bridge import mark_async
 from .client import McpClient, McpServerSpec
 from .grade import grade_from_annotations

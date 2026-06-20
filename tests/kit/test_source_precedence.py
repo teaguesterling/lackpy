@@ -1,6 +1,6 @@
 """Toolbox source precedence + drop-with-log collision merge (RFC 0002 §4, 3a)."""
 
-from lackpy.kit.toolbox import ToolSpec, Toolbox
+from lackpy.tools.toolbox import ToolSpec, Toolbox
 
 
 class _Src:

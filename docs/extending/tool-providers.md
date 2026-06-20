@@ -49,7 +49,7 @@ from typing import Any, Callable
 import urllib.request
 import json
 
-from lackpy.kit.toolbox import ToolSpec
+from lackpy.tools.toolbox import ToolSpec
 
 
 class RestProvider:
@@ -94,7 +94,7 @@ class RestProvider:
 ```python
 import asyncio
 from lackpy.service import LackpyService
-from lackpy.kit.toolbox import ToolSpec, ArgSpec
+from lackpy.tools.toolbox import ToolSpec, ArgSpec
 from my_project.providers.rest_provider import RestProvider
 
 async def main():
@@ -120,7 +120,7 @@ async def main():
 
     result = await svc.delegate(
         "search for open bugs",
-        kit=["search_issues"],
+        profile=["search_issues"],
     )
     print(result["output"])
 

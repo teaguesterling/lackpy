@@ -2,9 +2,9 @@
 
 import pytest
 
-from lackpy.kit.registry import resolve_kit, ResolvedKit
-from lackpy.kit.toolbox import Toolbox, ToolSpec, ArgSpec
-from lackpy.kit.providers.builtin import BuiltinProvider
+from lackpy.tools.registry import resolve_tools, ResolvedTools
+from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
+from lackpy.tools.providers.builtin import BuiltinProvider
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def toolbox():
 
 class TestResolveFromList:
     def test_resolves_explicit_list(self, toolbox):
-        kit = resolve_kit(["read_file", "find_files"], toolbox)
+        kit = resolve_tools(["read_file", "find_files"], toolbox)
         assert "read_file" in kit.tools
         assert "find_files" in kit.tools
         assert "edit_file" not in kit.tools
@@ -30,7 +30,7 @@ class TestResolveFromList:
 
     def test_unknown_tool_in_list_raises(self, toolbox):
         with pytest.raises(KeyError) as ei:
-            resolve_kit(["read_file", "nonexistent"], toolbox)
+            resolve_tools(["read_file", "nonexistent"], toolbox)
         # Actionable failure: names the tool, explains where tools come from, and
         # lists what's available — not a bare "Unknown tool".
         msg = str(ei.value)
@@ -43,34 +43,34 @@ class TestResolveFromName:
     def test_resolves_predefined_kit(self, toolbox, tmp_path):
         kit_file = tmp_path / "debug.kit"
         kit_file.write_text("---\nname: debug\ndescription: Read-only\n---\nread_file\nfind_files\n")
-        kit = resolve_kit("debug", toolbox, kits_dir=tmp_path)
+        kit = resolve_tools("debug", toolbox, kits_dir=tmp_path)
         assert "read_file" in kit.tools
         assert "find_files" in kit.tools
         assert "edit_file" not in kit.tools
 
     def test_unknown_kit_name_raises(self, toolbox, tmp_path):
         with pytest.raises(FileNotFoundError):
-            resolve_kit("nonexistent", toolbox, kits_dir=tmp_path)
+            resolve_tools("nonexistent", toolbox, kits_dir=tmp_path)
 
 
 class TestResolveFromDict:
     def test_resolves_dict_mapping(self, toolbox):
-        kit = resolve_kit({"reader": "read_file", "finder": "find_files"}, toolbox)
+        kit = resolve_tools({"reader": "read_file", "finder": "find_files"}, toolbox)
         assert "reader" in kit.tools
         assert "finder" in kit.tools
         assert kit.grade.w == 1
 
 
-class TestResolvedKitDescription:
+class TestResolvedToolsDescription:
     def test_has_namespace_description(self, toolbox):
-        kit = resolve_kit(["read_file"], toolbox)
+        kit = resolve_tools(["read_file"], toolbox)
         assert "read_file" in kit.description
         assert len(kit.description) > 0
 
 
 class TestExtraTools:
     def test_extra_tools_merged_into_list_kit(self, toolbox):
-        kit = resolve_kit(["read_file"], toolbox, extra_tools=["edit_file"])
+        kit = resolve_tools(["read_file"], toolbox, extra_tools=["edit_file"])
         assert "read_file" in kit.tools
         assert "edit_file" in kit.tools
         assert kit.grade.w == 3
@@ -78,29 +78,29 @@ class TestExtraTools:
     def test_extra_tools_merged_into_named_kit(self, toolbox, tmp_path):
         kit_file = tmp_path / "readonly.kit"
         kit_file.write_text("---\nname: readonly\n---\nread_file\n")
-        kit = resolve_kit("readonly", toolbox, kits_dir=tmp_path, extra_tools=["edit_file"])
+        kit = resolve_tools("readonly", toolbox, kits_dir=tmp_path, extra_tools=["edit_file"])
         assert "read_file" in kit.tools
         assert "edit_file" in kit.tools
 
     def test_extra_tools_duplicate_ignored(self, toolbox):
-        kit = resolve_kit(["read_file", "find_files"], toolbox, extra_tools=["read_file"])
+        kit = resolve_tools(["read_file", "find_files"], toolbox, extra_tools=["read_file"])
         assert len(kit.tools) == 2
 
     def test_extra_tools_standalone_with_none_kit(self, toolbox):
-        kit = resolve_kit(None, toolbox, extra_tools=["read_file"])
+        kit = resolve_tools(None, toolbox, extra_tools=["read_file"])
         assert "read_file" in kit.tools
         assert len(kit.tools) == 1
 
     def test_extra_tools_unknown_raises(self, toolbox):
         with pytest.raises(KeyError):
-            resolve_kit(["read_file"], toolbox, extra_tools=["nonexistent"])
+            resolve_tools(["read_file"], toolbox, extra_tools=["nonexistent"])
 
     def test_none_kit_string_resolves_empty(self, toolbox):
-        kit = resolve_kit("none", toolbox)
+        kit = resolve_tools("none", toolbox)
         assert len(kit.tools) == 0
 
     def test_none_kit_string_with_extra_tools(self, toolbox):
-        kit = resolve_kit("none", toolbox, extra_tools=["read_file"])
+        kit = resolve_tools("none", toolbox, extra_tools=["read_file"])
         assert "read_file" in kit.tools
         assert len(kit.tools) == 1
 
@@ -108,4 +108,4 @@ class TestExtraTools:
 class TestQuartermaster:
     def test_none_raises_not_implemented(self, toolbox):
         with pytest.raises(NotImplementedError):
-            resolve_kit(None, toolbox)
+            resolve_tools(None, toolbox)

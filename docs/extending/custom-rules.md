@@ -29,7 +29,7 @@ Rejects any `for` loop. Use this when you want programs to be purely functional 
 ```python
 from lackpy.lang.rules import no_loops
 
-result = svc.validate('for f in find_files("*.py"): print(f)', kit=["find_files"], rules=[no_loops])
+result = svc.validate('for f in find_files("*.py"): print(f)', profile=["find_files"], rules=[no_loops])
 # ValidationResult(valid=False, errors=["For-loop forbidden (line 1)"])
 ```
 
@@ -47,7 +47,7 @@ program = """
 if condition:
     result = read_file(path)
 """
-result = svc.validate(program, kit=["read_file"], rules=[rule])
+result = svc.validate(program, profile=["read_file"], rules=[rule])
 
 # Invalid — two levels deep
 program2 = """
@@ -55,7 +55,7 @@ if condition:
     if other:
         result = read_file(path)
 """
-result2 = svc.validate(program2, kit=["read_file"], rules=[rule])
+result2 = svc.validate(program2, profile=["read_file"], rules=[rule])
 # errors: ["Nesting depth 2 exceeds limit 1 (line 3)"]
 ```
 
@@ -68,7 +68,7 @@ from lackpy.lang.rules import max_calls
 
 result = svc.validate(
     'a = read_file("a")\nb = read_file("b")\nc = read_file("c")',
-    kit=["read_file"],
+    profile=["read_file"],
     rules=[max_calls(2)],
 )
 # errors: ["Too many calls: 3 exceeds limit 2"]
@@ -84,7 +84,7 @@ from lackpy.lang.rules import no_nested_calls
 # Invalid
 result = svc.validate(
     'lines = read_file(find_path("config"))',
-    kit=["read_file", "find_path"],
+    profile=["read_file", "find_path"],
     rules=[no_nested_calls],
 )
 # errors: ["Nested call at line 1: assign inner call to a variable first"]
@@ -92,7 +92,7 @@ result = svc.validate(
 # Valid equivalent
 result2 = svc.validate(
     'path = find_path("config")\nlines = read_file(path)',
-    kit=["read_file", "find_path"],
+    profile=["read_file", "find_path"],
     rules=[no_nested_calls],
 )
 ```
@@ -120,7 +120,7 @@ def no_print(tree: ast.Module) -> list[str]:
 Use it:
 
 ```python
-result = svc.validate('print("hello")', kit=[], rules=[no_print])
+result = svc.validate('print("hello")', profile=[], rules=[no_print])
 # ValidationResult(valid=False, errors=["print() is not allowed (line 1)"])
 ```
 
@@ -181,7 +181,7 @@ Use it:
 ```python
 result = await svc.delegate(
     "find all Python files and count them",
-    kit=["find_files"],
+    profile=["find_files"],
     rules=[only_tools({"find_files"})],
 )
 ```
@@ -196,16 +196,16 @@ Rules can be passed anywhere `extra_rules` is accepted:
 
 ```python
 # validate
-svc.validate(program, kit="filesystem", rules=[no_loops, max_calls(10)])
+svc.validate(program, profile="filesystem", rules=[no_loops, max_calls(10)])
 
 # generate (enforced during dispatch — invalid generations are retried)
-await svc.generate(intent, kit="filesystem", rules=[no_nested_calls])
+await svc.generate(intent, profile="filesystem", rules=[no_nested_calls])
 
 # run_program (validated before execution)
-await svc.run_program(program, kit="filesystem", rules=[max_depth(2)])
+await svc.run_program(program, profile="filesystem", rules=[max_depth(2)])
 
 # delegate (enforced during dispatch and before execution)
-await svc.delegate(intent, kit="filesystem", rules=[no_loops, no_nested_calls])
+await svc.delegate(intent, profile="filesystem", rules=[no_loops, no_nested_calls])
 ```
 
 Rules passed to `delegate` are forwarded to both `InferenceDispatcher.generate` (so the LLM is prompted with valid constraints and retried on rule failures) and to the pre-execution `validate` call.

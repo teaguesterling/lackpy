@@ -39,8 +39,8 @@ class GenerateDSLStep:
 
     async def run(self, ctx: StepContext) -> StepContext:
         start = time.perf_counter()
-        namespace_desc = ctx.kit.description
-        example_pool = collect_example_pool(list(ctx.kit.tools.values()))
+        namespace_desc = ctx.tools.description
+        example_pool = collect_example_pool(list(ctx.tools.tools.values()))
         system_prompt = build_system_prompt(
             namespace_desc,
             ctx.params_desc,
@@ -66,7 +66,7 @@ class GenerateDSLStep:
         ctx.programs.append(ProgramState(
             program=program,
             intent=ctx.intent,
-            kit=ctx.kit,
+            tools=ctx.tools,
             valid=None,
             errors=[],
             trace=StepTrace(

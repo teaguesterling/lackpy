@@ -8,9 +8,10 @@ import sys
 from pathlib import Path
 
 
-def _parse_kit(kit_str: str) -> list[str]:
-    """Parse --kit argument as a list of tool names."""
-    return [k.strip() for k in kit_str.split(",")]
+def _parse_profile(profile_str: str) -> str | list[str]:
+    """Parse a profile argument: comma-separated → tool list; bare → profile name."""
+    parts = [k.strip() for k in profile_str.split(",")]
+    return parts if len(parts) > 1 else parts[0]
 
 
 def _init_config(workspace: Path, ollama_model: str, ollama_url: str = "http://localhost:11434") -> None:
@@ -34,7 +35,7 @@ plugin = "woollama"
 model = "ollama/{ollama_model}"
 base_url = "{ollama_url}/v1"
 
-[kit]
+[profile]
 default = "debug"
 
 [sandbox]
@@ -48,7 +49,7 @@ memory_mb = 512
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lackpyctl",
-        description="lackpyctl — manager for lackpy workspaces, kits, toolboxes, and templates",
+        description="lackpyctl — manager for lackpy workspaces, profiles, toolboxes, and templates",
     )
     parser.add_argument(
         "--workspace", type=Path, default=None,
@@ -68,20 +69,20 @@ def build_parser() -> argparse.ArgumentParser:
     # spec
     subparsers.add_parser("spec", help="Print language spec")
 
-    # kit
-    kit_p = subparsers.add_parser("kit", help="Manage kits")
-    kit_sub = kit_p.add_subparsers(dest="kit_command")
+    # profile
+    profile_p = subparsers.add_parser("profile", help="Manage profiles")
+    profile_sub = profile_p.add_subparsers(dest="profile_command")
 
-    kit_sub.add_parser("list", help="List available kits")
+    profile_sub.add_parser("list", help="List available profiles")
 
-    kit_info_p = kit_sub.add_parser("info", help="Show kit info")
-    kit_info_p.add_argument("name", help="Kit name or comma-separated tools")
-    kit_info_p.add_argument("--tools", nargs="+", default=None, help="Tool names")
+    profile_info_p = profile_sub.add_parser("info", help="Show profile info")
+    profile_info_p.add_argument("name", help="Profile name or comma-separated tools")
+    profile_info_p.add_argument("--tools", nargs="+", default=None, help="Tool names")
 
-    kit_create_p = kit_sub.add_parser("create", help="Create a new kit")
-    kit_create_p.add_argument("name", help="Kit name")
-    kit_create_p.add_argument("--tools", nargs="+", required=True, help="Tool names to include")
-    kit_create_p.add_argument("--description", default=None, help="Kit description")
+    profile_create_p = profile_sub.add_parser("create", help="Create a new profile / tool-set")
+    profile_create_p.add_argument("name", help="Profile name")
+    profile_create_p.add_argument("--tools", nargs="+", required=True, help="Tool names to include")
+    profile_create_p.add_argument("--description", default=None, help="Profile description")
 
     # toolbox
     toolbox_p = subparsers.add_parser("toolbox", help="Manage toolbox")
@@ -183,19 +184,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
-    if args.command == "kit":
-        if args.kit_command == "list":
-            kits = svc.profile_list()
-            print(json.dumps(kits, indent=2))
-        elif args.kit_command == "info":
-            kit = _parse_kit(args.name) if args.tools is None else args.tools
-            info = svc.profile_info(kit)
+    if args.command == "profile":
+        if args.profile_command == "list":
+            profiles = svc.profile_list()
+            print(json.dumps(profiles, indent=2))
+        elif args.profile_command == "info":
+            profile = _parse_profile(args.name) if args.tools is None else args.tools
+            info = svc.profile_info(profile)
             print(json.dumps(info, indent=2))
-        elif args.kit_command == "create":
+        elif args.profile_command == "create":
             result = svc.profile_create(args.name, args.tools, args.description)
             print(json.dumps(result, indent=2))
         else:
-            print("Usage: lackpyctl kit {list|info|create}", file=sys.stderr)
+            print("Usage: lackpyctl profile {list|info|create}", file=sys.stderr)
             return 1
         return 0
 

@@ -19,7 +19,7 @@ Implementation: a thin wrapper over :class:`PythonInterpreter`. Lackpy's
 restricted validator already allows method calls on tool return values
 without requiring the method names to be in ``allowed_names`` — only
 the entry point needs to be registered. The plucker interpreter builds
-a kit with a single entry point, ``source(code)``, that returns a real
+a tools with a single entry point, ``source(code)``, that returns a real
 :class:`pluckit.Plucker` instance. Everything after the first call is
 normal Python attribute access on live pluckit objects.
 
@@ -31,7 +31,7 @@ returns without coercing to a single shape.
 
 Tracing: only the initial ``source()`` call appears in the execution
 trace; subsequent method calls are not traced because they happen
-inside runtime Python object dispatch rather than through the kit's
+inside runtime Python object dispatch rather than through the tools's
 instrumented tool wrappers. Fluent chains are opaque to lackpy's
 tracing by design — the final result is the interesting artifact, not
 the intermediate steps.
@@ -52,8 +52,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from ..kit.registry import ResolvedKit
-from ..kit.toolbox import ArgSpec, ToolSpec
+from ..tools.registry import ResolvedTools
+from ..tools.toolbox import ArgSpec, ToolSpec
 from ..lang.grader import Grade
 from .base import DelegatingInterpreter, ExecutionContext
 from .python import PythonInterpreter
@@ -106,35 +106,35 @@ class PluckerInterpreter(DelegatingInterpreter):
         self.sub = PythonInterpreter()
 
     def transform_context(self, context: ExecutionContext) -> ExecutionContext:
-        """Run the wrapped restricted-Python interpreter against a plucker kit (``source()``
+        """Run the wrapped restricted-Python interpreter against a plucker tools (``source()``
         as the sole bare callable). Validate/execute + result annotation come from
         :class:`DelegatingInterpreter`; this is the only plucker-specific hook."""
         return self._with_plucker_kit(context)
 
     def _with_plucker_kit(self, context: ExecutionContext) -> ExecutionContext:
-        """Return a new context with a plucker-specific kit installed.
+        """Return a new context with a plucker-specific tools installed.
 
-        The kit is built fresh on each call so the default ``code``
+        The tools is built fresh on each call so the default ``code``
         from ``context.config`` is captured in the ``source`` closure.
         """
         default_code = context.config.get("code")
         extra_plugins = list(context.config.get("plugins", []))
-        kit = _build_plucker_kit(
+        tools = _build_plucker_kit(
             default_code=default_code,
             extra_plugins=extra_plugins,
         )
-        return dataclasses.replace(context, kit=kit)
+        return dataclasses.replace(context, tools=tools)
 
 
 def _build_plucker_kit(
     default_code: str | None,
     extra_plugins: list,
-) -> ResolvedKit:
-    """Construct a ResolvedKit whose ``source`` returns a live Plucker.
+) -> ResolvedTools:
+    """Construct a ResolvedTools whose ``source`` returns a live Plucker.
 
     The ``source`` callable is a closure over the default code and the
     extra plugins list, so each plucker interpreter invocation gets a
-    kit that reflects its current context.
+    tools that reflects its current context.
     """
     def source(code: str | None = None) -> Any:
         try:
@@ -179,7 +179,7 @@ def _build_plucker_kit(
         ),
     }
 
-    return ResolvedKit(
+    return ResolvedTools(
         tools=tools,
         callables={"source": source},
         grade=Grade(w=1, d=1),

@@ -27,7 +27,7 @@ class CleanupStep:
         ctx.programs.append(ProgramState(
             program=cleaned,
             intent=ctx.current.intent,
-            kit=ctx.current.kit,
+            tools=ctx.current.tools,
             valid=None,
             errors=[],
             trace=StepTrace(

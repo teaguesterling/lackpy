@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from lackpy.kit.providers.mock import MockProvider
-from lackpy.kit.providers.pluckit_tools import PLUCKIT_TOOLS
-from lackpy.kit.providers.pluckit_registration import register_pluckit_tools
-from lackpy.kit.toolbox import Toolbox
-from lackpy.kit.registry import resolve_kit
+from lackpy.tools.providers.mock import MockProvider
+from lackpy.tools.providers.pluckit_tools import PLUCKIT_TOOLS
+from lackpy.tools.providers.pluckit_registration import register_pluckit_tools
+from lackpy.tools.toolbox import Toolbox
+from lackpy.tools.registry import resolve_tools
 from lackpy.lang.validator import validate
 from lackpy.run.runner import RestrictedRunner
 
@@ -38,7 +38,7 @@ class TestPluckitRegistration:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\nfind\ncallers\ntext\naddParam\nsave\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         assert "select_code" in kit.tools
         assert "callers" in kit.tools
         assert "addParam" in kit.tools
@@ -50,7 +50,7 @@ class TestPluckitRegistration:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\ncallers\naddParam\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         desc = kit.description
         assert "select_code" in desc
         assert "callers" in desc
@@ -64,7 +64,7 @@ class TestPluckitValidation:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\ncallers\ntext\ncount\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         result = validate(
             'fns = select_code(".fn:exported")\ncount(fns)',
             allowed_names=set(kit.tools.keys()),
@@ -77,7 +77,7 @@ class TestPluckitValidation:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\naddParam\nsave\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         result = validate(
             'fns = select_code(".fn:exported")\nresult = addParam(fns, "timeout: int = 30")\nsave(result, "feat: add timeout")',
             allowed_names=set(kit.tools.keys()),
@@ -90,7 +90,7 @@ class TestPluckitValidation:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\ncallers\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         result = validate(
             'fns = select_code(".fn")\ndelete_everything(fns)',
             allowed_names=set(kit.tools.keys()),
@@ -105,7 +105,7 @@ class TestPluckitExecution:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\ncallers\ncount\nnames\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         runner = RestrictedRunner()
         result = runner.run(
             'fns = select_code(".fn#validate_token")\ncaller_fns = callers(fns)\nnames(caller_fns)',
@@ -121,7 +121,7 @@ class TestPluckitExecution:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\naddParam\nsave\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         runner = RestrictedRunner()
         result = runner.run(
             'fns = select_code(".fn:exported")\nmutated = addParam(fns, "timeout: int = 30")\nsave(mutated, "feat: add timeout")',
@@ -137,7 +137,7 @@ class TestPluckitExecution:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\nsimilar\ncompare\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         runner = RestrictedRunner()
         result = runner.run(
             'fns = select_code(".fn#validate_token")\nsim = similar(fns, 0.7)\ncompare(sim)',
@@ -152,7 +152,7 @@ class TestPluckitExecution:
         (kits_dir / "pluckit.kit").write_text(
             "---\nname: pluckit\n---\nselect_code\nhistory\nat\ndiff\n"
         )
-        kit = resolve_kit("pluckit", toolbox, kits_dir=kits_dir)
+        kit = resolve_tools("pluckit", toolbox, kits_dir=kits_dir)
         runner = RestrictedRunner()
         result = runner.run(
             'fn = select_code(".fn#validate_token")\nold = at(fn, "last_green_build")\ndiff(fn, old)',

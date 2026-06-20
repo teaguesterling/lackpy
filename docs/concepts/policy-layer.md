@@ -31,7 +31,7 @@ A `TypedDict` describing the request. Only `kit` is required — all other field
 
 | Field | Type | VSM Level | Description |
 |-------|------|-----------|-------------|
-| `kit` | `ResolvedKit` | S1 (operations) | Tools available for this request |
+| `kit` | `ResolvedTools` | S1 (operations) | Tools available for this request |
 | `principal` | `Principal` | S5 (identity) | Who is requesting — human, agent, or subagent |
 | `model` | `ModelSpec` | S4 (inferencer) | Model name, temperature, tier |
 | `session_id` | `str` | S2 (coordination) | Lets sources correlate internal state |
@@ -47,7 +47,7 @@ The PolicyLayer itself is S3 (control). S0 (environment/world) is source-interna
 Sources are registered with a priority. The chain runs lowest-priority-first, threading an immutable `PolicyResult` through each source:
 
 ```
-1. KitPolicySource (0)       → establishes allowed_tools, grade, namespace_desc
+1. ToolsPolicySource (0)       → establishes allowed_tools, grade, namespace_desc
 2. KibitzerPolicySource (50)  → adds hints, docs, coaching
 3. UmweltPolicySource (100)   → restricts tools, adds per-tool constraints
 ```
@@ -70,9 +70,9 @@ result = layer.resolve({"kit": resolved_kit})
 
 ## Built-in sources
 
-### KitPolicySource (priority 0)
+### ToolsPolicySource (priority 0)
 
-Always present. Translates a `ResolvedKit` into the baseline `PolicyResult` — sets `allowed_tools` from the kit's tool names, `grade` from the kit's aggregate grade, and `namespace_desc` from the toolbox's formatted descriptions.
+Always present. Translates a `ResolvedTools` into the baseline `PolicyResult` — sets `allowed_tools` from the kit's tool names, `grade` from the kit's aggregate grade, and `namespace_desc` from the toolbox's formatted descriptions.
 
 Never sets `resolved=True`.
 
@@ -101,8 +101,8 @@ Optional. Queries umwelt's `PolicyEngine` for capability-taxon entries. Can **re
 
 These are separate concerns that happen at different points:
 
-1. **Kit resolution** (`resolve_kit()`) turns a kit name, tool list, or dict into a `ResolvedKit` with tools, callables, and grade. This is S1 — what's operationally available.
+1. **Kit resolution** (`resolve_tools()`) turns a kit name, tool list, or dict into a `ResolvedTools` with tools, callables, and grade. This is S1 — what's operationally available.
 
 2. **Policy resolution** (`PolicyLayer.resolve()`) takes the resolved kit and determines what constraints apply. This is S3 — what's allowed given the current context.
 
-The service calls `resolve_kit()` first, then passes the result into the policy layer via `PolicyContext["kit"]`.
+The service calls `resolve_tools()` first, then passes the result into the policy layer via `PolicyContext["kit"]`.
