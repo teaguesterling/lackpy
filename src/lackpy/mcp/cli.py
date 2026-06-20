@@ -42,8 +42,8 @@ def mcp_init(
 
     existed = name in servers
     servers[name] = {
-        "command": "lackpyctl",
-        "args": ["mcp", "serve", "--workspace", str(workspace.resolve())],
+        "command": "lackpy-mcp",
+        "args": ["--workspace", str(workspace.resolve())],
     }
 
     mcp_file.write_text(json.dumps(data, indent=2) + "\n")
@@ -58,3 +58,21 @@ def mcp_serve(workspace: Path) -> int:
     set_workspace(workspace)
     mcp.run(transport="stdio")
     return 0
+
+
+def mcp_main(argv: list[str] | None = None) -> int:
+    """Console-script entry: ``lackpy-mcp [--workspace DIR]`` — serve on stdio.
+
+    A stable, dedicated launch surface for external consumers (e.g. a woollama
+    ``mcp.json`` backend that spawns lackpy): one command, no subcommand. Equivalent
+    to ``lackpyctl mcp serve``. Also reachable as ``lackpy mcp`` for convenience.
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="lackpy-mcp",
+        description="Start the lackpy MCP server on stdio transport.")
+    p.add_argument("--workspace", type=Path, default=None,
+                   help="Workspace directory (default: cwd)")
+    args = p.parse_args(argv)
+    return mcp_serve(args.workspace or Path.cwd())
