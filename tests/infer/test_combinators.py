@@ -3,14 +3,14 @@
 import pytest
 from lackpy.infer.combinators import Sequence, Fallback
 from lackpy.infer.context import StepContext, ProgramState, StepTrace
-from lackpy.kit.toolbox import ToolSpec
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.toolbox import ToolSpec
+from lackpy.tools.registry import ResolvedTools
 from lackpy.lang.grader import Grade
 
 
 def _make_kit():
     tools = {"read_file": ToolSpec(name="read_file", provider="builtin", description="Read file")}
-    return ResolvedKit(
+    return ResolvedTools(
         tools=tools,
         callables={n: lambda *a: None for n in tools},
         grade=Grade(w=1, d=1),
@@ -26,7 +26,7 @@ def _make_trace(step_name="test"):
 
 
 def _make_ctx():
-    return StepContext(intent="test", kit=_make_kit())
+    return StepContext(intent="test", tools=_make_kit())
 
 
 class _AppendStep:
@@ -37,7 +37,7 @@ class _AppendStep:
 
     async def run(self, ctx: StepContext) -> StepContext:
         ctx.programs.append(ProgramState(
-            program=self._program, intent=ctx.intent, kit=ctx.kit,
+            program=self._program, intent=ctx.intent, tools=ctx.tools,
             valid=self._valid, errors=[], trace=_make_trace(self.name),
         ))
         return ctx

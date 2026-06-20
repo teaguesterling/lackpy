@@ -1,6 +1,6 @@
 """Phase 1 — Profile / resolve_profile (RFC 0002 increment 5, additive).
 
-Covers the core promise: a profile composes the existing resolve_kit (a kit is the
+Covers the core promise: a profile composes the existing resolve_tools (a kit is the
 degenerate, tools-only profile), carries per-task inference + the language/execution
 axes, falls back to service defaults, and parses from [profiles.<name>] config.
 """
@@ -9,9 +9,9 @@ from __future__ import annotations
 import pytest
 
 from lackpy.config import load_config
-from lackpy.kit.providers.builtin import BuiltinProvider
-from lackpy.kit.registry import resolve_kit
-from lackpy.kit.toolbox import ArgSpec, ToolSpec, Toolbox
+from lackpy.tools.providers.builtin import BuiltinProvider
+from lackpy.tools.registry import resolve_tools
+from lackpy.tools.toolbox import ArgSpec, ToolSpec, Toolbox
 from lackpy.profiles import Profile, ResolvedProfile, resolve_profile
 
 
@@ -31,9 +31,9 @@ def toolbox():
 
 class TestDegenerate:
     def test_tools_only_profile_equals_a_kit(self, toolbox):
-        # The core invariant: a tools-only profile resolves to exactly what resolve_kit does.
+        # The core invariant: a tools-only profile resolves to exactly what resolve_tools does.
         rp = resolve_profile(["read_file", "find_files"], toolbox)
-        rk = resolve_kit(["read_file", "find_files"], toolbox)
+        rk = resolve_tools(["read_file", "find_files"], toolbox)
         assert isinstance(rp, ResolvedProfile)
         assert set(rp.tools.tools) == set(rk.tools)
         assert rp.grade == rk.grade                 # grade passthrough = the tools' grade
@@ -84,7 +84,7 @@ class TestByName:
         assert rp.model == "ollama/qwen2.5-coder:3b" and rp.mode == "1-shot"
 
     def test_str_not_a_named_profile_is_a_toolset(self, toolbox):
-        # A str that isn't a configured profile is a bare tool-set value → resolve_kit
+        # A str that isn't a configured profile is a bare tool-set value → resolve_tools
         # treats it as a kit/profile file name (here: missing → FileNotFoundError).
         with pytest.raises(FileNotFoundError):
             resolve_profile("not-a-profile", toolbox, profiles={"fast": {}}, kits_dir=None)
@@ -123,9 +123,9 @@ execution = "literate"
 
 def test_profile_file_extension_loads(tmp_path, toolbox):
     """Regression (review #2): a .profile file is listed AND loadable, like .kit."""
-    from lackpy.kit.registry import resolve_kit
+    from lackpy.tools.registry import resolve_tools
     kits = tmp_path / "kits"
     kits.mkdir()
     (kits / "fs.profile").write_text("---\nname: fs\n---\nread_file\nfind_files\n")
-    rt = resolve_kit("fs", toolbox, kits_dir=kits)
+    rt = resolve_tools("fs", toolbox, kits_dir=kits)
     assert set(rt.tools) == {"read_file", "find_files"}

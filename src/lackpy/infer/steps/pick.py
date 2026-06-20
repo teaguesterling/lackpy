@@ -6,7 +6,7 @@ import ast
 import time
 
 from ..context import ProgramState, StepContext, StepTrace
-from ...kit.registry import ResolvedKit
+from ...tools.registry import ResolvedTools
 from ...lang.grader import Grade
 
 
@@ -48,7 +48,7 @@ class PickStep:
     """Analyze the current program to derive which tools it needs.
 
     Pushes a new ProgramState with the same program text but a
-    derived kit containing only the tools the program actually uses.
+    derived tools containing only the tools the program actually uses.
     Does not require an LLM -- pure AST and pattern analysis.
     """
 
@@ -59,12 +59,12 @@ class PickStep:
             return ctx
 
         start = time.perf_counter()
-        available = ctx.kit.tools
+        available = ctx.tools.tools
         used = _extract_tool_names(ctx.current.program, available)
 
-        # Build derived kit with only the tools that were used
+        # Build derived tools with only the tools that were used
         derived_tools = {name: spec for name, spec in available.items() if name in used}
-        derived_callables = {name: cb for name, cb in ctx.kit.callables.items() if name in used}
+        derived_callables = {name: cb for name, cb in ctx.tools.callables.items() if name in used}
 
         if derived_tools:
             max_w = max(s.grade_w for s in derived_tools.values())
@@ -72,7 +72,7 @@ class PickStep:
         else:
             max_w, max_d = 0, 0
 
-        derived_kit = ResolvedKit(
+        derived_kit = ResolvedTools(
             tools=derived_tools,
             callables=derived_callables,
             grade=Grade(w=max_w, d=max_d),
@@ -87,7 +87,7 @@ class PickStep:
         ctx.programs.append(ProgramState(
             program=ctx.current.program,
             intent=ctx.current.intent,
-            kit=derived_kit,
+            tools=derived_kit,
             valid=None,
             errors=[],
             trace=StepTrace(

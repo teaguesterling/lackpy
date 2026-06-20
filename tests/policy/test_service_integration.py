@@ -6,9 +6,9 @@ import pytest
 from pathlib import Path
 
 from lackpy.service import LackpyService
-from lackpy.kit.toolbox import ToolSpec, ArgSpec
+from lackpy.tools.toolbox import ToolSpec, ArgSpec
 from lackpy.policy.layer import PolicyLayer
-from lackpy.policy.sources.kit import KitPolicySource
+from lackpy.policy.sources.tools import ToolsPolicySource
 
 
 @pytest.fixture
@@ -32,12 +32,12 @@ class TestServiceHasPolicyLayer:
 
     def test_kit_source_always_registered(self, service):
         source_names = [s.name for s in service._policy._sources]
-        assert "kit" in source_names
+        assert "tools" in source_names
 
     def test_policy_resolves_with_kit(self, service):
-        from lackpy.kit.registry import resolve_kit
-        kit = resolve_kit(["read_file"], service.toolbox)
-        result = service._policy.resolve({"kit": kit})
+        from lackpy.tools.registry import resolve_tools
+        tools = resolve_tools(["read_file"], service.toolbox)
+        result = service._policy.resolve({"tools": tools})
         assert "read_file" in result.allowed_tools
         assert result.grade.w == 1
 

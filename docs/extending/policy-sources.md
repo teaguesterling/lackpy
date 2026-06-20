@@ -76,8 +76,8 @@ svc = LackpyService()
 svc._policy.add_source(RoleBasedSource(permissions_client))
 
 # Now resolve with a principal
-from lackpy.kit.registry import resolve_kit
-kit = resolve_kit(["read_file", "edit_file", "write_file"], svc.toolbox)
+from lackpy.tools.registry import resolve_tools
+kit = resolve_tools(["read_file", "edit_file", "write_file"], svc.toolbox)
 
 result = svc._policy.resolve({
     "kit": kit,
@@ -112,7 +112,7 @@ Context fields other than `kit` are optional. Check with `context.get("principal
 
 | Range | Intended use | Examples |
 |-------|-------------|----------|
-| 0–10 | Baseline sources | KitPolicySource |
+| 0–10 | Baseline sources | ToolsPolicySource |
 | 20–40 | Enrichment / analytics | Logging, metrics collection |
 | 50–60 | Coaching / hints | KibitzerPolicySource |
 | 70–90 | Access control | RBAC, feature flags, rate limiting |
@@ -128,13 +128,13 @@ Test sources in isolation by constructing a `PolicyResult` and `PolicyContext` d
 
 ```python
 from lackpy.policy import PolicyResult, PolicyContext
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.registry import ResolvedTools
 from lackpy.lang.grader import Grade
 
 
 def test_my_source_restricts_tools():
     source = MySource(config={"blocked": ["edit_file"]})
-    kit = ResolvedKit(tools={}, callables={}, grade=Grade(w=0, d=0), description="")
+    kit = ResolvedTools(tools={}, callables={}, grade=Grade(w=0, d=0), description="")
     current = PolicyResult(allowed_tools=frozenset({"read_file", "edit_file"}))
 
     result = source.resolve(current, {"kit": kit})

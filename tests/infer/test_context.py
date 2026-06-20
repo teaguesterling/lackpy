@@ -2,14 +2,14 @@
 
 import pytest
 from lackpy.infer.context import StepContext, ProgramState, StepTrace
-from lackpy.kit.registry import ResolvedKit
-from lackpy.kit.toolbox import ToolSpec
+from lackpy.tools.registry import ResolvedTools
+from lackpy.tools.toolbox import ToolSpec
 from lackpy.lang.grader import Grade
 
 
 def _make_kit(tools=None):
     tools = tools or {"read_file": ToolSpec(name="read_file", provider="builtin", description="Read file")}
-    return ResolvedKit(
+    return ResolvedTools(
         tools=tools,
         callables={n: lambda *a: None for n in tools},
         grade=Grade(w=1, d=1),
@@ -43,7 +43,7 @@ class TestProgramState:
             raw_output="find_files('**/*.py')", duration_ms=100.0,
         )
         state = ProgramState(
-            program="find_files('**/*.py')", intent="find files", kit=_make_kit(),
+            program="find_files('**/*.py')", intent="find files", tools=_make_kit(),
             valid=None, errors=[], trace=trace,
         )
         assert state.program == "find_files('**/*.py')"
@@ -56,7 +56,7 @@ class TestProgramState:
             raw_output="import glob", duration_ms=50.0,
         )
         state = ProgramState(
-            program="import glob", intent="find files", kit=_make_kit(),
+            program="import glob", intent="find files", tools=_make_kit(),
             valid=False, errors=["Forbidden AST node: Import at line 1"], trace=trace,
         )
         assert not state.valid
@@ -65,25 +65,25 @@ class TestProgramState:
 
 class TestStepContext:
     def test_create_context(self):
-        kit = _make_kit()
-        ctx = StepContext(intent="find files", kit=kit)
+        tools = _make_kit()
+        ctx = StepContext(intent="find files", tools=tools)
         assert ctx.intent == "find files"
         assert ctx.programs == []
         assert ctx.current is None
 
     def test_current_returns_last_program(self):
-        kit = _make_kit()
-        ctx = StepContext(intent="find files", kit=kit)
+        tools = _make_kit()
+        ctx = StepContext(intent="find files", tools=tools)
         trace = StepTrace(
             step_name="generate", provider_name=None, model=None,
             system_prompt=None, user_prompt=None, raw_output=None, duration_ms=0,
         )
         state1 = ProgramState(
-            program="v1", intent="find files", kit=kit,
+            program="v1", intent="find files", tools=tools,
             valid=False, errors=["err"], trace=trace,
         )
         state2 = ProgramState(
-            program="v2", intent="find files", kit=kit,
+            program="v2", intent="find files", tools=tools,
             valid=True, errors=[], trace=trace,
         )
         ctx.programs.append(state1)

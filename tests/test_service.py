@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 from lackpy.service import LackpyService
-from lackpy.kit.toolbox import ToolSpec, ArgSpec
+from lackpy.tools.toolbox import ToolSpec, ArgSpec
 
 
 @pytest.fixture

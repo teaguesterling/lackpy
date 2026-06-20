@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from typing import Any
 
-from lackpy.kit.toolbox import ARGSPEC_TYPE_MAP, resolve_python_type
+from lackpy.tools.toolbox import ARGSPEC_TYPE_MAP, resolve_python_type
 
 
 class TestArgspecTypeMap:

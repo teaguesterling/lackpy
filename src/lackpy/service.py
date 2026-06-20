@@ -14,14 +14,14 @@ from .infer.dispatch import InferenceDispatcher, GenerationResult
 from .infer.prompt import format_params_description
 from .infer.providers.rules import RulesProvider
 from .infer.providers.templates import TemplatesProvider
-from .kit.providers.builtin import BuiltinProvider
-from .kit.providers.python import PythonProvider
-from .kit.registry import ResolvedKit
+from .tools.providers.builtin import BuiltinProvider
+from .tools.providers.python import PythonProvider
+from .tools.registry import ResolvedTools
 from .profiles import Profile, ResolvedProfile, resolve_profile
-from .kit.toolbox import Toolbox
+from .tools.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
-from .policy.sources.kit import KitPolicySource
+from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.bridge import AsyncBridge, is_async_callable
@@ -110,7 +110,7 @@ class LackpyService:
         self._llm_model: str | None = None
         self._init_inference_providers()
         self._policy = PolicyLayer()
-        self._policy.add_source(KitPolicySource(self.toolbox))
+        self._policy.add_source(ToolsPolicySource(self.toolbox))
         self._kibitzer: Any = None
         self._init_kibitzer()
 
@@ -309,7 +309,7 @@ class LackpyService:
 
         Composes the source-populated toolbox + the configured ``[profiles.<name>]``
         tables; ``None`` → the configured default profile. The degenerate (tools-only)
-        case is exactly the former kit resolution — ``.tools`` is the same ResolvedKit.
+        case is exactly the former kit resolution — ``.tools`` is the same ResolvedTools.
         """
         if profile is None:
             profile = self._config.profile_default
@@ -317,7 +317,7 @@ class LackpyService:
         return resolve_profile(profile, self.toolbox, profiles=self._config.profiles,
                                kits_dir=kits_dir, extra_tools=extra_tools)
 
-    def _gate_kit(self, resolved: ResolvedKit) -> ResolvedKit:
+    def _gate_tools(self, resolved: ResolvedTools) -> ResolvedTools:
         """Generation gate: drop virtual tools the harness can't currently supply.
 
         Keeps the model from composing against an absent tool. (The call-time
@@ -337,13 +337,13 @@ class LackpyService:
         grade = compute_grade(
             {n: {"grade_w": s.grade_w, "effects_ceiling": s.effects_ceiling} for n, s in tools.items()}
         )
-        return ResolvedKit(
+        return ResolvedTools(
             tools=tools, callables=callables, grade=grade,
             description=self.toolbox.format_description(list(tools.keys())),
             docs=resolved.docs,
         )
 
-    def _resolve_params(self, params: dict[str, Any] | None, kit: ResolvedKit) -> tuple[dict[str, Any], str | None, set[str]]:
+    def _resolve_params(self, params: dict[str, Any] | None, resolved: ResolvedTools) -> tuple[dict[str, Any], str | None, set[str]]:
         if not params:
             return {}, None, set()
         values: dict[str, Any] = {}
@@ -352,7 +352,7 @@ class LackpyService:
                 values[name] = val["value"]
             else:
                 values[name] = val
-        collisions = set(values.keys()) & (set(kit.tools.keys()) | ALLOWED_BUILTINS)
+        collisions = set(values.keys()) & (set(resolved.tools.keys()) | ALLOWED_BUILTINS)
         if collisions:
             raise ValueError(f"Param names collide with tool/builtin names: {collisions}")
         params_desc = format_params_description(params)
@@ -412,7 +412,7 @@ class LackpyService:
         from .infer.context import StepContext
 
         rp = self._resolve_profile(profile, extra_tools=extra_tools)
-        resolved = self._gate_kit(rp.tools)
+        resolved = self._gate_tools(rp.tools)
         _, params_desc, param_names = self._resolve_params(params, resolved)
 
         # Inference selections: an explicit call arg wins over the profile's; both fall
@@ -440,7 +440,7 @@ class LackpyService:
                 provider = dispatcher.get_provider()
             step = strategy.build(provider)
             ctx = StepContext(
-                intent=intent, kit=resolved,
+                intent=intent, tools=resolved,
                 params_desc=params_desc, extra_rules=rules,
             )
             ctx = await step.run(ctx)
@@ -466,7 +466,7 @@ class LackpyService:
         # model) — no more reflecting `getattr(provider, "_model")`.
         from .policy.types import PolicyContext, ModelSpec
         model_name = effective_model or self._llm_model
-        policy_context: PolicyContext = {"kit": resolved}
+        policy_context: PolicyContext = {"tools": resolved}
         if model_name:
             policy_context["model"] = ModelSpec(name=model_name)
         # Thread the active operating mode (if kibitzer is tracking one) so umwelt's
@@ -543,7 +543,7 @@ class LackpyService:
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
-        resolved = self._gate_kit(self._resolve_profile(profile, extra_tools=extra_tools).tools)
+        resolved = self._gate_tools(self._resolve_profile(profile, extra_tools=extra_tools).tools)
         param_values, _, param_names = self._resolve_params(params, resolved)
         allowed = set(resolved.tools.keys()) | param_names
         validation = validate(program, allowed_names=allowed, extra_rules=rules)
@@ -585,7 +585,7 @@ class LackpyService:
         """
         start = time.perf_counter()
         rp = self._resolve_profile(profile, extra_tools=extra_tools)
-        resolved = self._gate_kit(rp.tools)
+        resolved = self._gate_tools(rp.tools)
         # The model actually used (per-call override or the profile's, else configured) —
         # the same value `generate` uses, so kibitzer logs the real model, not a reflection.
         effective_model = (model if model is not None else rp.model) or self._llm_model
@@ -596,7 +596,7 @@ class LackpyService:
             self._kibitzer.register_context({
                 "source": "lackpy",
                 "intent": intent,
-                "kit": list(resolved.tools.keys()),
+                "tools": list(resolved.tools.keys()),
             })
 
         if _program_override:

@@ -2,8 +2,8 @@
 
 import pytest
 
-from lackpy.kit.toolbox import Toolbox, ToolSpec, ArgSpec
-from lackpy.kit.providers.builtin import BuiltinProvider
+from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
+from lackpy.tools.providers.builtin import BuiltinProvider
 
 
 @pytest.fixture

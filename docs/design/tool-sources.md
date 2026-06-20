@@ -105,7 +105,7 @@ wins*: user config `[[tools]]` (20) > shipped defaults/builtins (10) > own
 `[mcp_servers]` (5) > host configs (4, descending per file so the earlier file wins,
 floored at 1). Equal precedence → the later-added source wins (this is how a user
 `[[tools]]` entry overrides a default of the same name). Directly-`register_tool`'d
-tools use `inf` (always authoritative). The resolved name set feeds `KitPolicySource`
+tools use `inf` (always authoritative). The resolved name set feeds `ToolsPolicySource`
 and `format_description` unchanged.
 
 ## 5. The sync↔async bridge (centerpiece, deferred)
@@ -199,7 +199,7 @@ Invariants (ordering canonical; exact integers the maintainer's call): external 
 raises **w**; destructiveness/non-idempotence raises **d**; **config override always
 wins**. Do not mix partial MCP annotation defaults with the mapping — any missing hint
 ⇒ conservative. Derived grades land on the `ToolSpec` and feed `compute_grade` →
-`ResolvedKit.grade` → `KitPolicySource` → kibitzer with **zero downstream change**.
+`ResolvedTools.grade` → `ToolsPolicySource` → kibitzer with **zero downstream change**.
 
 ## 7. Virtual / harness-provided tools (implemented)
 
@@ -224,7 +224,7 @@ through `make_traced` like any failure).
 Three trust tiers, explicit: **config/python** (arbitrary import/exec; trusted because
 auditable local source; highest precedence) > **MCP** (remote, opaque; conservative
 grade; provenance-tracked so a future `McpPolicySource` can gate host-config tools
-tighter) > **virtual** (trust follows the harness). The grade → `KitPolicySource` →
+tighter) > **virtual** (trust follows the harness). The grade → `ToolsPolicySource` →
 kibitzer chain is unchanged; new sources plug in by populating grades correctly.
 
 ## 9. Open questions

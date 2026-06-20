@@ -8,12 +8,12 @@ import pytest
 
 from lackpy.policy.layer import PolicyLayer
 from lackpy.policy.types import PolicyResult, PolicyContext
-from lackpy.policy.sources.kit import KitPolicySource
+from lackpy.policy.sources.tools import ToolsPolicySource
 from lackpy.policy.sources.kibitzer import KibitzerPolicySource
 from lackpy.policy.sources.umwelt import UmweltPolicySource
-from lackpy.kit.registry import ResolvedKit, resolve_kit
-from lackpy.kit.toolbox import Toolbox, ToolSpec, ArgSpec
-from lackpy.kit.providers.builtin import BuiltinProvider
+from lackpy.tools.registry import ResolvedTools, resolve_tools
+from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
+from lackpy.tools.providers.builtin import BuiltinProvider
 from lackpy.lang.grader import Grade
 from lackpy.infer.context import StepContext, ProgramState, StepTrace
 
@@ -76,11 +76,11 @@ class TestStandaloneConfig:
     """Kit source only — no Kibitzer, no umwelt."""
 
     def test_kit_only(self, toolbox):
-        kit = resolve_kit(["read_file", "find_files"], toolbox)
+        tools = resolve_tools(["read_file", "find_files"], toolbox)
         layer = PolicyLayer()
-        layer.add_source(KitPolicySource(toolbox))
+        layer.add_source(ToolsPolicySource(toolbox))
 
-        result = layer.resolve({"kit": kit})
+        result = layer.resolve({"tools": tools})
         assert result.allowed_tools == frozenset({"read_file", "find_files"})
         assert result.grade.w == 1
         assert result.namespace_desc is not None
@@ -92,33 +92,33 @@ class TestKitPlusKibitzer:
     """Kit + Kibitzer coaching."""
 
     def test_kibitzer_enriches_without_changing_tools(self, toolbox):
-        kit = resolve_kit(["read_file", "find_files"], toolbox)
+        tools = resolve_tools(["read_file", "find_files"], toolbox)
         layer = PolicyLayer()
-        layer.add_source(KitPolicySource(toolbox))
+        layer.add_source(ToolsPolicySource(toolbox))
         layer.add_source(KibitzerPolicySource(
             FakeKibitzerSession(coaching="\n- Always use find_files before read_file"),
         ))
 
-        result = layer.resolve({"kit": kit})
+        result = layer.resolve({"tools": tools})
         assert result.allowed_tools == frozenset({"read_file", "find_files"})
         assert "Always use find_files before read_file" in result.namespace_desc
 
     def test_kibitzer_adds_hints_on_failure(self, toolbox):
-        kit = resolve_kit(["read_file"], toolbox)
-        history = StepContext(intent="read a file", kit=kit)
+        tools = resolve_tools(["read_file"], toolbox)
+        history = StepContext(intent="read a file", tools=tools)
         history.programs.append(ProgramState(
-            program="open('test.txt')", intent="read a file", kit=kit,
+            program="open('test.txt')", intent="read a file", tools=tools,
             valid=False, errors=["Forbidden name: 'open'"],
             trace=_make_step_trace(),
         ))
 
         layer = PolicyLayer()
-        layer.add_source(KitPolicySource(toolbox))
+        layer.add_source(ToolsPolicySource(toolbox))
         layer.add_source(KibitzerPolicySource(
             FakeKibitzerSession(hints=["Use read_file() instead of open()"]),
         ))
 
-        result = layer.resolve({"kit": kit, "history": history})
+        result = layer.resolve({"tools": tools, "history": history})
         assert "Use read_file() instead of open()" in result.prompt_hints
         assert result.allowed_tools == frozenset({"read_file"})
 
@@ -127,10 +127,10 @@ class TestFullStack:
     """Kit + Kibitzer + umwelt."""
 
     def test_umwelt_restricts_after_kibitzer_enriches(self, toolbox):
-        kit = resolve_kit(["read_file", "find_files", "edit_file"], toolbox)
+        tools = resolve_tools(["read_file", "find_files", "edit_file"], toolbox)
 
         layer = PolicyLayer()
-        layer.add_source(KitPolicySource(toolbox))
+        layer.add_source(ToolsPolicySource(toolbox))
         layer.add_source(KibitzerPolicySource(
             FakeKibitzerSession(coaching="\n- Be careful with edit_file"),
         ))
@@ -140,24 +140,24 @@ class TestFullStack:
             {"entity_id": "edit_file", "properties": {"allow": "false"}},
         ])))
 
-        result = layer.resolve({"kit": kit})
+        result = layer.resolve({"tools": tools})
         assert result.allowed_tools == frozenset({"read_file", "find_files"})
         assert "edit_file" in result.denied_tools
         assert "Be careful with edit_file" in result.namespace_desc
         assert result.grade.w == 3
 
     def test_umwelt_cannot_add_tools_beyond_kit(self, toolbox):
-        kit = resolve_kit(["read_file"], toolbox)
+        tools = resolve_tools(["read_file"], toolbox)
 
         layer = PolicyLayer()
-        layer.add_source(KitPolicySource(toolbox))
+        layer.add_source(ToolsPolicySource(toolbox))
         layer.add_source(UmweltPolicySource(FakePolicyEngine([
             {"entity_id": "read_file", "properties": {"allow": "true"}},
             {"entity_id": "edit_file", "properties": {"allow": "true"}},
             {"entity_id": "bash", "properties": {"allow": "true"}},
         ])))
 
-        result = layer.resolve({"kit": kit})
+        result = layer.resolve({"tools": tools})
         assert result.allowed_tools == frozenset({"read_file"})
 
 
@@ -165,16 +165,16 @@ class TestKitPlusUmwelt:
     """Kit + umwelt, no Kibitzer."""
 
     def test_umwelt_restricts_kit(self, toolbox):
-        kit = resolve_kit(["read_file", "edit_file"], toolbox)
+        tools = resolve_tools(["read_file", "edit_file"], toolbox)
 
         layer = PolicyLayer()
-        layer.add_source(KitPolicySource(toolbox))
+        layer.add_source(ToolsPolicySource(toolbox))
         layer.add_source(UmweltPolicySource(FakePolicyEngine([
             {"entity_id": "read_file", "properties": {"allow": "true", "max-level": "1"}},
             {"entity_id": "edit_file", "properties": {"allow": "false"}},
         ])))
 
-        result = layer.resolve({"kit": kit})
+        result = layer.resolve({"tools": tools})
         assert result.allowed_tools == frozenset({"read_file"})
         assert "edit_file" in result.denied_tools
         assert result.tool_constraints["read_file"].max_level == 1

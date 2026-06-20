@@ -19,9 +19,9 @@ class ValidateStep:
         if ctx.current is None:
             return ctx
 
-        allowed = set(ctx.current.kit.tools.keys()) if ctx.current.kit else set()
-        if ctx.kit:
-            allowed |= set(ctx.kit.tools.keys())
+        allowed = set(ctx.current.tools.tools.keys()) if ctx.current.tools else set()
+        if ctx.tools:
+            allowed |= set(ctx.tools.tools.keys())
 
         result = validate(
             ctx.current.program,

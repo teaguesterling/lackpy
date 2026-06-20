@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..kit.providers.python import PythonProvider
-from ..kit.toolbox import ArgSpec, ToolSpec
+from ..tools.providers.python import PythonProvider
+from ..tools.toolbox import ArgSpec, ToolSpec
 
 
 class ConfigToolSource:

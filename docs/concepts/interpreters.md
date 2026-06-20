@@ -68,10 +68,10 @@ whatever the program's last expression evaluated to.
 
 ```python
 from lackpy.interpreters import PythonInterpreter, ExecutionContext, run_interpreter
-from lackpy.kit.registry import resolve_kit
+from lackpy.tools.registry import resolve_tools
 
 interp = PythonInterpreter()
-kit = resolve_kit(["read_file"])
+kit = resolve_tools(["read_file"])
 ctx = ExecutionContext(profile=kit)
 result = await run_interpreter(
     interp,

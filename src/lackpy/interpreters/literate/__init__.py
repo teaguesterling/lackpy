@@ -151,8 +151,8 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
     import builtins as _builtins_mod
     ns["__builtins__"] = _builtins_mod
 
-    if context.kit:
-        for name, fn in context.kit.callables.items():
+    if context.tools:
+        for name, fn in context.tools.callables.items():
             ns[name] = fn
 
     if context.params:

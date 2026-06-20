@@ -6,7 +6,7 @@ import pytest
 
 from lackpy.policy.types import PolicyResult, PolicyContext
 from lackpy.policy.layer import PolicyLayer, PolicySource
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.registry import ResolvedTools
 from lackpy.lang.grader import Grade
 
 
@@ -33,8 +33,8 @@ class StubSource:
 
 @pytest.fixture
 def minimal_kit():
-    """A minimal ResolvedKit for context construction."""
-    return ResolvedKit(
+    """A minimal ResolvedTools for context construction."""
+    return ResolvedTools(
         tools={},
         callables={},
         grade=Grade(w=0, d=0),
@@ -59,7 +59,7 @@ class TestPolicyLayerOrdering:
         layer.add_source(StubSource("low", priority=0, transform=make_transform("low")))
         layer.add_source(StubSource("mid", priority=50, transform=make_transform("mid")))
 
-        result = layer.resolve({"kit": minimal_kit})
+        result = layer.resolve({"tools": minimal_kit})
         assert call_order == ["low", "mid", "high"]
         assert result.prompt_hints == ("low", "mid", "high")
 
@@ -77,7 +77,7 @@ class TestPolicyLayerOrdering:
         layer.add_source(StubSource("stopper", priority=50, transform=track("stopper"), mark_resolved=True))
         layer.add_source(StubSource("skipped", priority=100, transform=track("skipped")))
 
-        result = layer.resolve({"kit": minimal_kit})
+        result = layer.resolve({"tools": minimal_kit})
         assert call_order == ["first", "stopper"]
         assert "skipped" not in result.prompt_hints
         assert result.resolved is True
@@ -86,7 +86,7 @@ class TestPolicyLayerOrdering:
 class TestPolicyLayerEmpty:
     def test_no_sources_returns_empty_result(self, minimal_kit):
         layer = PolicyLayer()
-        result = layer.resolve({"kit": minimal_kit})
+        result = layer.resolve({"tools": minimal_kit})
         assert result.allowed_tools == frozenset()
         assert result.resolved is False
 
@@ -97,7 +97,7 @@ class TestPolicyLayerEmpty:
         layer = PolicyLayer()
         layer.add_source(StubSource("only", priority=0, transform=set_tools))
 
-        result = layer.resolve({"kit": minimal_kit})
+        result = layer.resolve({"tools": minimal_kit})
         assert result.allowed_tools == frozenset({"read_file"})
 
 

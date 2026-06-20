@@ -12,7 +12,7 @@ from pathlib import Path
 import lackpy.lang
 
 LANG_DIR = Path(lackpy.lang.__file__).parent
-FORBIDDEN = {"run", "kit", "policy", "infer", "service", "lackey", "prompts",
+FORBIDDEN = {"run", "tools", "policy", "infer", "service", "lackey", "prompts",
              "interpreters", "mcp", "sources", "profiles"}
 
 

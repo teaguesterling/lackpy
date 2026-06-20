@@ -20,7 +20,7 @@ source-populated toolbox above):
   │  LackpyService                                                 │
   │                                                                │
   │  1. Kit resolution                                             │
-  │     kit name/list/dict ──► ResolvedKit (tools + callables)    │
+  │     kit name/list/dict ──► ResolvedTools (tools + callables)    │
   │                                                                │
   │  2. Inference                                                  │
   │     intent + namespace_desc                                    │
@@ -59,9 +59,9 @@ Validation is also performed inside `InferenceDispatcher` after each provider at
 | `lackpy.lang.grader` | `Grade(w, d)` computation from tool specs | none |
 | `lackpy.lang.rules` | Built-in custom rule callables | `ast` |
 | `lackpy.lang.spec` | Machine-readable grammar spec (used by `lackpyctl spec`) | `lang.grammar` |
-| `lackpy.kit.toolbox` | `Toolbox` — tool registry; `add_source()` merge with precedence + resolution | none |
-| `lackpy.kit.registry` | `resolve_kit()` — name/list/dict → `ResolvedKit` | `kit.toolbox`, `lang.grader` |
-| `lackpy.kit.providers.python` | Resolve a `ToolSpec` to an importable function | `importlib` |
+| `lackpy.tools.toolbox` | `Toolbox` — tool registry; `add_source()` merge with precedence + resolution | none |
+| `lackpy.tools.registry` | `resolve_tools()` — name/list/dict → `ResolvedTools` | `kit.toolbox`, `lang.grader` |
+| `lackpy.tools.providers.python` | Resolve a `ToolSpec` to an importable function | `importlib` |
 | `lackpy.sources.base` | `ToolSource` protocol — discover (own the names) + resolve | `kit.toolbox` |
 | `lackpy.sources.config` | `ConfigToolSource` — tools fully defined in config; `default_tools.toml` ships the builtins as data | `kit.providers.python` |
 | `lackpy.sources.virtual` | `VirtualToolSource` — harness-provided tools (`[[virtual_tools]]` + resolver) | `kit.toolbox` |

@@ -49,7 +49,7 @@ Tools are registered by adding a `ToolSpec` to the `Toolbox` and ensuring a matc
 
 ```python
 from lackpy.service import LackpyService
-from lackpy.kit.toolbox import ToolSpec, ArgSpec
+from lackpy.tools.toolbox import ToolSpec, ArgSpec
 
 svc = LackpyService()
 
@@ -143,7 +143,7 @@ fails cleanly. See [Tool Sources (RFC 0002)](../design/tool-sources.md).
 
 ## Profile / tool-selection forms
 
-`resolve_kit()` accepts these kit forms:
+`resolve_tools()` accepts these kit forms:
 
 | Form | Type | Example | Behaviour |
 |------|------|---------|-----------|
@@ -161,10 +161,10 @@ All kit forms support an optional `extra_tools` parameter — a list of tool nam
 
 ```python
 # Named profile + extra tools
-kit = resolve_kit("debug", toolbox, extra_tools=["edit_file"])
+kit = resolve_tools("debug", toolbox, extra_tools=["edit_file"])
 
 # Standalone tools (no base profile)
-kit = resolve_kit("none", toolbox, extra_tools=["read_file", "find_files"])
+kit = resolve_tools("none", toolbox, extra_tools=["read_file", "find_files"])
 ```
 
 Duplicates are silently ignored. The kit grade is recomputed after merging.
@@ -243,7 +243,7 @@ grade = compute_grade({
 # Grade(w=3, d=3)
 ```
 
-This grade is attached to every `ResolvedKit` and reported in `delegate()` results. The grade is informational — lackpy does not block execution based on grade values, but callers can use it to gate access in security-sensitive contexts.
+This grade is attached to every `ResolvedTools` and reported in `delegate()` results. The grade is informational — lackpy does not block execution based on grade values, but callers can use it to gate access in security-sensitive contexts.
 
 ---
 
@@ -260,7 +260,7 @@ Tools and kits can reference markdown documentation files. These references are 
 
 2. **Kit files** have an optional `docs` frontmatter field for kit-level documentation.
 
-3. **At resolution time**, `ResolvedKit` collects all doc references (from both the kit file and individual tools) into a `docs` list.
+3. **At resolution time**, `ResolvedTools` collects all doc references (from both the kit file and individual tools) into a `docs` list.
 
 4. **Consumers query, not load**: the service exposes `docs_index()` (returns the reference map) and `resolve_doc()` (reads a specific file on demand).
 

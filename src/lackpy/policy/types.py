@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Required, TypedDict
 from types import MappingProxyType
 
 if TYPE_CHECKING:
-    from ..kit.registry import ResolvedKit
+    from ..tools.registry import ResolvedTools
     from ..infer.context import StepContext
     from ..run.trace import Trace
     from ..lang.grader import Grade
@@ -72,11 +72,11 @@ class PolicyResult:
 class PolicyContext(TypedDict, total=False):
     """Shared request context passed through the policy chain.
 
-    VSM-informed: S1 (kit), S2 (session_id), S4 (model),
+    VSM-informed: S1 (tools), S2 (session_id), S4 (model),
     S5 (principal), S3* (history, trace).
     """
 
-    kit: Required[Any]  # ResolvedKit, Any to avoid circular import
+    tools: Required[Any]  # ResolvedTools, Any to avoid circular import
     principal: Principal
     model: ModelSpec
     session_id: str

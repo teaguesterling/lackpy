@@ -18,7 +18,7 @@ from lackpy.interpreters import (
 class TestExecutionContext:
     def test_default_fields(self):
         ctx = ExecutionContext()
-        assert ctx.kit is None
+        assert ctx.tools is None
         assert ctx.params == {}
         assert ctx.config == {}
         assert ctx.extra_rules is None
@@ -26,13 +26,13 @@ class TestExecutionContext:
 
     def test_explicit_fields(self):
         ctx = ExecutionContext(
-            kit="stub",
+            tools="stub",
             params={"x": 1},
             base_dir=Path("/tmp"),
             config={"mode": "brief"},
             extra_rules=["rule"],
         )
-        assert ctx.kit == "stub"
+        assert ctx.tools == "stub"
         assert ctx.params == {"x": 1}
         assert ctx.base_dir == Path("/tmp")
         assert ctx.config == {"mode": "brief"}

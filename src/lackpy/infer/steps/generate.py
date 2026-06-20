@@ -14,8 +14,8 @@ from ..sanitize import sanitize_output
 class GenerateStep:
     """Generate a lackpy-constrained program from intent.
 
-    Uses the provider's generate() method with the kit's namespace
-    description as the system prompt context. When the kit's tools
+    Uses the provider's generate() method with the tools's namespace
+    description as the system prompt context. When the tools's tools
     carry tagged examples, retrieval-augmented prompting selects the
     most relevant ones for the current intent.
     """
@@ -27,8 +27,8 @@ class GenerateStep:
 
     async def run(self, ctx: StepContext) -> StepContext:
         start = time.perf_counter()
-        namespace_desc = ctx.kit.description
-        example_pool = collect_example_pool(list(ctx.kit.tools.values()))
+        namespace_desc = ctx.tools.description
+        example_pool = collect_example_pool(list(ctx.tools.tools.values()))
         system_prompt = build_system_prompt(
             namespace_desc,
             ctx.params_desc,
@@ -55,7 +55,7 @@ class GenerateStep:
         ctx.programs.append(ProgramState(
             program=program,
             intent=ctx.intent,
-            kit=ctx.kit,
+            tools=ctx.tools,
             valid=None,
             errors=[],
             trace=StepTrace(

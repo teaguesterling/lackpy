@@ -6,7 +6,7 @@ import pytest
 
 from lackpy.policy.types import PolicyResult, PolicyContext
 from lackpy.policy.sources.kibitzer import KibitzerPolicySource
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.registry import ResolvedTools
 from lackpy.lang.grader import Grade
 from lackpy.infer.context import StepContext, ProgramState, StepTrace
 
@@ -36,7 +36,7 @@ class FakeKibitzerSession:
 
 @pytest.fixture
 def empty_kit():
-    return ResolvedKit(
+    return ResolvedTools(
         tools={}, callables={}, grade=Grade(w=0, d=0), description="",
     )
 
@@ -61,7 +61,7 @@ class TestKibitzerPolicySourceBasic:
             allowed_tools=frozenset({"read_file"}),
             namespace_desc="tools: read_file",
         )
-        context: PolicyContext = {"kit": empty_kit}
+        context: PolicyContext = {"tools": empty_kit}
         result = source.resolve(current, context)
         assert result.allowed_tools == frozenset({"read_file"})
         assert result.namespace_desc == "tools: read_file"
@@ -70,14 +70,14 @@ class TestKibitzerPolicySourceBasic:
     def test_never_modifies_allowed_tools(self, empty_kit):
         session = FakeKibitzerSession(hints=["use read_file instead"])
         source = KibitzerPolicySource(session)
-        history = StepContext(intent="test", kit=empty_kit)
+        history = StepContext(intent="test", tools=empty_kit)
         history.programs.append(ProgramState(
-            program="open('f')", intent="test", kit=empty_kit,
+            program="open('f')", intent="test", tools=empty_kit,
             valid=False, errors=["Forbidden name: 'open'"],
             trace=_make_step_trace(),
         ))
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
-        context: PolicyContext = {"kit": empty_kit, "history": history}
+        context: PolicyContext = {"tools": empty_kit, "history": history}
         result = source.resolve(current, context)
         assert result.allowed_tools == frozenset({"read_file"})
 
@@ -86,42 +86,42 @@ class TestKibitzerPolicySourceHints:
     def test_adds_hints_on_failure(self, empty_kit):
         session = FakeKibitzerSession(hints=["use read_file instead of open"])
         source = KibitzerPolicySource(session)
-        history = StepContext(intent="test", kit=empty_kit)
+        history = StepContext(intent="test", tools=empty_kit)
         history.programs.append(ProgramState(
-            program="open('f')", intent="test", kit=empty_kit,
+            program="open('f')", intent="test", tools=empty_kit,
             valid=False, errors=["Forbidden name: 'open'"],
             trace=_make_step_trace(),
         ))
         current = PolicyResult(allowed_tools=frozenset({"read_file"}))
-        context: PolicyContext = {"kit": empty_kit, "history": history}
+        context: PolicyContext = {"tools": empty_kit, "history": history}
         result = source.resolve(current, context)
         assert "use read_file instead of open" in result.prompt_hints
 
     def test_adds_doc_context(self, empty_kit):
         session = FakeKibitzerSession(doc_context="Signature: read_file(path: str) -> str")
         source = KibitzerPolicySource(session)
-        history = StepContext(intent="test", kit=empty_kit)
+        history = StepContext(intent="test", tools=empty_kit)
         history.programs.append(ProgramState(
-            program="open('f')", intent="test", kit=empty_kit,
+            program="open('f')", intent="test", tools=empty_kit,
             valid=False, errors=["Forbidden name: 'open'"],
             trace=_make_step_trace(),
         ))
         current = PolicyResult()
-        context: PolicyContext = {"kit": empty_kit, "history": history}
+        context: PolicyContext = {"tools": empty_kit, "history": history}
         result = source.resolve(current, context)
         assert "Signature: read_file(path: str) -> str" in result.docs
 
     def test_no_hints_on_valid_program(self, empty_kit):
         session = FakeKibitzerSession(hints=["should not appear"])
         source = KibitzerPolicySource(session)
-        history = StepContext(intent="test", kit=empty_kit)
+        history = StepContext(intent="test", tools=empty_kit)
         history.programs.append(ProgramState(
-            program="x = 1", intent="test", kit=empty_kit,
+            program="x = 1", intent="test", tools=empty_kit,
             valid=True, errors=[],
             trace=_make_step_trace(),
         ))
         current = PolicyResult()
-        context: PolicyContext = {"kit": empty_kit, "history": history}
+        context: PolicyContext = {"tools": empty_kit, "history": history}
         result = source.resolve(current, context)
         assert result.prompt_hints == ()
 
@@ -131,7 +131,7 @@ class TestKibitzerPolicySourceCoaching:
         session = FakeKibitzerSession(coaching="\n- Never use open()")
         source = KibitzerPolicySource(session)
         current = PolicyResult(namespace_desc="tools: read_file")
-        context: PolicyContext = {"kit": empty_kit}
+        context: PolicyContext = {"tools": empty_kit}
         result = source.resolve(current, context)
         assert result.namespace_desc == "tools: read_file\n- Never use open()"
 
@@ -139,7 +139,7 @@ class TestKibitzerPolicySourceCoaching:
         session = FakeKibitzerSession(coaching="\n- coaching")
         source = KibitzerPolicySource(session)
         current = PolicyResult(namespace_desc=None)
-        context: PolicyContext = {"kit": empty_kit}
+        context: PolicyContext = {"tools": empty_kit}
         result = source.resolve(current, context)
         assert result.namespace_desc is None
 
@@ -154,6 +154,6 @@ class TestKibitzerPolicySourceCoaching:
 
         source = KibitzerPolicySource(BareSession())
         current = PolicyResult(namespace_desc="tools: read_file")
-        context: PolicyContext = {"kit": empty_kit}
+        context: PolicyContext = {"tools": empty_kit}
         result = source.resolve(current, context)  # must not raise
         assert result.namespace_desc == "tools: read_file"

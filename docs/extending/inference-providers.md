@@ -114,7 +114,7 @@ async def main():
     result = await svc.delegate(intent, profile=kit)
     if result["success"]:
         # Warm the cache for next time
-        resolved = svc._resolve_kit(kit)
+        resolved = svc._resolve_tools(kit)
         cache.store(intent, resolved.description, result["program"])
 
     print(result["output"])

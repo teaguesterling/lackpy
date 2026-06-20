@@ -43,7 +43,7 @@ def test_no_forbidden_list():
 
 from lackpy.infer.retrieval import Example
 from lackpy.infer.prompt import collect_example_pool
-from lackpy.kit.toolbox import ToolSpec
+from lackpy.tools.toolbox import ToolSpec
 
 
 def test_no_examples_without_pool():

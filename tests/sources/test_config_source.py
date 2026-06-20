@@ -2,7 +2,7 @@
 
 import pytest
 
-from lackpy.kit.toolbox import Toolbox
+from lackpy.tools.toolbox import Toolbox
 from lackpy.sources.config import ConfigToolSource
 
 DEFS = [

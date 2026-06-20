@@ -34,7 +34,7 @@ class SolveStep:
 
     async def run(self, ctx: StepContext) -> StepContext:
         start = time.perf_counter()
-        namespace_desc = ctx.kit.description
+        namespace_desc = ctx.tools.description
         system_prompt = _SOLVE_SYSTEM_PROMPT.format(namespace_desc=namespace_desc)
 
         raw = await self._provider.generate(ctx.intent, system_prompt)
@@ -48,7 +48,7 @@ class SolveStep:
         ctx.programs.append(ProgramState(
             program=program,
             intent=ctx.intent,
-            kit=ctx.kit,
+            tools=ctx.tools,
             valid=None,
             errors=[],
             trace=StepTrace(

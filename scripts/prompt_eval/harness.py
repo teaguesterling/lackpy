@@ -23,7 +23,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from lackpy.kit.registry import ResolvedKit
+from lackpy.tools.registry import ResolvedTools
 
 from .eval_kit import build_eval_kit
 from .intents import Intent
@@ -84,7 +84,7 @@ def _namespace_desc_for(interpreter: str, toybox_dir: Path) -> str:
     if cache_key in _NAMESPACE_DESC_CACHE:
         return _NAMESPACE_DESC_CACHE[cache_key]
     if interpreter == "python":
-        kit: ResolvedKit = build_eval_kit(toybox_dir)
+        kit: ResolvedTools = build_eval_kit(toybox_dir)
         desc = kit.description
     else:
         desc = f"(interpreter={interpreter}; see prompt variant for syntax reference)"
