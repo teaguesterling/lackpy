@@ -96,10 +96,15 @@ class KitFileMetadata:
 def _load_kit_file(name: str, kits_dir: Path | None) -> KitFileMetadata:
     if kits_dir is None:
         kits_dir = Path(".lackpy/kits")
-    kit_file = kits_dir / f"{name}.kit"
-    if not kit_file.exists():
-        raise FileNotFoundError(f"Kit file not found: {kit_file}")
-    text = kit_file.read_text()
+    # Prefer .profile; fall back to legacy .kit (both are listed by profile_list, so
+    # both must resolve).
+    tools_file = kits_dir / f"{name}.profile"
+    if not tools_file.exists():
+        tools_file = kits_dir / f"{name}.kit"
+    if not tools_file.exists():
+        raise FileNotFoundError(
+            f"Profile/tool-set file not found: {kits_dir / f'{name}.profile'} (or .kit)")
+    text = tools_file.read_text()
     lines = text.strip().split("\n")
     in_frontmatter = False
     tool_names = []

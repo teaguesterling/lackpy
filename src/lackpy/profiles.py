@@ -117,7 +117,10 @@ def resolve_profile(
     - any tool-selection value (``str`` tool/tool-set name, ``list``, ``dict``, ``None``) —
       treated as the **degenerate, tools-only profile** ("a kit is a profile").
 
-    Inference fields the profile leaves unset fall back to ``defaults`` (the service config).
+    Inference fields the profile leaves unset fall back to ``defaults`` **only when a caller
+    passes it** — an optional convenience. The service does *not* pass ``defaults``: it
+    leaves them ``None`` so the global provider list / ``inference_mode`` supply the effective
+    model/mode downstream (keeping the unset-profile path zero-overhead).
     ``extra_tools`` is a runtime addition merged on top of the profile's own ``extra_tools``
     (the harness/CLI adding tools beyond the profile's declared set). Tool resolution, grade,
     policy, and validation go through the existing machinery untouched.

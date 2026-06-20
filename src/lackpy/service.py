@@ -584,7 +584,11 @@ class LackpyService:
             RuntimeError: If all inference providers fail to produce a valid program.
         """
         start = time.perf_counter()
-        resolved = self._gate_kit(self._resolve_profile(profile, extra_tools=extra_tools).tools)
+        rp = self._resolve_profile(profile, extra_tools=extra_tools)
+        resolved = self._gate_kit(rp.tools)
+        # The model actually used (per-call override or the profile's, else configured) —
+        # the same value `generate` uses, so kibitzer logs the real model, not a reflection.
+        effective_model = (model if model is not None else rp.model) or self._llm_model
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
 
         # Kibitzer: register context for this delegation
@@ -650,17 +654,11 @@ class LackpyService:
                 )
             # Report generation outcome with extended fields
             interp_name = getattr(interpreter, "name", None) if interpreter else None
-            # Extract model name from the provider that produced the result
-            model_name = None
-            for p in self._inference_providers:
-                if p.name == gen_result.provider_name:
-                    model_name = getattr(p, "_model", None)
-                    break
             self._kibitzer.report_generation({
                 "intent": intent,
                 "program": gen_result.program,
                 "provider": gen_result.provider_name,
-                "model": model_name,
+                "model": effective_model,
                 "correction_attempts": gen_result.correction_attempts,
                 "correction_strategy": gen_result.correction_strategy,
                 "success": exec_result.success,
