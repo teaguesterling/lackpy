@@ -53,11 +53,26 @@ def _get_service() -> LackpyService:
 async def delegate(intent: str, profile: str | list[str] | dict | None = None,
                    params: dict[str, Any] | None = None, rules: list[str] | None = None,
                    extra_tools: list[str] | None = None) -> dict:
-    """Generate a restricted program from a natural-language intent and run it, returning
-    the result. Use for a self-contained, multi-step mechanical task (read/transform/
-    compose tools). `profile` selects the tool set + model; omit it for the default."""
-    return await _get_service().delegate(intent, profile=profile, params=params,
-                                         rules=rules, extra_tools=extra_tools)
+    """Generate a restricted program from a natural-language intent and run it. Use for a
+    self-contained, multi-step mechanical task (read/transform/compose tools).
+
+    `profile` selects the tool set + model and is one of: a profile NAME (a configured
+    `[profiles.<name>]` entry or a `.profile`/`.kit` file), a LIST of tool names, or an
+    alias→tool MAP. Omit for the default profile. Returns a lean result (success, output,
+    grade, program, tools-called); call `run_program` if you need the full step trace.
+    """
+    r = await _get_service().delegate(intent, profile=profile, params=params,
+                                      rules=rules, extra_tools=extra_tools)
+    return {
+        "success": r.get("success"),
+        "output": r.get("output"),
+        "error": r.get("error"),
+        "grade": r.get("grade"),
+        "program": r.get("program"),
+        "generation_tier": r.get("generation_tier"),
+        "total_time_ms": r.get("total_time_ms"),
+        "tools_called": [s.get("tool") for s in r.get("trace", [])],
+    }
 
 
 @mcp.tool(annotations=_READ_ONLY)
