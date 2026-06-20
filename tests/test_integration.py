@@ -43,7 +43,7 @@ def service(workspace):
 class TestTemplateDelegate:
     @pytest.mark.asyncio
     async def test_read_file_via_template(self, service):
-        result = await service.delegate("read the file hello.txt", kit="debug")
+        result = await service.delegate("read the file hello.txt", profile="debug")
         assert result["success"]
         assert result["generation_tier"] == "templates"
         assert result["output"] == "hello world"
@@ -53,7 +53,7 @@ class TestTemplateDelegate:
 class TestRulesDelegate:
     @pytest.mark.asyncio
     async def test_read_file_via_rules(self, service):
-        result = await service.delegate("read file hello.txt", kit=["read_file"])
+        result = await service.delegate("read file hello.txt", profile=["read_file"])
         assert result["success"]
         assert result["output"] == "hello world"
 
@@ -61,7 +61,7 @@ class TestRulesDelegate:
 class TestRunProgram:
     @pytest.mark.asyncio
     async def test_run_with_glob(self, service):
-        result = await service.run_program("files = find_files('src/*.py')\nlen(files)", kit=["find_files"])
+        result = await service.run_program("files = find_files('src/*.py')\nlen(files)", profile=["find_files"])
         assert result.success
         assert result.output == 1
 
@@ -71,7 +71,7 @@ class TestCreate:
     async def test_create_template(self, service):
         result = await service.create(
             "content = read_file('{path}')\nlen(content)",
-            kit=["read_file"], name="file-length", pattern="how long is {path}",
+            profile=["read_file"], name="file-length", pattern="how long is {path}",
         )
         assert result["success"]
         assert Path(result["path"]).exists()
@@ -79,12 +79,12 @@ class TestCreate:
 
 class TestKitManagement:
     def test_kit_list(self, service):
-        kits = service.kit_list()
+        kits = service.profile_list()
         assert any(k["name"] == "debug" for k in kits)
 
     def test_kit_create_and_info(self, service):
-        service.kit_create("readonly", ["read_file", "find_files"], "Read-only tools")
-        info = service.kit_info("readonly")
+        service.profile_create("readonly", ["read_file", "find_files"], "Read-only tools")
+        info = service.profile_info("readonly")
         assert "read_file" in info["tools"]
         assert info["grade"]["w"] == 1
 
@@ -92,6 +92,6 @@ class TestKitManagement:
 class TestParamsIntegration:
     @pytest.mark.asyncio
     async def test_run_with_params(self, service):
-        result = await service.run_program("len(content)", kit=["read_file"], params={"content": "test string"})
+        result = await service.run_program("len(content)", profile=["read_file"], params={"content": "test string"})
         assert result.success
         assert result.output == 11

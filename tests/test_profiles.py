@@ -119,3 +119,13 @@ execution = "literate"
     assert "fast" in cfg.profiles and "notebook" in cfg.profiles
     assert cfg.profiles["fast"]["model"] == "ollama/qwen2.5-coder:3b"
     assert cfg.profiles["notebook"]["execution"] == "literate"
+
+
+def test_profile_file_extension_loads(tmp_path, toolbox):
+    """Regression (review #2): a .profile file is listed AND loadable, like .kit."""
+    from lackpy.kit.registry import resolve_kit
+    kits = tmp_path / "kits"
+    kits.mkdir()
+    (kits / "fs.profile").write_text("---\nname: fs\n---\nread_file\nfind_files\n")
+    rt = resolve_kit("fs", toolbox, kits_dir=kits)
+    assert set(rt.tools) == {"read_file", "find_files"}

@@ -185,14 +185,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "kit":
         if args.kit_command == "list":
-            kits = svc.kit_list()
+            kits = svc.profile_list()
             print(json.dumps(kits, indent=2))
         elif args.kit_command == "info":
             kit = _parse_kit(args.name) if args.tools is None else args.tools
-            info = svc.kit_info(kit)
+            info = svc.profile_info(kit)
             print(json.dumps(info, indent=2))
         elif args.kit_command == "create":
-            result = svc.kit_create(args.name, args.tools, args.description)
+            result = svc.profile_create(args.name, args.tools, args.description)
             print(json.dumps(result, indent=2))
         else:
             print("Usage: lackpyctl kit {list|info|create}", file=sys.stderr)

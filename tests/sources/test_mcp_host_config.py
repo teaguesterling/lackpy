@@ -50,7 +50,7 @@ async def test_service_ingests_host_config_end_to_end(tmp_path):
     try:
         names = {t["name"] for t in svc.toolbox_list()}
         assert {"echo", "add"} <= names
-        res = await svc.run_program("r = echo(text='hi')\nr", kit=["echo"])
+        res = await svc.run_program("r = echo(text='hi')\nr", profile=["echo"])
         assert res.success, res.error
         assert res.output == "hi"
     finally:

@@ -41,14 +41,14 @@ class TestKibitzerAvailable:
 
     @pytest.mark.asyncio
     async def test_delegate_with_kibitzer(self, service):
-        result = await service.delegate("read file test.txt", kit=["read_file"])
+        result = await service.delegate("read file test.txt", profile=["read_file"])
         assert result["success"]
         # Kibitzer should have tracked the read call
         assert result["output"] == "hello"
 
     @pytest.mark.asyncio
     async def test_delegate_returns_kibitzer_suggestions(self, service):
-        result = await service.delegate("read file test.txt", kit=["read_file"])
+        result = await service.delegate("read file test.txt", profile=["read_file"])
         # suggestions key may or may not be present depending on kibitzer state
         # but the delegate should not crash
         assert result["success"]
@@ -60,5 +60,5 @@ class TestKibitzerGracefulDegradation:
         (tmp_path / "test.txt").write_text("hello")
         svc = LackpyService(workspace=tmp_path)
         # Should not crash — kibitzer init may fail gracefully
-        result = svc.validate("x = read_file('test.txt')\nlen(x)", kit=["read_file"])
+        result = svc.validate("x = read_file('test.txt')\nlen(x)", profile=["read_file"])
         assert result.valid

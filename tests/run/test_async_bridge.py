@@ -51,7 +51,7 @@ async def test_async_tool_runs_through_bridge(tmp_path):
         return bridge.call_sync(_ainc(x))
 
     svc.toolbox.add_source(_FuncSource(_spec("ainc", "x"), proxy))
-    res = await svc.run_program("y = ainc(1)\ny", kit=["ainc"])
+    res = await svc.run_program("y = ainc(1)\ny", profile=["ainc"])
 
     assert res.success, res.error
     assert res.output == 2
@@ -72,7 +72,7 @@ async def test_async_tool_timeout_yields_failed_result(tmp_path):
         return bridge.call_sync(_hang(x), timeout=0.1)
 
     svc.toolbox.add_source(_FuncSource(_spec("hang", "x"), proxy))
-    res = await svc.run_program("y = hang(1)\ny", kit=["hang"])
+    res = await svc.run_program("y = hang(1)\ny", profile=["hang"])
 
     assert not res.success
     assert "timed out" in (res.error or "")
@@ -100,7 +100,7 @@ async def test_exec_lock_serializes_concurrent_executions(tmp_path):
     svc.toolbox.add_source(_FuncSource(_spec("rec", "tag", "str", "str"), proxy))
 
     async def run(tag):
-        return await svc.run_program(f"r = rec({tag!r})\nr", kit=["rec"])
+        return await svc.run_program(f"r = rec({tag!r})\nr", profile=["rec"])
 
     res_a, res_b = await asyncio.gather(run("A"), run("B"))
 
@@ -115,6 +115,6 @@ async def test_inline_path_still_used_without_async_tools(tmp_path):
     # No loop-bound tool -> inline (non-threaded) path; bridge loop never set.
     (tmp_path / "f.txt").write_text("data")
     svc = LackpyService(workspace=tmp_path)
-    res = await svc.run_program("c = read_file('f.txt')\nc", kit=["read_file"])
+    res = await svc.run_program("c = read_file('f.txt')\nc", profile=["read_file"])
     assert res.success and res.output == "data"
     assert svc._bridge.loop is None

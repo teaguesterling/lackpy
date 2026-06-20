@@ -106,6 +106,7 @@ def resolve_profile(
     profiles: dict[str, dict[str, Any]] | None = None,
     kits_dir: Path | None = None,
     defaults: dict[str, Any] | None = None,
+    extra_tools: list[str] | None = None,
 ) -> ResolvedProfile:
     """Resolve a profile into a ``ResolvedProfile``, composing the unchanged ``resolve_kit``.
 
@@ -116,13 +117,18 @@ def resolve_profile(
     - any tool-selection value (``str`` tool/tool-set name, ``list``, ``dict``, ``None``) —
       treated as the **degenerate, tools-only profile** ("a kit is a profile").
 
-    Inference fields the profile leaves unset fall back to ``defaults`` (the service config).
-    Tool resolution, grade, policy, and validation go through the existing machinery
-    untouched.
+    Inference fields the profile leaves unset fall back to ``defaults`` **only when a caller
+    passes it** — an optional convenience. The service does *not* pass ``defaults``: it
+    leaves them ``None`` so the global provider list / ``inference_mode`` supply the effective
+    model/mode downstream (keeping the unset-profile path zero-overhead).
+    ``extra_tools`` is a runtime addition merged on top of the profile's own ``extra_tools``
+    (the harness/CLI adding tools beyond the profile's declared set). Tool resolution, grade,
+    policy, and validation go through the existing machinery untouched.
     """
     prof = _coerce(profile, profiles)
+    merged_extra = (prof.extra_tools or []) + (extra_tools or []) or None
     resolved_tools = resolve_kit(
-        prof.tools, toolbox, kits_dir=kits_dir, extra_tools=prof.extra_tools
+        prof.tools, toolbox, kits_dir=kits_dir, extra_tools=merged_extra
     )
     d = defaults or {}
 

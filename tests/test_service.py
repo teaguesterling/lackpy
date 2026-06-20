@@ -23,38 +23,38 @@ def service(tmp_path):
 
 class TestValidate:
     def test_valid_program(self, service):
-        result = service.validate("x = read_file('test.txt')\nlen(x)", kit=["read_file"])
+        result = service.validate("x = read_file('test.txt')\nlen(x)", profile=["read_file"])
         assert result.valid
         assert "read_file" in result.calls
 
     def test_invalid_program(self, service):
-        result = service.validate("import os", kit=["read_file"])
+        result = service.validate("import os", profile=["read_file"])
         assert not result.valid
 
 
 class TestGenerate:
     @pytest.mark.asyncio
     async def test_generate_with_rules(self, service):
-        result = await service.generate("read file test.txt", kit=["read_file"])
+        result = await service.generate("read file test.txt", profile=["read_file"])
         assert result.program is not None
         assert "read_file(" in result.program
 
     @pytest.mark.asyncio
     async def test_generate_no_match(self, service):
         with pytest.raises(RuntimeError):
-            await service.generate("do something impossibly vague", kit=["read_file"])
+            await service.generate("do something impossibly vague", profile=["read_file"])
 
 
 class TestRunProgram:
     @pytest.mark.asyncio
     async def test_run_valid_program(self, service):
-        result = await service.run_program("x = read_file('test.txt')\nlen(x)", kit=["read_file"])
+        result = await service.run_program("x = read_file('test.txt')\nlen(x)", profile=["read_file"])
         assert result.success
         assert result.output == 11
 
     @pytest.mark.asyncio
     async def test_run_invalid_program(self, service):
-        result = await service.run_program("import os", kit=["read_file"])
+        result = await service.run_program("import os", profile=["read_file"])
         assert not result.success
 
     @pytest.mark.asyncio
@@ -62,7 +62,7 @@ class TestRunProgram:
         # A program that prints its answer (instead of a bare last expression)
         # must not silently drop the value: the typed output is None, but the
         # printed text is captured and surfaced via effective_output.
-        result = await service.run_program("print(read_file('test.txt'))", kit=["read_file"])
+        result = await service.run_program("print(read_file('test.txt'))", profile=["read_file"])
         assert result.success
         assert result.output is None
         assert result.stdout == "hello world\n"
@@ -72,7 +72,7 @@ class TestRunProgram:
 class TestDelegate:
     @pytest.mark.asyncio
     async def test_delegate_simple(self, service):
-        result = await service.delegate("read file test.txt", kit=["read_file"])
+        result = await service.delegate("read file test.txt", profile=["read_file"])
         assert result["success"]
         assert "read_file" in result["program"]
 
@@ -80,18 +80,18 @@ class TestDelegate:
     async def test_delegate_result_carries_stdout(self, service):
         # The delegate contract surfaces captured stdout so a printed answer is
         # never lost, even when the typed output is populated.
-        result = await service.delegate("read file test.txt", kit=["read_file"])
+        result = await service.delegate("read file test.txt", profile=["read_file"])
         assert "stdout" in result
 
     @pytest.mark.asyncio
     async def test_delegate_with_params(self, service):
-        result = await service.delegate("read file test.txt", kit=["read_file"], params={"prefix": "hello"})
+        result = await service.delegate("read file test.txt", profile=["read_file"], params={"prefix": "hello"})
         assert result["success"]
 
 
 class TestKitInfo:
     def test_kit_info_from_list(self, service):
-        info = service.kit_info(["read_file"])
+        info = service.profile_info(["read_file"])
         assert "read_file" in info["tools"]
         assert info["grade"]["w"] == 1
 
@@ -104,7 +104,7 @@ class TestGetConfig:
     def test_has_required_keys(self, service):
         config = service.get_config()
         assert "inference_order" in config
-        assert "kit_default" in config
+        assert "profile_default" in config
         assert "sandbox_enabled" in config
         assert "config_dir" in config
 

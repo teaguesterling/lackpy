@@ -16,7 +16,8 @@ from .infer.providers.rules import RulesProvider
 from .infer.providers.templates import TemplatesProvider
 from .kit.providers.builtin import BuiltinProvider
 from .kit.providers.python import PythonProvider
-from .kit.registry import ResolvedKit, resolve_kit
+from .kit.registry import ResolvedKit
+from .profiles import Profile, ResolvedProfile, resolve_profile
 from .kit.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
@@ -302,12 +303,19 @@ class LackpyService:
         except Exception:
             pass
 
-    def _resolve_kit(self, kit: str | list[str] | dict | None,
-                     extra_tools: list[str] | None = None) -> ResolvedKit:
-        if kit is None:
-            kit = self._config.kit_default
+    def _resolve_profile(self, profile: "Profile | str | list[str] | dict | None",
+                         extra_tools: list[str] | None = None) -> ResolvedProfile:
+        """Resolve a profile (name, bundle, or bare tool selection) to a ResolvedProfile.
+
+        Composes the source-populated toolbox + the configured ``[profiles.<name>]``
+        tables; ``None`` → the configured default profile. The degenerate (tools-only)
+        case is exactly the former kit resolution — ``.tools`` is the same ResolvedKit.
+        """
+        if profile is None:
+            profile = self._config.profile_default
         kits_dir = self._config.config_dir / "kits"
-        return resolve_kit(kit, self.toolbox, kits_dir=kits_dir, extra_tools=extra_tools)
+        return resolve_profile(profile, self.toolbox, profiles=self._config.profiles,
+                               kits_dir=kits_dir, extra_tools=extra_tools)
 
     def _gate_kit(self, resolved: ResolvedKit) -> ResolvedKit:
         """Generation gate: drop virtual tools the harness can't currently supply.
@@ -350,27 +358,27 @@ class LackpyService:
         params_desc = format_params_description(params)
         return values, params_desc, set(values.keys())
 
-    def validate(self, program: str, kit: str | list[str] | dict | None = None,
+    def validate(self, program: str, profile: Profile | str | list[str] | dict | None = None,
                  rules: list | None = None, param_names: set[str] | None = None,
                  extra_tools: list[str] | None = None) -> ValidationResult:
         """Validate a lackpy program against a kit's allowed names.
 
         Args:
             program: The lackpy program source to validate.
-            kit: Kit name, list of tool names, or dict mapping. Defaults to config default.
+            profile: Profile name, bundle, tool list, or dict mapping. Defaults to config default.
             rules: Additional validation rules to apply beyond core checks.
             param_names: Extra names (e.g. parameter names) to allow in the program.
 
         Returns:
             A ValidationResult indicating whether the program is valid.
         """
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
         allowed = set(resolved.tools.keys())
         if param_names:
             allowed |= param_names
         return validate(program, allowed_names=allowed, extra_rules=rules)
 
-    async def generate(self, intent: str, kit: str | list[str] | dict | None = None,
+    async def generate(self, intent: str, profile: Profile | str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None,
                        mode: str | None = None, interpreter: Any = None,
                        extra_tools: list[str] | None = None,
@@ -380,7 +388,7 @@ class LackpyService:
 
         Args:
             intent: Natural language description of the desired program.
-            kit: Kit name, list of tool names, or dict mapping.
+            profile: Profile name, bundle, tool list, or dict mapping.
             params: Named input values available to the generated program.
             rules: Additional validation rules the generated program must satisfy.
             mode: Inference strategy mode (e.g. '1-shot', 'spm'). Defaults to config or '1-shot'.
@@ -403,14 +411,19 @@ class LackpyService:
         from .infer.strategy import STRATEGIES
         from .infer.context import StepContext
 
-        resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
+        rp = self._resolve_profile(profile, extra_tools=extra_tools)
+        resolved = self._gate_kit(rp.tools)
         _, params_desc, param_names = self._resolve_params(params, resolved)
 
-        # Per-call providers: the global set, or a copy with the LLM tier's model/temperature
-        # overridden when the caller (a profile) supplies one. Omitted → identical to before.
-        providers = self._providers_for(model, temperature)
+        # Inference selections: an explicit call arg wins over the profile's; both fall
+        # back to the service config (woollama tier / inference_mode) downstream.
+        effective_model = model if model is not None else rp.model
+        effective_temp = temperature if temperature is not None else rp.temperature
+        # Per-call providers: the global set, or a copy with the LLM tier overridden when a
+        # model/temperature is selected. Neither selected → identical to before (invariant 8).
+        providers = self._providers_for(effective_model, effective_temp)
 
-        effective_mode = mode or self._config.inference_mode
+        effective_mode = mode or rp.mode or self._config.inference_mode
 
         if effective_mode and effective_mode in STRATEGIES:
             strategy_cls = STRATEGIES[effective_mode]
@@ -452,7 +465,7 @@ class LackpyService:
         # The active model is known explicitly (per-call override or the configured LLM
         # model) — no more reflecting `getattr(provider, "_model")`.
         from .policy.types import PolicyContext, ModelSpec
-        model_name = model or self._llm_model
+        model_name = effective_model or self._llm_model
         policy_context: PolicyContext = {"kit": resolved}
         if model_name:
             policy_context["model"] = ModelSpec(name=model_name)
@@ -511,7 +524,7 @@ class LackpyService:
         finally:
             os.chdir(prev_cwd)
 
-    async def run_program(self, program: str, kit: str | list[str] | dict | None = None,
+    async def run_program(self, program: str, profile: Profile | str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
                           extra_tools: list[str] | None = None) -> ExecutionResult:
@@ -522,7 +535,7 @@ class LackpyService:
 
         Args:
             program: The lackpy program source to execute.
-            kit: Kit name, list of tool names, or dict mapping.
+            profile: Profile name, bundle, tool list, or dict mapping.
             params: Named input values injected into the execution namespace.
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules to apply before execution.
@@ -530,7 +543,7 @@ class LackpyService:
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
-        resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
+        resolved = self._gate_kit(self._resolve_profile(profile, extra_tools=extra_tools).tools)
         param_values, _, param_names = self._resolve_params(params, resolved)
         allowed = set(resolved.tools.keys()) | param_names
         validation = validate(program, allowed_names=allowed, extra_rules=rules)
@@ -538,7 +551,7 @@ class LackpyService:
             return ExecutionResult(success=False, error=f"Validation failed: {'; '.join(validation.errors)}")
         return await self._execute(program, resolved.callables, param_values)
 
-    async def delegate(self, intent: str, kit: str | list[str] | dict | None = None,
+    async def delegate(self, intent: str, profile: Profile | str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
                        rules: list | None = None,
                        _program_override: str | None = None,
@@ -554,7 +567,7 @@ class LackpyService:
 
         Args:
             intent: Natural language description of the desired program.
-            kit: Kit name, list of tool names, or dict mapping.
+            profile: Profile name, bundle, tool list, or dict mapping.
             params: Named input values available to the program.
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules for generation and execution.
@@ -571,7 +584,11 @@ class LackpyService:
             RuntimeError: If all inference providers fail to produce a valid program.
         """
         start = time.perf_counter()
-        resolved = self._gate_kit(self._resolve_kit(kit, extra_tools=extra_tools))
+        rp = self._resolve_profile(profile, extra_tools=extra_tools)
+        resolved = self._gate_kit(rp.tools)
+        # The model actually used (per-call override or the profile's, else configured) —
+        # the same value `generate` uses, so kibitzer logs the real model, not a reflection.
+        effective_model = (model if model is not None else rp.model) or self._llm_model
         param_values, params_desc, param_names = self._resolve_params(params, resolved)
 
         # Kibitzer: register context for this delegation
@@ -590,7 +607,7 @@ class LackpyService:
                 generation_time_ms=0.0,
             )
         else:
-            gen_result = await self.generate(intent, kit, params, rules, mode=mode,
+            gen_result = await self.generate(intent, profile, params, rules, mode=mode,
                                             interpreter=interpreter, extra_tools=extra_tools,
                                             model=model, temperature=temperature)
 
@@ -637,17 +654,11 @@ class LackpyService:
                 )
             # Report generation outcome with extended fields
             interp_name = getattr(interpreter, "name", None) if interpreter else None
-            # Extract model name from the provider that produced the result
-            model_name = None
-            for p in self._inference_providers:
-                if p.name == gen_result.provider_name:
-                    model_name = getattr(p, "_model", None)
-                    break
             self._kibitzer.report_generation({
                 "intent": intent,
                 "program": gen_result.program,
                 "provider": gen_result.provider_name,
-                "model": model_name,
+                "model": effective_model,
                 "correction_attempts": gen_result.correction_attempts,
                 "correction_strategy": gen_result.correction_strategy,
                 "success": exec_result.success,
@@ -714,7 +725,7 @@ class LackpyService:
             elif "default" in spec:
                 merged_params[name] = spec["default"]
 
-        kit = info.tools
+        tools = info.tools
 
         # Convert top-level `return X` to bare expression `X` so the runner can
         # execute the body as a flat program (return is only valid inside a function).
@@ -722,7 +733,7 @@ class LackpyService:
 
         return await self.delegate(
             intent="",
-            kit=kit,
+            profile=tools,
             params=merged_params if merged_params else None,
             _program_override=run_body,
         )
@@ -750,7 +761,7 @@ class LackpyService:
             returns=returns, creation_log=creation_log,
         )
 
-    async def create(self, program: str, kit: str | list[str] | dict | None = None,
+    async def create(self, program: str, profile: Profile | str | list[str] | dict | None = None,
                      name: str = "", pattern: str | None = None,
                      extra_tools: list[str] | None = None) -> dict[str, Any]:
         """Validate a program and save it as a named template.
@@ -765,7 +776,7 @@ class LackpyService:
             A dict with keys: success (bool), path (str) on success,
             or errors (list) on validation failure.
         """
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
         validation = validate(program, allowed_names=set(resolved.tools.keys()))
         if not validation.valid:
             return {"success": False, "errors": validation.errors}
@@ -779,12 +790,12 @@ class LackpyService:
         template_file.write_text(content)
         return {"success": True, "path": str(template_file)}
 
-    def kit_info(self, kit: str | list[str] | dict,
-                 extra_tools: list[str] | None = None) -> dict[str, Any]:
-        """Return metadata for a resolved kit.
+    def profile_info(self, profile: Profile | str | list[str] | dict,
+                     extra_tools: list[str] | None = None) -> dict[str, Any]:
+        """Return metadata for a resolved profile (its tools, grade, description).
 
         Args:
-            kit: Kit name, list of tool names, or dict mapping.
+            profile: Profile name, bundle, tool list, or dict mapping.
 
         Returns:
             A dict with keys: tools (mapping of tool name to spec dict),
@@ -794,7 +805,7 @@ class LackpyService:
             KeyError: If the kit references an unknown tool.
             FileNotFoundError: If a named kit file does not exist.
         """
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
         return {
             "tools": {name: {"description": spec.description, "grade_w": spec.grade_w,
                              "effects_ceiling": spec.effects_ceiling}
@@ -803,25 +814,26 @@ class LackpyService:
             "description": resolved.description,
         }
 
-    def kit_list(self) -> list[dict[str, str]]:
-        """List all kit files in the workspace configuration directory.
+    def profile_list(self) -> list[dict[str, str]]:
+        """List named tool-set files in the workspace configuration directory.
 
         Returns:
             A list of dicts with keys: name (stem) and path (absolute path string).
-            Returns an empty list if the kits directory does not exist.
+            Returns an empty list if the directory does not exist.
         """
         kits_dir = self._config.config_dir / "kits"
         if not kits_dir.exists():
             return []
-        return [{"name": p.stem, "path": str(p)} for p in sorted(kits_dir.glob("*.kit"))]
+        files = sorted([*kits_dir.glob("*.profile"), *kits_dir.glob("*.kit")])
+        return [{"name": p.stem, "path": str(p)} for p in files]
 
-    def kit_create(self, name: str, tools: list[str], description: str | None = None) -> dict[str, Any]:
-        """Create a new kit file in the workspace configuration directory.
+    def profile_create(self, name: str, tools: list[str], description: str | None = None) -> dict[str, Any]:
+        """Create a named tool-set file in the workspace configuration directory.
 
         Args:
-            name: Kit name used as the filename stem.
-            tools: List of tool names to include in the kit.
-            description: Optional human-readable description written to the kit frontmatter.
+            name: Name used as the filename stem.
+            tools: List of tool names to include.
+            description: Optional human-readable description written to the frontmatter.
 
         Returns:
             A dict with keys: name, path (absolute path string), and tools.
@@ -836,7 +848,7 @@ class LackpyService:
         kit_file.write_text(content)
         return {"name": name, "path": str(kit_file), "tools": tools}
 
-    def docs_index(self, kit: str | list[str] | dict | None = None,
+    def docs_index(self, profile: Profile | str | list[str] | dict | None = None,
                    extra_tools: list[str] | None = None) -> dict[str, Any]:
         """Return documentation references for a kit's tools.
 
@@ -844,7 +856,7 @@ class LackpyService:
         and ``kit_docs`` (list of kit-level doc paths). Paths are relative
         to the package/workspace root — callers resolve them on demand.
         """
-        resolved = self._resolve_kit(kit, extra_tools=extra_tools)
+        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
         tool_docs = {name: spec.docs for name, spec in resolved.tools.items() if spec.docs}
         return {
             "tool_docs": tool_docs,
@@ -880,7 +892,7 @@ class LackpyService:
             "config_dir": str(self._config.config_dir),
             "inference_order": self._config.inference_order,
             "inference_mode": self._config.inference_mode,
-            "kit_default": self._config.kit_default,
+            "profile_default": self._config.profile_default,
             "sandbox_enabled": self._config.sandbox_enabled,
             "sandbox_timeout": self._config.sandbox_timeout,
             "sandbox_memory_mb": self._config.sandbox_memory_mb,
