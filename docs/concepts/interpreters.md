@@ -72,7 +72,7 @@ from lackpy.kit.registry import resolve_kit
 
 interp = PythonInterpreter()
 kit = resolve_kit(["read_file"])
-ctx = ExecutionContext(kit=kit)
+ctx = ExecutionContext(profile=kit)
 result = await run_interpreter(
     interp,
     'content = read_file("README.md")\ncontent',

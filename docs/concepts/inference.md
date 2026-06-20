@@ -148,7 +148,7 @@ Over time, the template library grows and LLM calls become less frequent. The te
 
 ```bash
 # Step 1: first run (rules or LLM tier)
-lackpy -c "read the file pyproject.toml" --kit read_file
+lackpy -c "read the file pyproject.toml" --profile read_file
 ```
 
 ```python
@@ -165,13 +165,13 @@ asyncio.run(svc.create(
     program="content = read_file('pyproject.toml')\ncontent",
     name="read-pyproject",
     pattern="read the file pyproject.toml",
-    kit=["read_file"],
+    profile=["read_file"],
 ))
 ```
 
 ```bash
 # Step 3: future runs hit tier 0
-lackpy -c "read the file pyproject.toml" --kit read_file
+lackpy -c "read the file pyproject.toml" --profile read_file
 # generation_tier: "templates"
 ```
 

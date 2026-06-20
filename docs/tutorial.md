@@ -27,7 +27,7 @@ lackpyctl status
   "workspace": "/path/to/my-lackpy-project",
   "config_dir": "/path/to/my-lackpy-project/.lackpy",
   "inference_order": ["templates", "rules"],
-  "kit_default": "debug",
+  "profile_default": "debug",
   "sandbox_enabled": false,
   "tools": 4
 }
@@ -86,7 +86,7 @@ count = len(files)
 count
 EOF
 
-lackpy check.py --validate --kit find_files
+lackpy check.py --validate --profile find_files
 ```
 
 ```json
@@ -107,7 +107,7 @@ import sys
 sys.version
 EOF
 
-lackpy bad.py --validate --kit find_files
+lackpy bad.py --validate --profile find_files
 ```
 
 ```json
@@ -142,7 +142,7 @@ from lackpy.service import LackpyService
 svc = LackpyService()
 result = svc.validate(
     'files = find_files("**/*.py")\nlen(files)',
-    kit=["find_files"],
+    profile=["find_files"],
 )
 print(result.valid)     # True
 print(result.errors)    # []
@@ -164,13 +164,13 @@ lackpyctl toolbox list
 ### Use a comma-separated kit
 
 ```bash
-lackpy -c "read the file README.md" --kit read_file,find_files
+lackpy -c "read the file README.md" --profile read_file,find_files
 ```
 
 ### Create a named kit
 
 ```bash
-lackpyctl kit create filesystem --tools read glob write --description "File system tools"
+lackpyctl profile create filesystem --tools read glob write --description "File system tools"
 ```
 
 This creates `.lackpy/kits/filesystem.kit`:
@@ -188,13 +188,13 @@ write
 ### Use the named kit
 
 ```bash
-lackpy -c "find all Python files" --kit filesystem
+lackpy -c "find all Python files" --profile filesystem
 ```
 
 ### Kit info
 
 ```bash
-lackpyctl kit info filesystem
+lackpyctl profile info filesystem
 ```
 
 ```json
@@ -215,15 +215,15 @@ lackpyctl kit info filesystem
 svc = LackpyService()
 
 # Named kit (from .lackpy/kits/filesystem.kit)
-result = await svc.delegate("find all Python files", kit="filesystem")
+result = await svc.delegate("find all Python files", profile="filesystem")
 
 # List of tool names
-result = await svc.delegate("find all Python files", kit=["find_files"])
+result = await svc.delegate("find all Python files", profile=["find_files"])
 
 # Dict with aliases
 result = await svc.delegate(
     "find all Python files",
-    kit={"ls": "find_files"},  # calls are `ls(...)` in the program
+    profile={"ls": "find_files"},  # calls are `ls(...)` in the program
 )
 ```
 
@@ -234,7 +234,7 @@ result = await svc.delegate(
 The `--generate` flag runs the inference pipeline without executing the result:
 
 ```bash
-lackpy -c "find all Python files" --generate --kit find_files
+lackpy -c "find all Python files" --generate --profile find_files
 ```
 
 ```python
@@ -249,7 +249,7 @@ files
     Templates are matched first. If a template pattern matches the intent, the stored program is returned — no LLM required.
 
     ```bash
-    lackpy -c "read the file config.toml" --generate --kit read_file
+    lackpy -c "read the file config.toml" --generate --profile read_file
     # → matched by rules tier: content = read_file('config.toml')
     ```
 
@@ -285,7 +285,7 @@ files
 ### Python API
 
 ```python
-result = await svc.generate("find all Python files", kit=["find_files"])
+result = await svc.generate("find all Python files", profile=["find_files"])
 print(result.program)          # the generated program
 print(result.provider_name)    # which tier produced it
 print(result.generation_time_ms)
@@ -295,7 +295,7 @@ print(result.generation_time_ms)
 
 ## 6. Running programs directly
 
-When you already have a program file, pass its path as the first positional argument (there is no `run` subcommand). A plain program file needs `--kit` or `--tools` to supply its namespace; a Lackey file carries its own tools and needs neither:
+When you already have a program file, pass its path as the first positional argument (there is no `run` subcommand). A plain program file needs `--profile` or `--tools` to supply its namespace; a Lackey file carries its own tools and needs neither:
 
 ```bash
 cat > list_py.py << 'EOF'
@@ -303,7 +303,7 @@ files = find_files("**/*.py")
 files
 EOF
 
-lackpy list_py.py --kit find_files
+lackpy list_py.py --profile find_files
 ```
 
 ```json
@@ -321,7 +321,7 @@ The program is validated before execution. If validation fails, the runner retur
 ```python
 result = await svc.run_program(
     'files = find_files("**/*.py")\nfiles',
-    kit=["find_files"],
+    profile=["find_files"],
 )
 print(result.success)
 print(result.output)
@@ -337,7 +337,7 @@ Parameters let you pass values into programs without interpolating them into the
 ```python
 result = await svc.delegate(
     intent="read the target file",
-    kit=["read_file"],
+    profile=["read_file"],
     params={
         "target_file": {
             "value": "README.md",
@@ -370,7 +370,7 @@ lackpy gives you two ways to reuse a validated program. They're distinct mechani
 The `--create` flag generates a program from your intent and saves it as a **Lackey file** — a Python class wrapping the program, plus its tools — under `.lackpy/templates/`:
 
 ```bash
-lackpy -c "read the file README.md" --create --name ReadFile --kit read_file
+lackpy -c "read the file README.md" --create --name ReadFile --profile read_file
 ```
 
 The output is plain text:
@@ -394,7 +394,7 @@ To make *intent matching* deterministic, save a `.tmpl` template with a `pattern
 ```python
 result = await svc.create(
     program="content = read_file('{path}')\ncontent",
-    kit=["read_file"],
+    profile=["read_file"],
     name="read-file",
     pattern="read the file {path}",
 )
@@ -428,14 +428,14 @@ from lackpy.lang.rules import no_loops, max_calls, max_depth, no_nested_calls
 # Use in validate
 result = svc.validate(
     program,
-    kit=["find_files"],
+    profile=["find_files"],
     rules=[no_loops, max_calls(5)],
 )
 
 # Use in delegate (enforced on the generated program)
 result = await svc.delegate(
     "find all Python files",
-    kit=["find_files"],
+    profile=["find_files"],
     rules=[no_loops, max_depth(2)],
 )
 ```
@@ -460,7 +460,7 @@ Every program run produces a `Trace` with an entry for each tool call:
 ```python
 result = await svc.run_program(
     'files = find_files("**/*.py")\ncount = len(files)\ncount',
-    kit=["find_files"],
+    profile=["find_files"],
 )
 
 for entry in result.trace.entries:
@@ -496,7 +496,7 @@ The `Trace` also has `files_read` and `files_modified` lists, populated when too
 
 - [Concepts: Architecture](concepts/architecture.md) — internals of the pipeline
 - [Concepts: Language Spec](concepts/language-spec.md) — full allowed/forbidden reference
-- [Concepts: Kits & Toolbox](concepts/kits.md) — provider system in depth
+- [Concepts: Kits & Toolbox](concepts/profiles.md) — provider system in depth
 - [Concepts: Inference Pipeline](concepts/inference.md) — tier system and config
 - [Extending: Custom Rules](extending/custom-rules.md) — write your own validation rules
 - [Extending: Tool Providers](extending/tool-providers.md) — register custom tools

@@ -9,7 +9,7 @@
 ## What it does
 
 ```bash
-$ lackpy -c "read file main.py and count its lines" --kit read_file,find_files
+$ lackpy -c "read file main.py and count its lines" --profile read_file,find_files
 ```
 
 lackpy takes an intent, generates a restricted Python program using a local model you configure (any Ollama-served coder model), validates it against a strict AST whitelist, and runs it with traced tool calls. One MCP call replaces N tool round-trips.
@@ -46,7 +46,7 @@ pip install -e ./packages/lackpy-lang -e ".[dev]"
 
 ```bash
 lackpyctl init --ollama-url http://localhost:11434   # writes .lackpy/config.toml
-lackpy -c "find all python files" --kit read_file,find_files
+lackpy -c "find all python files" --profile read_file,find_files
 ```
 
 `lackpyctl init` wires a local Ollama model into the inference order — pick the model
@@ -60,7 +60,7 @@ import asyncio
 
 async def main():
     svc = LackpyService()
-    result = await svc.delegate("read file README.md", kit=["read_file"])
+    result = await svc.delegate("read file README.md", profile=["read_file"])
     print(result["output"])
 
 asyncio.run(main())

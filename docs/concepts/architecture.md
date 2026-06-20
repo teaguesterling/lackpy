@@ -8,7 +8,7 @@ hard-coded tool names in lackpy. Each source *discovers* full `ToolSpec`s and
 `default_tools.toml` builtins), MCP-discovered tools (`[mcp_servers]` + ingested
 host configs), and virtual/harness tools (`[[virtual_tools]]`). Sources merge by
 precedence (local config/builtins > own MCP > host); a shadowed name is dropped.
-See [Kits & Toolbox](kits.md) and the [Tool Sources RFC](../design/tool-sources.md).
+See [Kits & Toolbox](profiles.md) and the [Tool Sources RFC](../design/tool-sources.md).
 
 ## Pipeline
 
@@ -142,6 +142,6 @@ Every kit has a `Grade(w, d)` computed from its tools:
 | `w` | World coupling | 0 = pure, 1 = pinhole read, 2 = scoped exec, 3 = scoped write |
 | `d` | Effects ceiling | 0–3, higher = more side effects |
 
-`compute_grade()` takes the element-wise maximum across all tools in the kit. The grade is reported in every `delegate()` result and `kit_info()` response so callers can decide whether a given kit is acceptable for their context.
+`compute_grade()` takes the element-wise maximum across all tools in the kit. The grade is reported in every `delegate()` result and `profile_info()` response so callers can decide whether a given kit is acceptable for their context.
 
 Tool authors set `grade_w` and `effects_ceiling` on their `ToolSpec`. The built-in tools default to `grade_w=3, effects_ceiling=3` (conservative).

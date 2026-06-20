@@ -111,7 +111,7 @@ async def main():
     intent = "find all Python files"
     kit = ["find_files"]
 
-    result = await svc.delegate(intent, kit=kit)
+    result = await svc.delegate(intent, profile=kit)
     if result["success"]:
         # Warm the cache for next time
         resolved = svc._resolve_kit(kit)

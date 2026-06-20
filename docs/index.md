@@ -28,13 +28,13 @@ delegate is the default mode) and `lackpyctl` (workspace management).
 lackpyctl init
 
 # Generate and run a program from natural language (delegate is the default mode)
-lackpy -c "read the file README.md" --kit read_file,find_files
+lackpy -c "read the file README.md" --profile read_file,find_files
 
 # Just generate — don't run
-lackpy -c "find all Python files" --generate --kit find_files
+lackpy -c "find all Python files" --generate --profile find_files
 
 # Validate a hand-written program file
-lackpy my_program.py --validate --kit read_file,find_files
+lackpy my_program.py --validate --profile read_file,find_files
 ```
 
 ## Quick start — Python API
@@ -49,7 +49,7 @@ async def main():
     # Generate and run in one call
     result = await svc.delegate(
         intent="read the file pyproject.toml",
-        kit=["read_file"],
+        profile=["read_file"],
     )
     print(result["output"])
     print(result["trace"])  # every tool call recorded
@@ -66,7 +66,7 @@ The "rigged suite" is the property that lackpy's inference pipeline can be made 
 **Lackey files.** Generate a program from an intent and save it as a reusable **Lackey file** (a Python class) under `.lackpy/templates/`, then invoke it by path:
 
 ```bash
-lackpy -c "read the file README.md" --create --name ReadFile --kit read_file
+lackpy -c "read the file README.md" --create --name ReadFile --profile read_file
 # → Created .lackpy/templates/ReadFile.py
 lackpy .lackpy/templates/ReadFile.py
 ```

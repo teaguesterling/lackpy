@@ -10,9 +10,9 @@
         - run_program
         - delegate
         - create
-        - kit_info
-        - kit_list
-        - kit_create
+        - profile_info
+        - profile_list
+        - profile_create
         - toolbox_list
         - docs_index
         - resolve_doc

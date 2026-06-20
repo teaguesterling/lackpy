@@ -28,7 +28,7 @@ from lackpy.service import LackpyService
 from langchain_lackpy import LackpyToolkit
 
 svc = LackpyService(workspace=Path("."))
-toolkit = LackpyToolkit(service=svc, kit=["read_file", "find_files"])
+toolkit = LackpyToolkit(service=svc, profile=["read_file", "find_files"])
 ```
 
 The `kit` parameter accepts the same types as `LackpyService.delegate()` — a kit name, a list of tool names, or a dict mapping.
@@ -108,8 +108,8 @@ result = await delegate.ainvoke({"intent": "Read config.yaml and extract the dat
 If you have multiple kits, give each delegate a distinct name so the agent can choose between them:
 
 ```python
-file_toolkit = LackpyToolkit(service=svc, kit=["read_file", "find_files"])
-data_toolkit = LackpyToolkit(service=svc, kit=["query_db", "format_csv"])
+file_toolkit = LackpyToolkit(service=svc, profile=["read_file", "find_files"])
+data_toolkit = LackpyToolkit(service=svc, profile=["query_db", "format_csv"])
 
 file_delegate = file_toolkit.as_delegate(name="lackpy_files")
 data_delegate = data_toolkit.as_delegate(name="lackpy_data")
@@ -148,7 +148,7 @@ The node reads `state[intent_key]`, calls `service.delegate()`, and returns `{re
 If you don't need to configure the service separately, `from_config()` discovers `lackpy.toml` / `.lackpy/config.toml` automatically:
 
 ```python
-toolkit = LackpyToolkit.from_config(workspace=Path("."), kit="filesystem")
+toolkit = LackpyToolkit.from_config(workspace=Path("."), profile="filesystem")
 ```
 
 ---

@@ -1,13 +1,25 @@
-# Kits & Toolbox
+# Profiles & Toolbox
 
-## Toolbox vs Kits
+!!! note "Profiles replace kits"
+    A **profile** is the per-task configuration bundle that generalizes the former
+    "kit": a tool selection **plus** optional inference settings (`model`/`mode`/
+    `temperature`) and the language/execution model. A profile that selects only tools
+    is the degenerate case — *that* is what a "kit" used to be. The user-facing `kit`
+    surface (the `kit=` argument, `--kit`, `kit_*` tools) has been **removed in favor of
+    `profile`** (no alias). See [RFC 0002 §10](../design/tool-sources.md#10-migration--sequencing).
+
+## Toolbox vs Profiles
 
 | Concept | What it is | Scope |
 |---------|------------|-------|
 | **Toolbox** | The global registry of all available tools and their providers | Service-wide |
-| **Kit** | A named subset of toolbox tools for a specific task | Per-request |
+| **Profile** | A named per-task bundle: a tool selection (+ optional inference / language) | Per-request |
 
-The `Toolbox` holds every tool that has been registered across all providers. A `Kit` is the subset of those tools that a particular program may call — it defines the allowed namespace for validation and the callable namespace for execution.
+The `Toolbox` holds every tool registered across all sources. A profile's **tool
+selection** is the subset a particular program may call — it defines the allowed namespace
+for validation and the callable namespace for execution; the profile additionally carries
+which model/mode and language/execution to run. Define profiles as `[profiles.<name>]`
+tables in `.lackpy/config.toml`, or pass a tool list/name inline.
 
 ---
 
@@ -129,7 +141,7 @@ fails cleanly. See [Tool Sources (RFC 0002)](../design/tool-sources.md).
 
 ---
 
-## Kit parameter forms
+## Profile / tool-selection forms
 
 `resolve_kit()` accepts these kit forms:
 
@@ -148,10 +160,10 @@ With the tool mapping form, the program sees `find(...)` but the toolbox resolve
 All kit forms support an optional `extra_tools` parameter — a list of tool names merged into the resolved kit:
 
 ```python
-# Named kit + extra tools
+# Named profile + extra tools
 kit = resolve_kit("debug", toolbox, extra_tools=["edit_file"])
 
-# Standalone tools (no base kit)
+# Standalone tools (no base profile)
 kit = resolve_kit("none", toolbox, extra_tools=["read_file", "find_files"])
 ```
 
@@ -159,7 +171,7 @@ Duplicates are silently ignored. The kit grade is recomputed after merging.
 
 ---
 
-## Kit file format
+## Tool-set file format
 
 Named kits are stored as `.kit` files in `.lackpy/kits/`:
 
@@ -179,7 +191,7 @@ edit_file
 - Lines starting with `#` are treated as comments.
 - Supported frontmatter fields: `name`, `description`, `docs`.
 
-### Kit-level documentation
+### Profile-level documentation
 
 Kits can reference documentation files via the `docs` frontmatter field:
 
@@ -202,17 +214,17 @@ The `docs` path is relative to the workspace root. It is not loaded at resolutio
 ## CLI management
 
 ```bash
-# List all kits in .lackpy/kits/
-lackpyctl kit list
+# List all tool-sets in .lackpy/kits/
+lackpyctl profile list
 
-# Show tools and grade for a kit
-lackpyctl kit info filesystem
+# Show tools and grade for a profile
+lackpyctl profile info filesystem
 
 # Show tools and grade for an ad-hoc list
-lackpyctl kit info read_file,find_files,write_file
+lackpyctl profile info read_file,find_files,write_file
 
-# Create a new kit
-lackpyctl kit create mykit --tools read_file find_files --description "Read-only tools"
+# Create a new tool-set
+lackpyctl profile create mykit --tools read_file find_files --description "Read-only tools"
 ```
 
 ---
@@ -255,8 +267,8 @@ Tools and kits can reference markdown documentation files. These references are 
 ### API
 
 ```python
-# Get the docs index for a kit
-index = svc.docs_index(kit="debug", extra_tools=["edit_file"])
+# Get the docs index for a profile
+index = svc.docs_index(profile="debug", extra_tools=["edit_file"])
 # {"tool_docs": {"read_file": "docs/tools/read_file.md", ...}, "kit_docs": [...]}
 
 # Read a specific doc file

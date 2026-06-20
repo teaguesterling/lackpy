@@ -120,7 +120,7 @@ async def main():
 
     result = await svc.delegate(
         "search for open bugs",
-        kit=["search_issues"],
+        profile=["search_issues"],
     )
     print(result["output"])
 

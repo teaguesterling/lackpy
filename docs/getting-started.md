@@ -117,7 +117,7 @@ lackpyctl toolbox list
 Generate and run a program (delegate is the default `lackpy -c` mode):
 
 ```bash
-lackpy -c "read the file README.md" --kit read_file
+lackpy -c "read the file README.md" --profile read_file
 ```
 
 The output is JSON with the generated program, trace, and result:
@@ -160,7 +160,7 @@ async def main():
     # Validate a program manually
     result = svc.validate(
         'content = read_file("pyproject.toml")\ncontent',
-        kit=["read_file"],
+        profile=["read_file"],
     )
     print(result.valid)   # True
     print(result.errors)  # []
@@ -168,7 +168,7 @@ async def main():
     # Generate and run
     result = await svc.delegate(
         intent="read the file pyproject.toml",
-        kit=["read_file"],
+        profile=["read_file"],
     )
     print(result["output"])
 
@@ -185,5 +185,5 @@ asyncio.run(main())
 - [Tutorial](tutorial.md) — hands-on walkthrough of every feature
 - [Concepts: Architecture](concepts/architecture.md) — understand the pipeline
 - [Concepts: Language Spec](concepts/language-spec.md) — what Python constructs are allowed
-- [Concepts: Kits & Toolbox](concepts/kits.md) — tool organization
+- [Concepts: Kits & Toolbox](concepts/profiles.md) — tool organization
 - [CLI Reference](reference/cli.md) — complete CLI documentation
