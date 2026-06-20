@@ -15,7 +15,7 @@ class TestMcpInit:
         assert mcp_file.exists()
         data = json.loads(mcp_file.read_text())
         assert "lackpy" in data["mcpServers"]
-        assert data["mcpServers"]["lackpy"]["command"] == "lackpyctl"
+        assert data["mcpServers"]["lackpy"]["command"] == "lackpy-mcp"
 
     def test_includes_workspace_in_args(self, tmp_path):
         mcp_init(workspace=tmp_path)
@@ -59,7 +59,7 @@ class TestMcpInit:
         result = mcp_init(workspace=tmp_path, force=True)
         assert result == 0
         data = json.loads(mcp_file.read_text())
-        assert data["mcpServers"]["lackpy"]["command"] == "lackpyctl"
+        assert data["mcpServers"]["lackpy"]["command"] == "lackpy-mcp"
 
     def test_custom_name(self, tmp_path):
         mcp_init(workspace=tmp_path, name="my-lackpy")
@@ -78,3 +78,37 @@ class TestMcpInit:
         mcp_file.write_text("[]")
         result = mcp_init(workspace=tmp_path)
         assert result == 1
+
+
+class TestMcpEntryPoints:
+    """The external-consumer launch surface (woollama spawns lackpy's MCP server)."""
+
+    def test_lackpy_mcp_routes_to_server(self):
+        # `lackpy mcp --help` must reach mcp_main (exit 0), not the runner's parser
+        # (which would reject 'mcp' as unrecognized → exit 2).
+        import pytest
+        from lackpy.cli import main
+        with pytest.raises(SystemExit) as e:
+            main(["mcp", "--help"])
+        assert e.value.code == 0
+
+    def test_mcp_main_parses_workspace(self, monkeypatch):
+        from lackpy.mcp import cli as mcpcli
+        seen = {}
+
+        def fake_serve(ws):
+            seen["ws"] = ws
+            return 0
+
+        monkeypatch.setattr(mcpcli, "mcp_serve", fake_serve)
+        rc = mcpcli.mcp_main(["--workspace", "/tmp/ws"])
+        assert rc == 0 and str(seen["ws"]) == "/tmp/ws"
+
+    def test_generated_config_uses_dedicated_entrypoint(self, tmp_path):
+        from lackpy.mcp.cli import mcp_init
+        mcp_init(tmp_path)
+        import json
+        data = json.loads((tmp_path / ".mcp.json").read_text())
+        entry = data["mcpServers"]["lackpy"]
+        assert entry["command"] == "lackpy-mcp"        # decoupled, spawnable as-is
+        assert "serve" not in entry["args"]            # no subcommand needed

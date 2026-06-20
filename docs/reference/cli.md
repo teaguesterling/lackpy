@@ -331,9 +331,21 @@ Start the lackpy MCP server over stdio transport.
 lackpyctl mcp serve
 ```
 
+!!! tip "Dedicated launch command for external consumers"
+    An MCP client that spawns lackpy as a backend (e.g. a `mcp.json`/`.mcp.json`
+    `command`) should use the stable, dedicated entry point — equivalent to
+    `lackpyctl mcp serve`, but a single command with no subcommand:
+
+    ```bash
+    lackpy-mcp [--workspace DIR]     # canonical, decoupled
+    lackpy mcp [--workspace DIR]     # convenience alias on the runner CLI
+    ```
+
+    This is the form `lackpyctl mcp init` writes into `.mcp.json`.
+
 ### `lackpyctl mcp init`
 
-Add lackpy to `.mcp.json`.
+Add lackpy to `.mcp.json` (as a `lackpy-mcp` server entry).
 
 ```bash
 lackpyctl mcp init [--name NAME] [--force]

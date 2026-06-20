@@ -122,6 +122,12 @@ def main(argv: list[str] | None = None) -> int:
     # Pre-parse: detect bare file argument before argparse sees it.
     # If the first non-flag token ends with .py (and isn't a flag), treat it as a file.
     raw_args = argv if argv is not None else sys.argv[1:]
+    # `lackpy mcp [--workspace …]` → start the MCP server on stdio. Matches an external
+    # consumer's `command: "lackpy", args: ["mcp"]` (e.g. woollama's mcp.json); the
+    # dedicated `lackpy-mcp` console script is the canonical, decoupled form.
+    if raw_args and raw_args[0] == "mcp":
+        from .mcp.cli import mcp_main
+        return mcp_main(raw_args[1:])
     first_positional = next(
         (a for a in raw_args if not a.startswith("-")), None
     )
