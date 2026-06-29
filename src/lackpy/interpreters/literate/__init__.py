@@ -33,6 +33,7 @@ from .effects import (
     combine,
     exceeds_ceiling,
 )
+from .journal import FileJournal
 from .kernel import LightweightKernel
 from .parser import parse
 from .prompt import LITERATE_HINT
@@ -89,40 +90,39 @@ class LiterateInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
-        # Effect ceiling gate (effects-core-to-the-step). Refuse a document whose
-        # aggregate effects exceed the ceiling -- statically, before any cell runs.
-        # First consumer of the effect classifier; the @continue file journal and
-        # sandbox fail-closed are later slices.
+        # Effects-core-to-the-step: classify the document once (statically, before
+        # any cell runs), then drive two mechanisms off the result -- an always-on
+        # write journal and a conditional ceiling gate.
         #
-        # Profile -> ceiling wiring: an explicit context.config["grade_ceiling"]
-        # wins; otherwise the ceiling DEFAULTS to the granted toolset's grade
-        # (ResolvedProfile.grade == its tools' grade), i.e. a document may not
-        # exceed the effect grade of the tools its profile granted. No ceiling and
-        # no toolset => no gate (behaviour unchanged). (End-to-end enforcement in
-        # the agent path additionally needs execution-axis dispatch to run literate
-        # under a profile -- a separate slice.)
-        #
-        # NOTE: this gates only the batch path. The StreamingDriver path is not yet
-        # gated -- a follow-up slice must mirror this there. Cells are also compiled
-        # here and again by the kernel (cheap for small docs; a later slice can
-        # compile once and feed both).
+        # Cells that don't parse are skipped here so the kernel reports the precise
+        # syntax error rather than a misleading refusal. (Cells are compiled here
+        # and again by the kernel -- cheap for small docs; a later slice can compile
+        # once and feed both. This gates/journals only the batch path; the
+        # StreamingDriver path is a follow-up slice.)
+        effects_map = _gate_effects_map(context)
+        cell_effects = []
+        for cell in parsed.cells:
+            src = compile_cell(cell)
+            try:
+                ast.parse(src)
+            except SyntaxError:
+                continue
+            cell_effects.append(classify_effects(src, tool_effects=effects_map))
+        doc_effects = combine(cell_effects)
+
+        # Ceiling gate (conditional): refuse a document whose aggregate effects
+        # exceed the ceiling, before any cell runs. Profile -> ceiling wiring: an
+        # explicit context.config["grade_ceiling"] wins; otherwise the ceiling
+        # DEFAULTS to the granted toolset's grade (ResolvedProfile.grade == its
+        # tools' grade) -- a document may not exceed the effect grade of the tools
+        # its profile granted. No ceiling and no toolset => no gate. (End-to-end
+        # enforcement in the agent path additionally needs execution-axis dispatch
+        # to run literate under a profile -- a separate slice.)
         raw_ceiling = (context.config or {}).get("grade_ceiling")
         if raw_ceiling is None:
             raw_ceiling = getattr(context.tools, "grade", None)
         if raw_ceiling is not None:
             ceiling = as_grade(raw_ceiling)
-            effects_map = _gate_effects_map(context)
-            cell_effects = []
-            for cell in parsed.cells:
-                src = compile_cell(cell)
-                try:
-                    ast.parse(src)
-                except SyntaxError:
-                    # Skip a malformed cell so the kernel reports the precise
-                    # syntax error rather than a misleading ceiling refusal.
-                    continue
-                cell_effects.append(classify_effects(src, tool_effects=effects_map))
-            doc_effects = combine(cell_effects)
             violation = exceeds_ceiling(doc_effects, ceiling)
             if violation:
                 return InterpreterExecutionResult(
@@ -137,6 +137,16 @@ class LiterateInterpreter:
                     },
                 )
 
+        # Write journal (always-on): snapshot the document's statically known
+        # literal writes (doc_effects.writes) so the whole batch run is atomic for
+        # those files -- any cell failure rolls them back, so a failed document
+        # leaves the filesystem as it was. Dynamic-path/exec/unanalyzable effects
+        # are out of the journal's reach (see journal.py); when a ceiling is set it
+        # is what keeps those out of a policy-governed run. Transaction boundary is
+        # the whole execute() call; per-@continue commit points are a later slice.
+        journal = FileJournal(context.base_dir)
+        journal.snapshot(doc_effects.writes)
+
         namespace = _build_namespace(context)
         kernel = LightweightKernel(namespace=namespace)
 
@@ -148,6 +158,9 @@ class LiterateInterpreter:
             result = kernel.execute_cell(cell, index)
 
             if not result.success:
+                # Roll the document's known writes back to their pre-run state so a
+                # failed document does not leave half-applied files behind.
+                journal.rollback()
                 return InterpreterExecutionResult(
                     success=False,
                     error=result.error or "Unknown error",
@@ -162,6 +175,9 @@ class LiterateInterpreter:
 
             if result.namespace_delta.get("__continue_requested__"):
                 continue_requested = True
+
+        # Every cell ran: accept the writes (drop the snapshots).
+        journal.commit()
 
         elapsed = (time.perf_counter() - start) * 1000
 
