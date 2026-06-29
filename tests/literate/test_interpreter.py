@@ -400,3 +400,66 @@ class TestCeilingGate:
                                config={"grade_ceiling": Grade(1, 1)})
         result = await interpreter.execute("```lackpy @write(o.py)\nv=1\n```", ctx)
         assert not result.success
+
+
+class TestTransactionalWrites:
+    """@continue transactional journal: a failed document rolls its writes back.
+
+    The journal is always-on: it does not depend on a ceiling. Covers only
+    statically-known literal writes; exec / dynamic / unanalyzable effects are out
+    of scope (when a ceiling is set, it is what keeps those out of a policy-
+    governed run).
+    """
+
+    OK_CEILING = {"grade_ceiling": Grade(3, 3)}  # gate present but permissive: writes allowed
+
+    @pytest.mark.asyncio
+    async def test_failure_removes_a_newly_created_file(self, interpreter, tmp_path):
+        doc = ("```lackpy @write(out.txt)\nfresh\n```\n\n"
+               "```lackpy\nraise ValueError('boom')\n```")
+        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        result = await interpreter.execute(doc, ctx)
+        assert not result.success
+        assert not (tmp_path / "out.txt").exists()   # rolled back
+
+    @pytest.mark.asyncio
+    async def test_failure_restores_overwritten_file(self, interpreter, tmp_path):
+        (tmp_path / "keep.txt").write_text("ORIGINAL")
+        doc = ("```lackpy @write(keep.txt)\nNEW\n```\n\n"
+               "```lackpy\nx = 1 / 0\n```")
+        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        result = await interpreter.execute(doc, ctx)
+        assert not result.success
+        assert (tmp_path / "keep.txt").read_text() == "ORIGINAL"   # restored
+
+    @pytest.mark.asyncio
+    async def test_success_commits_the_write(self, interpreter, tmp_path):
+        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        result = await interpreter.execute("```lackpy @write(out.txt)\nkept\n```", ctx)
+        assert result.success
+        assert (tmp_path / "out.txt").read_text() == "kept"
+
+    @pytest.mark.asyncio
+    async def test_rollback_happens_without_a_ceiling(self, interpreter, tmp_path):
+        # The journal is always-on: rollback does not depend on a ceiling or a
+        # granted toolset. A bare run's failed write is still rolled back.
+        doc = ("```lackpy @write(out.txt)\nfresh\n```\n\n"
+               "```lackpy\nraise ValueError('boom')\n```")
+        ctx = ExecutionContext(base_dir=tmp_path)  # no ceiling, no tools
+        result = await interpreter.execute(doc, ctx)
+        assert not result.success
+        assert not (tmp_path / "out.txt").exists()   # rolled back regardless
+
+    @pytest.mark.asyncio
+    async def test_failure_restores_a_diffed_file(self, interpreter, tmp_path):
+        # apply_diff mutates an existing file -- the dangerous write-kind. A later
+        # failure must restore the original content.
+        (tmp_path / "hello.txt").write_text("Hello World\n")
+        doc = ("```lackpy @diff(hello.txt)\n"
+               "--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n"
+               "-Hello World\n+Hello Universe\n```\n\n"
+               "```lackpy\nraise RuntimeError('boom')\n```")
+        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        result = await interpreter.execute(doc, ctx)
+        assert not result.success
+        assert (tmp_path / "hello.txt").read_text() == "Hello World\n"   # restored
