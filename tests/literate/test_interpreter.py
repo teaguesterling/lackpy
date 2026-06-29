@@ -370,3 +370,33 @@ class TestCeilingGate:
         ctx = ExecutionContext(base_dir=tmp_path, config=None)
         result = await interpreter.execute("Hello", ctx)
         assert result.success
+
+    @staticmethod
+    def _toolset(grade_w):
+        spec = ToolSpec(name="reader", provider="python", description="r",
+                        args=[], returns="str", grade_w=grade_w, effects_ceiling=grade_w)
+        return ResolvedTools(tools={"reader": spec}, callables={"reader": lambda: "x"},
+                             grade=Grade(grade_w, grade_w), description="t")
+
+    @pytest.mark.asyncio
+    async def test_ceiling_defaults_to_granted_toolset_grade(self, interpreter, tmp_path):
+        # Profile -> ceiling wiring: with NO explicit ceiling, the gate caps the
+        # document at the granted toolset's grade. A read-only toolset (w=1)
+        # refuses a write-builtin doc; a write-capable toolset (w=3) allows it.
+        write_doc = "```lackpy @write(o.py)\nv = 1\n```"
+
+        ro = ExecutionContext(base_dir=tmp_path, tools=self._toolset(1))
+        result = await interpreter.execute(write_doc, ro)
+        assert not result.success and "w=3" in result.error
+        assert not (tmp_path / "o.py").exists()
+
+        rw = ExecutionContext(base_dir=tmp_path, tools=self._toolset(3))
+        assert (await interpreter.execute(write_doc, rw)).success
+
+    @pytest.mark.asyncio
+    async def test_explicit_ceiling_overrides_toolset_grade(self, interpreter, tmp_path):
+        # An explicit config ceiling wins over the toolset-grade default.
+        ctx = ExecutionContext(base_dir=tmp_path, tools=self._toolset(3),
+                               config={"grade_ceiling": Grade(1, 1)})
+        result = await interpreter.execute("```lackpy @write(o.py)\nv=1\n```", ctx)
+        assert not result.success
