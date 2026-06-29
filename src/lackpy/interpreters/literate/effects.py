@@ -247,6 +247,21 @@ def combine(effects: list[CellEffects]) -> CellEffects:
     )
 
 
+def exceeds_ceiling(effects: CellEffects, ceiling: Grade) -> str | None:
+    """Return a human-readable reason if ``effects`` exceeds ``ceiling``, else None.
+
+    The gate compares both grade axes -- world-coupling (``w``) and effects-depth
+    (``d``). The literate step calls this on a segment's combined effects to refuse
+    a document whose aggregate effects exceed the profile's allowed grade *before*
+    any cell runs. ``w`` is reported first because it is the coupling axis that
+    decides enforcement (read/exec/write)."""
+    if effects.grade.w > ceiling.w:
+        return f"world-coupling w={effects.grade.w} exceeds ceiling w={ceiling.w}"
+    if effects.grade.d > ceiling.d:
+        return f"effects-depth d={effects.grade.d} exceeds ceiling d={ceiling.d}"
+    return None
+
+
 def _max_grade(a: Grade, b: Grade) -> Grade:
     return Grade(w=max(a.w, b.w), d=max(a.d, b.d))
 

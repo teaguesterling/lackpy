@@ -10,6 +10,7 @@ from lackpy.interpreters.literate.effects import (
     LITERATE_TOOL_EFFECTS,
     classify_effects,
     combine,
+    exceeds_ceiling,
 )
 from lackpy.interpreters.literate.compiler import compile_document
 from lackpy.lang.grader import Grade
@@ -191,3 +192,35 @@ def test_unknown_tool_name_is_ignored():
     assert eff.grade.w == 0
     assert not eff.needs_sandbox
     assert eff.transactional
+
+
+# --- the ceiling gate (slice 1: refuse before running if effects exceed grade) ---
+
+def test_exceeds_ceiling_on_world_coupling():
+    write = classify_effects("write_file('a.py', 'x')")  # w=3
+    assert exceeds_ceiling(write, Grade(1, 3)) is not None  # w=3 > ceiling w=1
+    assert "w=3" in exceeds_ceiling(write, Grade(1, 3))
+
+
+def test_within_ceiling_passes():
+    read = classify_effects("print(read_file('a.py'))")  # w=1
+    assert exceeds_ceiling(read, Grade(1, 1)) is None  # exactly at ceiling -> ok
+    assert exceeds_ceiling(read, Grade(3, 3)) is None
+
+
+def test_pure_doc_passes_a_zero_ceiling():
+    pure = classify_effects("x = 1 + 2")
+    assert exceeds_ceiling(pure, Grade(0, 0)) is None
+
+
+def test_exceeds_ceiling_on_effects_depth():
+    # d over, w within: still a violation, reported on the d axis.
+    eff = CellEffects(Grade(1, 3), frozenset(), frozenset(), frozenset(), False, False)
+    msg = exceeds_ceiling(eff, Grade(2, 2))
+    assert msg is not None and "d=3" in msg
+
+
+def test_unanalyzable_doc_is_caught_by_a_low_ceiling():
+    # import -> unanalyzable -> conservative w=3, so a read-only ceiling refuses it.
+    eff = classify_effects("import os\nos.remove('x')")
+    assert exceeds_ceiling(eff, Grade(1, 1)) is not None

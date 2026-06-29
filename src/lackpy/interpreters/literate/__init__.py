@@ -22,6 +22,8 @@ from ..base import (
     InterpreterExecutionResult,
     InterpreterValidationResult,
 )
+from .compiler import compile_cells
+from .effects import classify_effects, exceeds_ceiling
 from .kernel import LightweightKernel
 from .parser import parse
 from .prompt import LITERATE_HINT
@@ -77,6 +79,28 @@ class LiterateInterpreter:
                 output_format="none",
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
+
+        # Effect ceiling gate (effects-core-to-the-step). When the context carries
+        # a `grade_ceiling` Grade, refuse a document whose aggregate effects exceed
+        # it -- statically, before any cell runs. No ceiling => no gate (behaviour
+        # unchanged). This is the first consumer of the effect classifier; the
+        # @continue file journal and sandbox fail-closed are later slices.
+        ceiling = context.config.get("grade_ceiling")
+        if ceiling is not None:
+            doc_effects = classify_effects(compile_cells(parsed))
+            violation = exceeds_ceiling(doc_effects, ceiling)
+            if violation:
+                return InterpreterExecutionResult(
+                    success=False,
+                    error=f"effect ceiling exceeded: {violation}",
+                    output_format="none",
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                    metadata={
+                        "effects": doc_effects,
+                        "ceiling": ceiling,
+                        "needs_sandbox": doc_effects.needs_sandbox,
+                    },
+                )
 
         namespace = _build_namespace(context)
         kernel = LightweightKernel(namespace=namespace)

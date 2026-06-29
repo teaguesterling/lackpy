@@ -7,6 +7,7 @@ import pytest
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter
+from lackpy.lang.grader import Grade
 
 
 @pytest.fixture
@@ -275,3 +276,37 @@ The first line is: {first_line}"""
         assert result.success
         assert "2 lines" in result.output
         assert "def main():" in result.output
+
+
+class TestCeilingGate:
+    """The effect ceiling gate: refuse a document whose aggregate effects exceed
+    the context's grade_ceiling -- statically, before any cell runs."""
+
+    @pytest.mark.asyncio
+    async def test_gate_refuses_doc_over_ceiling(self, interpreter, tmp_path):
+        # A write-grade (w=3) doc under a read-only ceiling (w=1) is refused
+        # before running -- the target file must NOT be created.
+        ctx = ExecutionContext(base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)})
+        doc = "```lackpy @write(out.py)\nvalue = 1\n```\n"
+        result = await interpreter.execute(doc, ctx)
+        assert not result.success
+        assert "effect ceiling exceeded" in result.error
+        assert "w=3" in result.error
+        assert not (tmp_path / "out.py").exists()  # gate ran before the write
+
+    @pytest.mark.asyncio
+    async def test_gate_allows_doc_within_ceiling(self, interpreter, tmp_path):
+        ctx = ExecutionContext(base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)})
+        doc = "```lackpy @hidden\nx = 2 + 2\n```\n\nResult: {x}"
+        result = await interpreter.execute(doc, ctx)
+        assert result.success
+        assert "Result: 4" in result.output
+
+    @pytest.mark.asyncio
+    async def test_no_ceiling_means_no_gate(self, interpreter, tmp_path):
+        # Without a grade_ceiling the doc runs as before (writes the file).
+        ctx = ExecutionContext(base_dir=tmp_path)
+        doc = "```lackpy @write(out.py)\nvalue = 1\n```\n"
+        result = await interpreter.execute(doc, ctx)
+        assert result.success
+        assert (tmp_path / "out.py").exists()
