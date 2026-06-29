@@ -89,17 +89,26 @@ class LiterateInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
-        # Effect ceiling gate (effects-core-to-the-step). When the context carries
-        # a `grade_ceiling`, refuse a document whose aggregate effects exceed it --
-        # statically, before any cell runs. No ceiling => no gate (behaviour
-        # unchanged). First consumer of the effect classifier; the @continue file
-        # journal and sandbox fail-closed are later slices.
+        # Effect ceiling gate (effects-core-to-the-step). Refuse a document whose
+        # aggregate effects exceed the ceiling -- statically, before any cell runs.
+        # First consumer of the effect classifier; the @continue file journal and
+        # sandbox fail-closed are later slices.
+        #
+        # Profile -> ceiling wiring: an explicit context.config["grade_ceiling"]
+        # wins; otherwise the ceiling DEFAULTS to the granted toolset's grade
+        # (ResolvedProfile.grade == its tools' grade), i.e. a document may not
+        # exceed the effect grade of the tools its profile granted. No ceiling and
+        # no toolset => no gate (behaviour unchanged). (End-to-end enforcement in
+        # the agent path additionally needs execution-axis dispatch to run literate
+        # under a profile -- a separate slice.)
         #
         # NOTE: this gates only the batch path. The StreamingDriver path is not yet
         # gated -- a follow-up slice must mirror this there. Cells are also compiled
         # here and again by the kernel (cheap for small docs; a later slice can
         # compile once and feed both).
         raw_ceiling = (context.config or {}).get("grade_ceiling")
+        if raw_ceiling is None:
+            raw_ceiling = getattr(context.tools, "grade", None)
         if raw_ceiling is not None:
             ceiling = as_grade(raw_ceiling)
             effects_map = _gate_effects_map(context)
