@@ -17,6 +17,14 @@ This is the foundation the effect-aware step consumes four ways: the ceiling
 gate, the file journal, the sandbox decision, and the dry-run manifest shown to
 the model/policy before commit.
 
+**Grades are config-driven, not hardcoded.** Each literate tool's grade + effect
+kind + path argument is declared in ``tool_effects.toml`` (a ToolSpec-shaped
+table) and loaded into :data:`LITERATE_TOOL_EFFECTS`. Callers may inject a
+different map via ``classify_effects(..., tool_effects=)`` -- the seam through
+which the resolved toolbox will supply grades once the literate tools are
+registered as real graded specs (today they bypass the toolbox as plain
+functions; unifying them is the remaining follow-up).
+
 **Scope -- read this.** This is a *cooperative planner*, NOT a security boundary.
 Because literate cells run un-restricted Python (the prompt permits ``import os``
 etc.), no name-based AST pass can soundly enumerate every effect path. The
@@ -31,27 +39,49 @@ step must sandbox it and must not promise rollback" signal.
 from __future__ import annotations
 
 import ast
+import tomllib
 from dataclasses import dataclass
+from importlib.resources import files
+from typing import Mapping
 
 from ...lang.grader import Grade
 
-# name -> (grade, path-parameter-name, positional-index). The literate tools
-# (interpreters/literate/tools.py) are plain functions, so their grades live
-# here for now rather than on a ToolSpec; unifying the two is a follow-up.
-_READ_TOOLS: dict[str, tuple[Grade, str, int]] = {
-    "read_file": (Grade(1, 1), "path", 0),
-    "search_content": (Grade(1, 1), "path", 1),
-}
-_WRITE_TOOLS: dict[str, tuple[Grade, str, int]] = {
-    "write_file": (Grade(3, 3), "path", 0),
-    "apply_diff": (Grade(3, 3), "path", 0),
-}
-# Exec tools are off the "scoped" lattice -- a shell command can write anywhere,
-# spawn, or reach the network -- so they get high coupling and force a sandbox.
-_EXEC_TOOLS: dict[str, Grade] = {
-    "run_command": Grade(3, 3),
-    "run_tests": Grade(2, 3),
-}
+
+@dataclass(frozen=True)
+class ToolEffect:
+    """Effect descriptor for one literate tool (one row of tool_effects.toml).
+
+    Attributes:
+        grade: The tool's world-coupling/effects grade.
+        kind: ``"read"`` | ``"write"`` | ``"exec"`` -- selects the enforcement
+            mechanism (read=run, write=journal, exec=sandbox).
+        path_arg: Name of the parameter carrying a file path, or None.
+        path_index: Positional index of that parameter, or None.
+    """
+
+    grade: Grade
+    kind: str
+    path_arg: str | None = None
+    path_index: int | None = None
+
+
+def _load_tool_effects() -> dict[str, ToolEffect]:
+    """Load the literate tool effect table from the shipped TOML data."""
+    raw = (files(__package__) / "tool_effects.toml").read_text(encoding="utf-8")
+    table: dict[str, ToolEffect] = {}
+    for t in tomllib.loads(raw).get("tools", []):
+        table[t["name"]] = ToolEffect(
+            grade=Grade(w=t.get("grade_w", 3), d=t.get("effects_ceiling", 3)),
+            kind=t["kind"],
+            path_arg=t.get("path_arg"),
+            path_index=t.get("path_index"),
+        )
+    return table
+
+
+# The literate tool namespace's effect grades -- the single, config-driven source
+# of truth (tool_effects.toml). Injectable per-call via classify_effects().
+LITERATE_TOOL_EFFECTS: dict[str, ToolEffect] = _load_tool_effects()
 
 # Raw effect primitives that defeat name-based classification. Calling any of
 # these (or importing anything) means we can no longer bound the cell's effects.
@@ -76,9 +106,9 @@ class CellEffects:
             set the step can journal for rollback.
         reads: File paths the cell reads via a literal argument (informational;
             reads need no rollback).
-        exec_calls: Names of exec-graded tools the cell invokes (``run_command``,
+        exec_calls: Names of exec-kind tools the cell invokes (``run_command``,
             ``run_tests``). Non-empty => a sandbox is required.
-        dynamic_paths: A write/read tool was called with a non-literal path, so
+        dynamic_paths: A path-bearing tool was called with a non-literal path, so
             its target can't be journaled statically.
         unanalyzable: The cell reaches raw effect surface (``import`` / ``open`` /
             raw exec) this pass can't bound. The step must sandbox it and must
@@ -109,7 +139,11 @@ class CellEffects:
         return not (self.unanalyzable or self.dynamic_paths or self.exec_calls)
 
 
-def classify_effects(compiled_source: str) -> CellEffects:
+def classify_effects(
+    compiled_source: str,
+    *,
+    tool_effects: Mapping[str, ToolEffect] | None = None,
+) -> CellEffects:
     """Classify the effects of one compiled cell without executing it.
 
     Args:
@@ -117,12 +151,16 @@ def classify_effects(compiled_source: str) -> CellEffects:
             cell (the output of ``compiler._COMPILERS[...]``). Annotated cells
             (``@read``/``@write``/``@diff``) compile to literal-path tool calls,
             so they classify through the same path as raw code cells.
+        tool_effects: Name -> :class:`ToolEffect` map defining which calls are
+            graded effects. Defaults to :data:`LITERATE_TOOL_EFFECTS` (loaded
+            from ``tool_effects.toml``); inject a toolbox-derived map to override.
 
     Returns:
         A :class:`CellEffects`. A cell that doesn't parse is treated as
         ``unanalyzable`` (the kernel's own static check reports the syntax error
         separately; here we just refuse to vouch for its effects).
     """
+    effects_map = tool_effects if tool_effects is not None else LITERATE_TOOL_EFFECTS
     try:
         tree = ast.parse(compiled_source)
     except SyntaxError:
@@ -152,25 +190,23 @@ def classify_effects(compiled_source: str) -> CellEffects:
         name = node.func.id
         if name in _ESCAPE_HATCH_CALLS:
             unanalyzable = True
-        elif name in _READ_TOOLS:
-            g, pname, idx = _READ_TOOLS[name]
-            grade = _max_grade(grade, g)
-            literal = _literal_path(node, pname, idx)
+            continue
+
+        te = effects_map.get(name)
+        if te is None:
+            continue
+
+        grade = _max_grade(grade, te.grade)
+        if te.kind == "exec":
+            exec_calls.add(name)
+        elif te.kind in ("read", "write"):
+            literal = _literal_path(node, te.path_arg, te.path_index)
             if literal is None:
                 dynamic_paths = True
+            elif te.kind == "write":
+                writes.add(literal)
             else:
                 reads.add(literal)
-        elif name in _WRITE_TOOLS:
-            g, pname, idx = _WRITE_TOOLS[name]
-            grade = _max_grade(grade, g)
-            literal = _literal_path(node, pname, idx)
-            if literal is None:
-                dynamic_paths = True
-            else:
-                writes.add(literal)
-        elif name in _EXEC_TOOLS:
-            grade = _max_grade(grade, _EXEC_TOOLS[name])
-            exec_calls.add(name)
 
     if unanalyzable:
         grade = _max_grade(grade, _CONSERVATIVE)
@@ -215,12 +251,13 @@ def _max_grade(a: Grade, b: Grade) -> Grade:
     return Grade(w=max(a.w, b.w), d=max(a.d, b.d))
 
 
-def _literal_path(node: ast.Call, pname: str, idx: int) -> str | None:
+def _literal_path(node: ast.Call, pname: str | None, idx: int | None) -> str | None:
     """Extract a string-literal path argument, or None if absent/non-literal."""
-    for kw in node.keywords:  # keyword form: f(path="x")
-        if kw.arg == pname:
-            return _const_str(kw.value)
-    if idx < len(node.args):  # positional form: f("x")
+    if pname is not None:
+        for kw in node.keywords:  # keyword form: f(path="x")
+            if kw.arg == pname:
+                return _const_str(kw.value)
+    if idx is not None and idx < len(node.args):  # positional form: f("x")
         return _const_str(node.args[idx])
     return None
 

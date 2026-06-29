@@ -6,10 +6,13 @@ every case here is pure input -> CellEffects with no kernel, no filesystem.
 
 from lackpy.interpreters.literate.effects import (
     CellEffects,
+    ToolEffect,
+    LITERATE_TOOL_EFFECTS,
     classify_effects,
     combine,
 )
 from lackpy.interpreters.literate.compiler import compile_document
+from lackpy.lang.grader import Grade
 
 
 def test_pure_compute_is_grade_zero_and_transactional():
@@ -154,3 +157,37 @@ def test_celleffects_is_frozen():
     assert isinstance(eff, CellEffects)
     import dataclasses
     assert dataclasses.is_dataclass(eff)
+
+
+# --- config-driven grade table (the "(b)" mechanism: grades from data, injectable) ---
+
+def test_grades_load_from_toml_covering_the_literate_tools():
+    assert set(LITERATE_TOOL_EFFECTS) == {
+        "read_file", "search_content", "write_file",
+        "apply_diff", "run_tests", "run_command",
+    }
+    assert LITERATE_TOOL_EFFECTS["write_file"].grade.w == 3
+    assert LITERATE_TOOL_EFFECTS["read_file"].kind == "read"
+    # run_command: write-ceiling blast radius but exec mechanism (sandbox).
+    rc = LITERATE_TOOL_EFFECTS["run_command"]
+    assert rc.grade.w == 3 and rc.kind == "exec" and rc.path_arg is None
+
+
+def test_injected_tool_effects_override_the_default_table():
+    # A caller (e.g. a session sourcing grades from the resolved toolbox) can
+    # supply its own map; the built-in names are then NOT classified.
+    custom = {"my_writer": ToolEffect(Grade(3, 3), "write", "path", 0)}
+    eff = classify_effects("my_writer('out.x', 'data')", tool_effects=custom)
+    assert eff.writes == frozenset({"out.x"})
+    assert eff.grade.w == 3
+    # read_file is absent from the injected map -> treated as a plain call.
+    eff2 = classify_effects("read_file('x')", tool_effects=custom)
+    assert eff2.reads == frozenset()
+    assert eff2.grade.w == 0
+
+
+def test_unknown_tool_name_is_ignored():
+    eff = classify_effects("frobnicate('x')")
+    assert eff.grade.w == 0
+    assert not eff.needs_sandbox
+    assert eff.transactional

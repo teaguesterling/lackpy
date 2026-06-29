@@ -1,0 +1,63 @@
+# Effect grades for the literate tool namespace (interpreters/literate/tools.py).
+#
+# Single, config-driven source of truth consumed by effects.classify_effects --
+# NOT hardcoded in Python. Each entry is shaped as a ToolSpec subset (grade_w /
+# effects_ceiling) plus the two things the effect classifier needs beyond a
+# grade: the effect `kind` and which argument carries a path. This shape lets the
+# table fold into the toolbox's graded-source stack (default_tools.toml /
+# ConfigToolSource) when the literate tools are registered as real specs.
+#
+# kind:
+#   read  -> pinhole read; nothing to roll back (transactional)
+#   write -> scoped write; journalable when its path arg is a literal
+#   exec  -> subprocess/shell; sandbox boundary, never transactional
+# path_arg / path_index: the parameter (name + positional index) holding the
+#   file path, used to extract a literal target for the rollback journal.
+
+[[tools]]
+name = "read_file"
+grade_w = 1
+effects_ceiling = 1
+kind = "read"
+path_arg = "path"
+path_index = 0
+
+[[tools]]
+name = "search_content"
+grade_w = 1
+effects_ceiling = 1
+kind = "read"
+path_arg = "path"
+path_index = 1
+
+[[tools]]
+name = "write_file"
+grade_w = 3
+effects_ceiling = 3
+kind = "write"
+path_arg = "path"
+path_index = 0
+
+[[tools]]
+name = "apply_diff"
+grade_w = 3
+effects_ceiling = 3
+kind = "write"
+path_arg = "path"
+path_index = 0
+
+[[tools]]
+# Scoped exec (pytest within the tree). Exec, so sandboxed + non-transactional.
+name = "run_tests"
+grade_w = 2
+effects_ceiling = 3
+kind = "exec"
+
+[[tools]]
+# Unscoped shell -- off the "scoped" lattice (can write anywhere / network).
+# Graded at the write ceiling (w=3) so the ceiling gate sees its blast radius,
+# but kind=exec so it is sandboxed and never journaled/rolled back.
+name = "run_command"
+grade_w = 3
+effects_ceiling = 3
+kind = "exec"
