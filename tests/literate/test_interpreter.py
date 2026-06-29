@@ -1,13 +1,12 @@
 """Integration tests for the LiterateInterpreter."""
 
-import os
-from pathlib import Path
-
 import pytest
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter
 from lackpy.lang.grader import Grade
+from lackpy.tools.registry import ResolvedTools
+from lackpy.tools.toolbox import ToolSpec
 
 
 @pytest.fixture
@@ -310,3 +309,64 @@ class TestCeilingGate:
         result = await interpreter.execute(doc, ctx)
         assert result.success
         assert (tmp_path / "out.py").exists()
+
+    @pytest.mark.asyncio
+    async def test_scratch_directive_allowed_under_read_ceiling(self, interpreter, workspace):
+        # Review #2/#8: @scratch compiles to locals(); it must NOT be refused as
+        # an escape hatch under a read-only ceiling.
+        ctx = ExecutionContext(base_dir=workspace, config={"grade_ceiling": Grade(1, 1)})
+        doc = "```lackpy @read(hello.txt)\n```\n\n```lackpy @scratch\nx = 1\n```"
+        result = await interpreter.execute(doc, ctx)
+        assert result.success
+
+    @pytest.mark.asyncio
+    async def test_injected_tool_is_graded_by_the_gate(self, interpreter, tmp_path):
+        # Review #1/#3: a profile-injected write-capable tool must be graded by
+        # the gate, not slip under a read-only ceiling as a pure call.
+        called = []
+        spec = ToolSpec(name="custom_writer", provider="python", description="w",
+                        args=[], returns="bool", grade_w=3, effects_ceiling=3)
+        resolved = ResolvedTools(
+            tools={"custom_writer": spec},
+            callables={"custom_writer": lambda p, d: called.append(p)},
+            grade=Grade(3, 3), description="custom",
+        )
+        doc = '```lackpy\ncustom_writer("out.txt", "data")\n```'
+
+        ctx = ExecutionContext(base_dir=tmp_path, tools=resolved,
+                               config={"grade_ceiling": Grade(1, 1)})
+        result = await interpreter.execute(doc, ctx)
+        assert not result.success                 # refused
+        assert "w=3" in result.error
+        assert called == []                       # tool never ran
+
+        ctx2 = ExecutionContext(base_dir=tmp_path, tools=resolved,
+                                config={"grade_ceiling": Grade(3, 3)})
+        result2 = await interpreter.execute(doc, ctx2)
+        assert result2.success and called          # allowed + ran under a write ceiling
+
+    @pytest.mark.asyncio
+    async def test_syntax_error_reports_kernel_error_not_ceiling(self, interpreter, tmp_path):
+        # Review #9: a cell with a Python typo under a low ceiling must surface the
+        # real syntax error, not a misleading "effect ceiling exceeded".
+        ctx = ExecutionContext(base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)})
+        result = await interpreter.execute("```lackpy\nx = (1 +\n```", ctx)
+        assert not result.success
+        assert "ceiling" not in (result.error or "")
+        assert "syntax" in (result.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_ceiling_accepts_a_pair_or_int(self, interpreter, tmp_path):
+        # Review #6: a config/TOML-sourced ceiling (list/int) is coerced.
+        for ceiling in ([1, 1], 1):
+            ctx = ExecutionContext(base_dir=tmp_path, config={"grade_ceiling": ceiling})
+            result = await interpreter.execute("```lackpy @write(o.py)\nv=1\n```", ctx)
+            assert not result.success
+            assert "ceiling" in result.error
+
+    @pytest.mark.asyncio
+    async def test_none_config_does_not_crash(self, interpreter, tmp_path):
+        # Review #4: tolerate config=None (against the dict default-factory contract).
+        ctx = ExecutionContext(base_dir=tmp_path, config=None)
+        result = await interpreter.execute("Hello", ctx)
+        assert result.success

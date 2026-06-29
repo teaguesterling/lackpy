@@ -190,6 +190,18 @@ _COMPILERS: dict[str, Callable[[Cell], str]] = {
 }
 
 
+def compile_cell(cell: Cell) -> str:
+    """Compile a single cell to Python source.
+
+    Raises ``ValueError`` on an unknown cell type (the parser only emits known
+    types, so this is a guard, not an expected path). Used by the effect-ceiling
+    gate to classify cells one at a time."""
+    compiler = _COMPILERS.get(cell.cell_type)
+    if compiler is None:
+        raise ValueError(f"Unknown cell type: {cell.cell_type}")
+    return compiler(cell)
+
+
 def compile_cells(parse_result: ParseResult) -> str:
     """Compile a parsed document into a single Python program."""
     parts: list[str] = []

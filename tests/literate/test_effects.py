@@ -4,10 +4,13 @@ classify_effects() operates on *compiled* cell source and never executes it, so
 every case here is pure input -> CellEffects with no kernel, no filesystem.
 """
 
+import pytest
+
 from lackpy.interpreters.literate.effects import (
     CellEffects,
     ToolEffect,
     LITERATE_TOOL_EFFECTS,
+    as_grade,
     classify_effects,
     combine,
     exceeds_ceiling,
@@ -224,3 +227,43 @@ def test_unanalyzable_doc_is_caught_by_a_low_ceiling():
     # import -> unanalyzable -> conservative w=3, so a read-only ceiling refuses it.
     eff = classify_effects("import os\nos.remove('x')")
     assert exceeds_ceiling(eff, Grade(1, 1)) is not None
+
+
+# --- review fixes: introspection not a hatch, as_grade coercion ---
+
+def test_introspection_is_not_an_escape_hatch():
+    # locals/globals/vars are pure namespace introspection (no world effect) and
+    # the first-party @scratch directive compiles to locals() -- flagging them
+    # would falsely refuse benign read-only docs (review finding #2/#8).
+    for src in ("locals()", "globals()", "vars()"):
+        eff = classify_effects(src)
+        assert not eff.unanalyzable, src
+        assert eff.grade.w == 0, src
+
+
+def test_scratch_directive_classifies_as_pure():
+    from lackpy.interpreters.literate.compiler import compile_document
+    compiled = compile_document("```lackpy @scratch\na = 10\nb = 'x'\n```")
+    eff = classify_effects(compiled)
+    assert not eff.unanalyzable
+    assert eff.grade.w == 0  # benign introspection, allowed under any ceiling
+
+
+def test_open_still_an_escape_hatch_after_introspection_removed():
+    # Removing locals/globals/vars must not weaken the genuine hatches.
+    assert classify_effects("open('x','w')").unanalyzable
+    assert classify_effects("eval('1+1')").unanalyzable
+
+
+def test_as_grade_coerces_grade_int_and_pair():
+    assert as_grade(Grade(2, 3)) == Grade(2, 3)
+    assert as_grade(2) == Grade(2, 2)
+    assert as_grade((1, 3)) == Grade(1, 3)
+    assert as_grade([0, 0]) == Grade(0, 0)
+
+
+def test_as_grade_rejects_garbage_and_bool():
+    with pytest.raises(TypeError):
+        as_grade("high")
+    with pytest.raises(TypeError):
+        as_grade(True)  # bool is an int subclass; reject the ambiguity
