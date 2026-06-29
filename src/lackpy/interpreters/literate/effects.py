@@ -83,11 +83,16 @@ def _load_tool_effects() -> dict[str, ToolEffect]:
 # of truth (tool_effects.toml). Injectable per-call via classify_effects().
 LITERATE_TOOL_EFFECTS: dict[str, ToolEffect] = _load_tool_effects()
 
-# Raw effect primitives that defeat name-based classification. Calling any of
-# these (or importing anything) means we can no longer bound the cell's effects.
+# Raw effect primitives that defeat name-based classification: code execution
+# (eval/exec/compile/__import__), dynamic attribute access (getattr/setattr/
+# delattr), file/stdin I/O (open/input). Calling any (or importing anything)
+# means we can no longer bound the cell's effects. NOTE: locals/globals/vars are
+# deliberately NOT here -- they are pure namespace introspection (no world
+# effect), and the first-party @scratch directive compiles to locals(); flagging
+# them would falsely refuse benign read-only documents under a low ceiling.
 _ESCAPE_HATCH_CALLS: frozenset[str] = frozenset(
-    {"open", "eval", "exec", "compile", "__import__", "globals", "locals",
-     "getattr", "setattr", "delattr", "vars", "input"}
+    {"open", "eval", "exec", "compile", "__import__",
+     "getattr", "setattr", "delattr", "input"}
 )
 
 _PURE = Grade(0, 0)
@@ -244,6 +249,40 @@ def combine(effects: list[CellEffects]) -> CellEffects:
         grade=grade, writes=frozenset(writes), reads=frozenset(reads),
         exec_calls=frozenset(exec_calls), dynamic_paths=dynamic_paths,
         unanalyzable=unanalyzable,
+    )
+
+
+def exceeds_ceiling(effects: CellEffects, ceiling: Grade) -> str | None:
+    """Return a human-readable reason if ``effects`` exceeds ``ceiling``, else None.
+
+    The gate compares both grade axes -- world-coupling (``w``) and effects-depth
+    (``d``). The literate step calls this on a segment's combined effects to refuse
+    a document whose aggregate effects exceed the profile's allowed grade *before*
+    any cell runs. ``w`` is reported first because it is the coupling axis that
+    decides enforcement (read/exec/write)."""
+    if effects.grade.w > ceiling.w:
+        return f"world-coupling w={effects.grade.w} exceeds ceiling w={ceiling.w}"
+    if effects.grade.d > ceiling.d:
+        return f"effects-depth d={effects.grade.d} exceeds ceiling d={ceiling.d}"
+    return None
+
+
+def as_grade(value: object) -> Grade:
+    """Coerce a ceiling spec into a :class:`Grade`.
+
+    Accepts a ``Grade`` (returned as-is), a ``(w, d)`` pair, or a single int
+    (applied to both axes). This lets a config/TOML-sourced ``grade_ceiling``
+    (often a list or int) be used without the caller hand-building a ``Grade``."""
+    if isinstance(value, Grade):
+        return value
+    if isinstance(value, bool):  # bool is an int subclass; reject the ambiguity
+        raise TypeError(f"grade_ceiling must not be a bool; got {value!r}")
+    if isinstance(value, int):
+        return Grade(value, value)
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        return Grade(int(value[0]), int(value[1]))
+    raise TypeError(
+        f"grade_ceiling must be a Grade, (w, d) pair, or int; got {value!r}"
     )
 
 

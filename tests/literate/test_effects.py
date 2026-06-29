@@ -4,12 +4,16 @@ classify_effects() operates on *compiled* cell source and never executes it, so
 every case here is pure input -> CellEffects with no kernel, no filesystem.
 """
 
+import pytest
+
 from lackpy.interpreters.literate.effects import (
     CellEffects,
     ToolEffect,
     LITERATE_TOOL_EFFECTS,
+    as_grade,
     classify_effects,
     combine,
+    exceeds_ceiling,
 )
 from lackpy.interpreters.literate.compiler import compile_document
 from lackpy.lang.grader import Grade
@@ -191,3 +195,75 @@ def test_unknown_tool_name_is_ignored():
     assert eff.grade.w == 0
     assert not eff.needs_sandbox
     assert eff.transactional
+
+
+# --- the ceiling gate (slice 1: refuse before running if effects exceed grade) ---
+
+def test_exceeds_ceiling_on_world_coupling():
+    write = classify_effects("write_file('a.py', 'x')")  # w=3
+    assert exceeds_ceiling(write, Grade(1, 3)) is not None  # w=3 > ceiling w=1
+    assert "w=3" in exceeds_ceiling(write, Grade(1, 3))
+
+
+def test_within_ceiling_passes():
+    read = classify_effects("print(read_file('a.py'))")  # w=1
+    assert exceeds_ceiling(read, Grade(1, 1)) is None  # exactly at ceiling -> ok
+    assert exceeds_ceiling(read, Grade(3, 3)) is None
+
+
+def test_pure_doc_passes_a_zero_ceiling():
+    pure = classify_effects("x = 1 + 2")
+    assert exceeds_ceiling(pure, Grade(0, 0)) is None
+
+
+def test_exceeds_ceiling_on_effects_depth():
+    # d over, w within: still a violation, reported on the d axis.
+    eff = CellEffects(Grade(1, 3), frozenset(), frozenset(), frozenset(), False, False)
+    msg = exceeds_ceiling(eff, Grade(2, 2))
+    assert msg is not None and "d=3" in msg
+
+
+def test_unanalyzable_doc_is_caught_by_a_low_ceiling():
+    # import -> unanalyzable -> conservative w=3, so a read-only ceiling refuses it.
+    eff = classify_effects("import os\nos.remove('x')")
+    assert exceeds_ceiling(eff, Grade(1, 1)) is not None
+
+
+# --- review fixes: introspection not a hatch, as_grade coercion ---
+
+def test_introspection_is_not_an_escape_hatch():
+    # locals/globals/vars are pure namespace introspection (no world effect) and
+    # the first-party @scratch directive compiles to locals() -- flagging them
+    # would falsely refuse benign read-only docs (review finding #2/#8).
+    for src in ("locals()", "globals()", "vars()"):
+        eff = classify_effects(src)
+        assert not eff.unanalyzable, src
+        assert eff.grade.w == 0, src
+
+
+def test_scratch_directive_classifies_as_pure():
+    from lackpy.interpreters.literate.compiler import compile_document
+    compiled = compile_document("```lackpy @scratch\na = 10\nb = 'x'\n```")
+    eff = classify_effects(compiled)
+    assert not eff.unanalyzable
+    assert eff.grade.w == 0  # benign introspection, allowed under any ceiling
+
+
+def test_open_still_an_escape_hatch_after_introspection_removed():
+    # Removing locals/globals/vars must not weaken the genuine hatches.
+    assert classify_effects("open('x','w')").unanalyzable
+    assert classify_effects("eval('1+1')").unanalyzable
+
+
+def test_as_grade_coerces_grade_int_and_pair():
+    assert as_grade(Grade(2, 3)) == Grade(2, 3)
+    assert as_grade(2) == Grade(2, 2)
+    assert as_grade((1, 3)) == Grade(1, 3)
+    assert as_grade([0, 0]) == Grade(0, 0)
+
+
+def test_as_grade_rejects_garbage_and_bool():
+    with pytest.raises(TypeError):
+        as_grade("high")
+    with pytest.raises(TypeError):
+        as_grade(True)  # bool is an int subclass; reject the ambiguity

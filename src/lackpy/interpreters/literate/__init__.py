@@ -14,13 +14,24 @@ recovery, plugin orchestration, and parse-as-you-generate execution.
 
 from __future__ import annotations
 
+import ast
 import time
 from typing import Any
 
+from ...lang.grader import Grade
 from ..base import (
     ExecutionContext,
     InterpreterExecutionResult,
     InterpreterValidationResult,
+)
+from .compiler import compile_cell
+from .effects import (
+    LITERATE_TOOL_EFFECTS,
+    ToolEffect,
+    as_grade,
+    classify_effects,
+    combine,
+    exceeds_ceiling,
 )
 from .kernel import LightweightKernel
 from .parser import parse
@@ -77,6 +88,45 @@ class LiterateInterpreter:
                 output_format="none",
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
+
+        # Effect ceiling gate (effects-core-to-the-step). When the context carries
+        # a `grade_ceiling`, refuse a document whose aggregate effects exceed it --
+        # statically, before any cell runs. No ceiling => no gate (behaviour
+        # unchanged). First consumer of the effect classifier; the @continue file
+        # journal and sandbox fail-closed are later slices.
+        #
+        # NOTE: this gates only the batch path. The StreamingDriver path is not yet
+        # gated -- a follow-up slice must mirror this there. Cells are also compiled
+        # here and again by the kernel (cheap for small docs; a later slice can
+        # compile once and feed both).
+        raw_ceiling = (context.config or {}).get("grade_ceiling")
+        if raw_ceiling is not None:
+            ceiling = as_grade(raw_ceiling)
+            effects_map = _gate_effects_map(context)
+            cell_effects = []
+            for cell in parsed.cells:
+                src = compile_cell(cell)
+                try:
+                    ast.parse(src)
+                except SyntaxError:
+                    # Skip a malformed cell so the kernel reports the precise
+                    # syntax error rather than a misleading ceiling refusal.
+                    continue
+                cell_effects.append(classify_effects(src, tool_effects=effects_map))
+            doc_effects = combine(cell_effects)
+            violation = exceeds_ceiling(doc_effects, ceiling)
+            if violation:
+                return InterpreterExecutionResult(
+                    success=False,
+                    error=f"effect ceiling exceeded: {violation}",
+                    output_format="none",
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                    metadata={
+                        "effects": doc_effects,
+                        "ceiling": ceiling,
+                        "needs_sandbox": doc_effects.needs_sandbox,
+                    },
+                )
 
         namespace = _build_namespace(context)
         kernel = LightweightKernel(namespace=namespace)
@@ -140,6 +190,34 @@ _INTERNAL_NAMES = frozenset({
     "__literate_continue__", "__builtins__",
     "__continue_requested__",
 })
+
+
+def _gate_effects_map(context: ExecutionContext) -> dict[str, ToolEffect]:
+    """Effect grades the ceiling gate scores against, for THIS context.
+
+    Starts from the literate builtins (``LITERATE_TOOL_EFFECTS``) and adds any
+    profile/toolbox-injected tools (``context.tools``) graded by their own
+    ``ToolSpec``. Without this the gate would only know the builtins, so an
+    injected write-capable tool would classify as pure and slip under a
+    read-only ceiling -- the gate's validation surface must match the execution
+    surface (``_build_namespace`` injects the same ``context.tools`` callables).
+
+    Injected tools carry no literate-specific path metadata, so ``kind`` is
+    derived from the grade (w>=3 write, w==2 exec, else read); only the grade
+    matters for the ceiling comparison. Conservative defaults (3/3) for tools
+    missing a grade fail closed -- safer to over-refuse than under-refuse.
+    """
+    effects_map = dict(LITERATE_TOOL_EFFECTS)
+    resolved = context.tools
+    specs = getattr(resolved, "tools", None) if resolved is not None else None
+    for name, spec in (specs or {}).items():
+        if name in effects_map:
+            continue
+        w = getattr(spec, "grade_w", 3)
+        d = getattr(spec, "effects_ceiling", 3)
+        kind = "write" if w >= 3 else "exec" if w == 2 else "read"
+        effects_map[name] = ToolEffect(grade=Grade(w, d), kind=kind)
+    return effects_map
 
 
 def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
