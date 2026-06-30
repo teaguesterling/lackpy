@@ -524,6 +524,74 @@ class LackpyService:
         finally:
             os.chdir(prev_cwd)
 
+    async def _execute_program(
+        self, program: str, rp: ResolvedProfile, resolved: Any,
+        param_values: dict[str, Any], *, allowed: set[str] | None = None,
+        rules: list | None = None, kibitzer_session: Any = None,
+    ) -> ExecutionResult:
+        """Route a program to the execution model named by the profile's ``execution``
+        axis -- the shared seam for ``run_program`` (and, next, ``delegate``).
+
+        Validation lives ABOVE the branch: a literate document is NOT restricted
+        Python, so it must not pass through the restricted-Python validator (which
+        would reject its fences/prose as a syntax error and never reach the gate).
+        ``execution == "literate"`` validates and runs the program through the
+        LiterateInterpreter, whose ceiling gate + write journal enforce the granted
+        toolset's grade; any other axis is restricted Python -- validated against
+        the allowed names, then run through the restricted runner (unchanged).
+        """
+        if rp.execution == "literate":
+            return await self._execute_literate(program, resolved, param_values)
+
+        if allowed is not None:
+            validation = validate(program, allowed_names=allowed, extra_rules=rules)
+            if not validation.valid:
+                return ExecutionResult(
+                    success=False,
+                    error=f"Validation failed: {'; '.join(validation.errors)}",
+                )
+        return await self._execute(
+            program, resolved.callables, param_values,
+            kibitzer_session=kibitzer_session,
+        )
+
+    async def _execute_literate(
+        self, program: str, resolved: Any, param_values: dict[str, Any],
+    ) -> ExecutionResult:
+        """Execute a literate document through the LiterateInterpreter, adapting its
+        result to an ``ExecutionResult``.
+
+        The granted toolset (``resolved``) is threaded as ``context.tools`` so the
+        ceiling defaults to its grade -- a document may not exceed the effect grade
+        of the tools its profile granted -- and its callables join the literate
+        namespace. ``base_dir`` is made absolute so the write journal / tool path
+        resolver is immune to the concurrent single-flight ``os.chdir`` on the
+        restricted-Python path.
+        """
+        from .interpreters.base import ExecutionContext
+        from .interpreters.literate import LiterateInterpreter
+
+        interp = LiterateInterpreter()
+        ctx = ExecutionContext(
+            base_dir=str(self._workspace.resolve()),
+            tools=resolved,
+            params=param_values,
+        )
+        validation = interp.validate(program, ctx)
+        if not validation.valid:
+            return ExecutionResult(
+                success=False,
+                error=f"Validation failed: {'; '.join(validation.errors)}",
+            )
+        result = await interp.execute(program, ctx)
+        return ExecutionResult(
+            success=result.success,
+            output=result.output,
+            stdout=str(result.output) if result.output else "",
+            error=result.error,
+            variables=result.metadata.get("variables", {}),
+        )
+
     async def run_program(self, program: str, profile: Profile | str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
@@ -543,13 +611,14 @@ class LackpyService:
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
-        resolved = self._gate_tools(self._resolve_profile(profile, extra_tools=extra_tools).tools)
+        rp = self._resolve_profile(profile, extra_tools=extra_tools)
+        resolved = self._gate_tools(rp.tools)
         param_values, _, param_names = self._resolve_params(params, resolved)
         allowed = set(resolved.tools.keys()) | param_names
-        validation = validate(program, allowed_names=allowed, extra_rules=rules)
-        if not validation.valid:
-            return ExecutionResult(success=False, error=f"Validation failed: {'; '.join(validation.errors)}")
-        return await self._execute(program, resolved.callables, param_values)
+        # The execution axis (one-shot restricted-Python vs literate) decides both
+        # validation and execution; the seam keeps them paired (see _execute_program).
+        return await self._execute_program(
+            program, rp, resolved, param_values, allowed=allowed, rules=rules)
 
     async def delegate(self, intent: str, profile: Profile | str | list[str] | dict | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,

@@ -4,6 +4,7 @@ import pytest
 from pathlib import Path
 
 from lackpy.service import LackpyService
+from lackpy.profiles import Profile
 from lackpy.tools.toolbox import ToolSpec, ArgSpec
 
 
@@ -147,3 +148,53 @@ class TestLanguageSpec:
         spec = service.language_spec()
         assert "allowed_nodes" in spec
         assert "allowed_builtins" in spec
+
+
+class TestLiterateExecutionAxis:
+    """Profile `execution == "literate"` routes run_program through the
+    LiterateInterpreter, so the effect-ceiling gate (defaulting to the granted
+    toolset's grade) and the write journal enforce end-to-end via the service.
+    """
+
+    @pytest.mark.asyncio
+    async def test_write_doc_refused_under_a_read_only_literate_profile(self, service):
+        # read_file grants only a w=1 toolset -> ceiling w=1 -> a @write doc (w=3)
+        # is refused before any cell runs, and the file is never created.
+        doc = "```lackpy @write(out.txt)\nhello\n```"
+        profile = Profile(tools=["read_file"], execution="literate")
+        result = await service.run_program(doc, profile=profile)
+        assert not result.success
+        assert "effect ceiling exceeded" in (result.error or "")
+        assert not (service._workspace / "out.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_within_ceiling_doc_executes_and_renders(self, service):
+        # A pure doc (w=0) is within the read ceiling -> it runs and renders.
+        doc = "```lackpy\nx = 2 + 2\n```\n\nResult: {x}"
+        profile = Profile(tools=["read_file"], execution="literate")
+        result = await service.run_program(doc, profile=profile)
+        assert result.success
+        assert "Result: 4" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_write_allowed_when_toolset_grade_permits(self, service):
+        # Granting a w=3 tool (edit_file) raises the ceiling to w=3, so the @write
+        # doc is allowed and the literate write builtin creates the file. edit_file
+        # is deliberately NOT write_file, so it does not shadow that builtin.
+        service.toolbox.register_tool(ToolSpec(
+            name="edit_file", provider="builtin", description="edit a file",
+            args=[ArgSpec(name="path", type="str", description="File path")],
+            returns="str", grade_w=3, effects_ceiling=3,
+        ))
+        doc = "```lackpy @write(out.txt)\nkept\n```"
+        profile = Profile(tools=["read_file", "edit_file"], execution="literate")
+        result = await service.run_program(doc, profile=profile)
+        assert result.success, result.error
+        assert (service._workspace / "out.txt").read_text() == "kept"
+
+    @pytest.mark.asyncio
+    async def test_one_shot_axis_unaffected(self, service):
+        # The default execution axis still runs restricted Python through _execute.
+        result = await service.run_program(
+            "x = read_file('test.txt')\nlen(x)", profile=["read_file"])
+        assert result.success
