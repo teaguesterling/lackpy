@@ -668,6 +668,42 @@ class LackpyService:
             errors[provider.name] = validation.errors
         raise RuntimeError(f"Literate generation failed. Errors: {errors}")
 
+    def _planned_tool_calls(
+        self, program: str, rp: ResolvedProfile, allowed: set[str],
+    ) -> list[str]:
+        """Tool names a generated program will call, for the kibitzer mode-policy
+        pre-check (Python builtins excluded).
+
+        A literate document is markdown, so the restricted-Python validator rejects
+        it outright and the pre-check used to silently self-skip -- mode policy did
+        not apply to literate calls. Compile the doc to its Python form first, then
+        extract calls the same way (``validate`` collects called names during its
+        AST walk regardless of whether other rules pass, so an off-lattice doc's
+        tool calls are still surfaced). One-shot programs are unchanged: calls are
+        taken only when the program validates. Returns ``[]`` when nothing can be
+        analyzed (execution will surface the real error).
+
+        COOPERATIVE, not a security boundary -- the same limitation as the effect
+        gate. This enumerates *direct, named* calls only. An attribute call
+        (``os.system(...)``), an alias (``w = write_file; w(...)``), or reflection
+        (``getattr(...)(...)``) is NOT attributed to a tool and slips the check.
+        Soundness against adversarial docs comes from the restricted-AST whitelist
+        + nsjail, not from this pass.
+        """
+        if rp.execution == "literate":
+            try:
+                from .interpreters.literate.compiler import compile_document
+                program = compile_document(program)
+            except Exception:
+                return []
+            calls = validate(program, allowed_names=allowed).calls
+        else:
+            vr = validate(program, allowed_names=allowed)
+            if not vr.valid:
+                return []
+            calls = vr.calls
+        return [c for c in calls if c not in ALLOWED_BUILTINS]
+
     async def run_program(self, program: str, profile: Profile | str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
@@ -756,13 +792,15 @@ class LackpyService:
                                             interpreter=interpreter, extra_tools=extra_tools,
                                             model=model, temperature=temperature)
 
-        # Kibitzer: validate planned calls before execution
+        # Kibitzer: validate planned calls before execution. A literate document is
+        # compiled to its Python form first (see _planned_tool_calls) so mode policy
+        # applies to literate calls too, instead of self-skipping on the markdown.
         kibitzer_suggestions: list[str] = []
         if self._kibitzer:
-            validation_result = validate(gen_result.program, allowed_names=set(resolved.tools.keys()) | param_names)
-            if validation_result.valid:
-                planned = [{"tool": call, "input": {}} for call in validation_result.calls
-                           if call not in ALLOWED_BUILTINS]
+            planned_names = self._planned_tool_calls(
+                gen_result.program, rp, set(resolved.tools.keys()) | param_names)
+            if planned_names:  # only ever validate a non-empty call set
+                planned = [{"tool": call, "input": {}} for call in planned_names]
                 violations = self._kibitzer.validate_calls(planned)
                 if violations:
                     return {
