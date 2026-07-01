@@ -79,6 +79,24 @@ class LiterateInterpreter:
         Uses LightweightKernel directly (not StreamingDriver) because the
         batch path doesn't need streaming, recovery, or plugin orchestration.
         """
+        namespace = _build_namespace(context)
+        kernel = LightweightKernel(namespace=namespace)
+        return await self._run_document(program, context, kernel)
+
+    async def _run_document(
+        self,
+        program: str,
+        context: ExecutionContext,
+        kernel: LightweightKernel,
+    ) -> InterpreterExecutionResult:
+        """Run a literate document through an ALREADY-BUILT kernel: classify ->
+        ceiling gate -> write journal -> run cells -> render.
+
+        Shared by the batch ``execute()`` (a fresh kernel each call) and
+        ``LiterateSession.step()`` (one persistent kernel threaded across rounds).
+        The kernel owns the namespace, so this must NOT rebuild it -- doing so
+        would wipe state threaded from prior rounds.
+        """
         start = time.perf_counter()
 
         parsed = parse(program)
@@ -146,9 +164,6 @@ class LiterateInterpreter:
         # the whole execute() call; per-@continue commit points are a later slice.
         journal = FileJournal(context.base_dir)
         journal.snapshot(doc_effects.writes)
-
-        namespace = _build_namespace(context)
-        kernel = LightweightKernel(namespace=namespace)
 
         output_parts: list[str] = []
         continue_requested = False
@@ -262,3 +277,8 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
         ns.update(context.params)
 
     return ns
+
+
+# Re-export the multi-round fold API. Imported at the end (after LiterateInterpreter
+# and _build_namespace are defined) so session.py's lazy imports resolve cleanly.
+from .session import LiterateSession, StepResult, strip_think  # noqa: E402,F401

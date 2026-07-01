@@ -162,6 +162,20 @@ class LightweightKernel:
         import builtins
         self._namespace["__builtins__"] = builtins
 
+    def snapshot(self) -> dict[str, Any]:
+        """Shallow copy of the current namespace, for restore() after a failed
+        step. Captures name REBINDINGS only -- in-place mutations of held objects
+        are not recorded (consistent with this kernel's own delta tracking, which
+        also can't see in-place changes). A deep copy is deliberately avoided
+        (arbitrary/unpicklable live objects, cost)."""
+        return dict(self._namespace)
+
+    def restore(self, snapshot: dict[str, Any]) -> None:
+        """Restore the namespace to a prior snapshot() -- undoes name rebindings
+        made since the snapshot. In-place mutations are not reverted."""
+        self._namespace.clear()
+        self._namespace.update(snapshot)
+
     def get_namespace(self) -> dict[str, Any]:
         return {
             k: v for k, v in self._namespace.items()

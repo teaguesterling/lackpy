@@ -22,7 +22,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
-from lackpy.interpreters.literate import LiterateInterpreter
+from lackpy.interpreters.literate import LiterateInterpreter, LiterateSession
 from lackpy.prompts import DEFAULT_PERSONA, PERSONAS, compose
 
 
@@ -100,6 +100,11 @@ async def run_literate_agent(
     system_prompt = compose(persona, interpreter)
     work_dir = Path(base_dir) if base_dir else Path.cwd()
     context = ExecutionContext(base_dir=work_dir)
+    # The fold. One persistent kernel is threaded across rounds, so functions and
+    # objects defined in one round are live in the next; step() strips <think>,
+    # gates + journals the doc, and returns Either. This thin client just does the
+    # model-call loop and feeds the next round.
+    session = LiterateSession(context, interpreter=interpreter)
 
     if verbose:
         print(f"Persona: {persona}", file=sys.stderr)
@@ -120,35 +125,43 @@ async def run_literate_agent(
         response = await call_ollama(full_prompt, model=model, system=system_prompt, num_predict=num_predict, verbose=verbose)
 
         if verbose:
-            print(f"\n--- Model Response ---", file=sys.stderr)
+            print("\n--- Model Response ---", file=sys.stderr)
             print(response, file=sys.stderr)
-            print(f"--- End Response ---\n", file=sys.stderr)
+            print("--- End Response ---\n", file=sys.stderr)
 
-        result = await interpreter.execute(response, context)
+        result = await session.step(response)
 
         if verbose:
-            print(f"\n--- Execution Result ---", file=sys.stderr)
-            print(f"Success: {result.success}", file=sys.stderr)
-            if result.error:
-                print(f"Error: {result.error}", file=sys.stderr)
-            print(f"--- End Result ---\n", file=sys.stderr)
+            print("\n--- Step Result ---", file=sys.stderr)
+            print(f"ok: {result.ok}", file=sys.stderr)
+            if not result.ok:
+                print(f"Errors: {result.errors}", file=sys.stderr)
+            print("--- End Result ---\n", file=sys.stderr)
 
-        if not result.success:
-            return f"[Execution failed: {result.error}]\n\nRaw response:\n{response}"
+        if not result.ok:
+            # Left: hand the errors + the raw un-interpreted document back so the
+            # model corrects its own work. State is NOT advanced; retry this round.
+            errors = "\n".join(result.errors)
+            full_prompt = (
+                f"Your previous document failed:\n{errors}\n\n"
+                f"Here is what you wrote:\n{result.raw}\n\n"
+                f"Fix the problem and resubmit the FULL corrected document."
+            )
+            continue
 
-        if not result.metadata.get("continue_requested"):
-            return result.output
+        if not result.continue_requested:
+            return session.rendered
 
-        variables = result.metadata.get("variables", {})
-        var_summary = "\n".join(f"  {k} = {repr(v)[:200]}" for k, v in variables.items())
-
+        # Right + @continue: feed what is LIVE (session.scope), not repr text, so the
+        # model keeps building on the real objects already in the kernel.
+        scope_summary = "\n".join(f"  {k} = {v}" for k, v in session.scope.items())
         full_prompt = (
-            f"Previous execution output:\n{result.output}\n\n"
-            f"Variables available:\n{var_summary}\n\n"
+            f"Previous output:\n{result.clean_doc}\n\n"
+            f"Live variables (already in scope — do not redefine):\n{scope_summary}\n\n"
             f"Continue writing the document from where @continue left off."
         )
 
-    return result.output
+    return session.rendered
 
 
 def main():
