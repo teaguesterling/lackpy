@@ -266,3 +266,96 @@ class TestStripLiterateWrapper:
     def test_empty_is_empty(self):
         from lackpy.service import _strip_literate_wrapper
         assert _strip_literate_wrapper("   ") == ""
+
+
+class _FakeKibitzer:
+    """Minimal kibitzer stand-in: records the planned calls delegate sends to
+    validate_calls, and returns a canned violation list."""
+
+    def __init__(self, violations=None):
+        self.mode = "test"
+        self.seen_planned = None
+        self._violations = violations or []
+
+    def register_context(self, *a, **k):
+        pass
+
+    def validate_calls(self, planned):
+        self.seen_planned = planned
+        return self._violations
+
+    def get_suggestions(self):
+        return []
+
+    def report_generation(self, *a, **k):
+        pass
+
+    def save(self):
+        pass
+
+
+class _Violation:
+    def __init__(self, reason):
+        self.reason = reason
+
+
+class TestLiterateModePolicy:
+    """delegate's kibitzer mode-policy pre-check now applies to literate docs
+    (previously it self-skipped because the restricted-Python validator rejects
+    the markdown outright).
+    """
+
+    def test_planned_calls_extracted_from_a_literate_doc(self, service):
+        rp = service._resolve_profile(Profile(tools=["read_file"], execution="literate"))
+        calls = service._planned_tool_calls(
+            "```lackpy\ndata = read_file('t')\n```", rp, {"read_file"})
+        assert calls == ["read_file"]
+
+    def test_annotation_calls_are_extracted_too(self, service):
+        # @write compiles to write_file(...) -- the compiled call is what policy sees.
+        rp = service._resolve_profile(Profile(tools=["read_file"], execution="literate"))
+        calls = service._planned_tool_calls("```lackpy @write(o.txt)\nhi\n```", rp, {"read_file"})
+        assert "write_file" in calls
+
+    @pytest.mark.asyncio
+    async def test_delegate_routes_literate_calls_to_mode_policy(self, service):
+        fake = _FakeKibitzer()
+        service._kibitzer = fake
+        await service.delegate(
+            "x", profile=Profile(tools=["read_file"], execution="literate"),
+            _program_override="```lackpy\ndata = read_file('t')\n```")
+        assert fake.seen_planned == [{"tool": "read_file", "input": {}}]
+
+    @pytest.mark.asyncio
+    async def test_delegate_enforces_a_literate_mode_policy_violation(self, service):
+        fake = _FakeKibitzer(violations=[_Violation("write_file blocked in test mode")])
+        service._kibitzer = fake
+        result = await service.delegate(
+            "x", profile=Profile(tools=["read_file"], execution="literate"),
+            _program_override="```lackpy @write(o.txt)\nhi\n```")
+        assert not result["success"]
+        assert "Kibitzer mode policy violation" in result["error"]
+        assert "write_file blocked" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_one_shot_calls_still_checked(self, service):
+        fake = _FakeKibitzer()
+        service._kibitzer = fake
+        await service.delegate(
+            "read file", profile=["read_file"],
+            _program_override="x = read_file('t')")
+        assert fake.seen_planned == [{"tool": "read_file", "input": {}}]
+
+    def test_cooperative_limitation_indirect_calls_bypass(self, service):
+        # Boundary pin: mode policy sees only DIRECT named calls. Attribute /
+        # aliased / reflected invocations are NOT attributed to a tool, so they
+        # slip the pre-check -- the same cooperative-planner limitation as the
+        # effect gate. Soundness is nsjail + restricted-AST, not this pass.
+        rp = service._resolve_profile(Profile(tools=["read_file"], execution="literate"))
+        allowed = {"read_file", "write_file"}
+        attribute = service._planned_tool_calls(
+            "```lackpy\nimport os\nos.system('x')\n```", rp, allowed)
+        aliased = service._planned_tool_calls(
+            "```lackpy\nw = write_file\nw('o', 'x')\n```", rp, allowed)
+        assert "write_file" not in attribute      # os.system(...) surfaces nothing
+        assert "write_file" not in aliased         # only the alias name 'w' surfaces
