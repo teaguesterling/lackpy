@@ -1,7 +1,6 @@
 """Tests for the unified service layer."""
 
 import pytest
-from pathlib import Path
 
 from lackpy.service import LackpyService
 from lackpy.profiles import Profile
@@ -198,3 +197,72 @@ class TestLiterateExecutionAxis:
         result = await service.run_program(
             "x = read_file('test.txt')\nlen(x)", profile=["read_file"])
         assert result.success
+
+    @pytest.mark.asyncio
+    async def test_delegate_dispatches_literate_and_gate_refuses(self, service):
+        # delegate routes through the same axis seam: a write doc under a read-only
+        # literate profile is refused by the gate (via _program_override, no LLM).
+        ro = Profile(tools=["read_file"], execution="literate")
+        result = await service.delegate(
+            "x", profile=ro, _program_override="```lackpy @write(o.txt)\nhi\n```")
+        assert not result["success"]
+        assert "effect ceiling exceeded" in (result["error"] or "")
+        assert not (service._workspace / "o.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_delegate_dispatches_literate_and_renders(self, service):
+        ro = Profile(tools=["read_file"], execution="literate")
+        result = await service.delegate(
+            "x", profile=ro, _program_override="```lackpy\nx = 2 + 2\n```\n\nResult: {x}")
+        assert result["success"]
+        assert "Result: 4" in result["stdout"]
+
+
+class TestLiterateGenerationRouting:
+    """generate() routes an execution=="literate" profile to the literate
+    generation path (own hint + parse validation), not the Python dispatcher.
+    """
+
+    @pytest.mark.asyncio
+    async def test_literate_profile_uses_the_literate_generation_path(self, service, monkeypatch):
+        from lackpy.infer.dispatch import GenerationResult
+        seen = {}
+
+        async def fake_gen_literate(intent, providers, resolved, params_desc, rules):
+            seen["intent"] = intent
+            return GenerationResult(program="Hello {x}", provider_name="fake", generation_time_ms=0.0)
+
+        monkeypatch.setattr(service, "_generate_literate", fake_gen_literate)
+        result = await service.generate(
+            "greet", profile=Profile(tools=["read_file"], execution="literate"))
+        assert seen.get("intent") == "greet"
+        assert result.program == "Hello {x}"
+
+    @pytest.mark.asyncio
+    async def test_one_shot_profile_does_not_use_the_literate_path(self, service, monkeypatch):
+        async def boom(*a, **k):
+            raise AssertionError("_generate_literate must not run for a one-shot profile")
+
+        monkeypatch.setattr(service, "_generate_literate", boom)
+        result = await service.generate("read file test.txt", profile=["read_file"])
+        assert "read_file(" in result.program
+
+
+class TestStripLiterateWrapper:
+    def test_strips_leading_preamble(self):
+        from lackpy.service import _strip_literate_wrapper
+        out = _strip_literate_wrapper("Here is the document:\n```lackpy\nx=1\n```")
+        assert out == "```lackpy\nx=1\n```"
+
+    def test_strips_outer_markdown_wrapper(self):
+        from lackpy.service import _strip_literate_wrapper
+        assert _strip_literate_wrapper("```markdown\nHello {x}\n```") == "Hello {x}"
+
+    def test_preserves_inner_lackpy_fences(self):
+        from lackpy.service import _strip_literate_wrapper
+        doc = "```lackpy @write(o.txt)\nv=1\n```"
+        assert _strip_literate_wrapper(doc) == doc  # must NOT unwrap the code block
+
+    def test_empty_is_empty(self):
+        from lackpy.service import _strip_literate_wrapper
+        assert _strip_literate_wrapper("   ") == ""

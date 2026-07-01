@@ -58,6 +58,35 @@ def _strip_top_level_return(program: str) -> str:
     return ast.unparse(tree)
 
 
+_LITERATE_PREAMBLE_MARKERS = ("here's", "here is", "the following", "the document")
+
+
+def _strip_literate_wrapper(raw: str) -> str:
+    """Literate-safe cleanup of a model's raw output before parsing it.
+
+    A literate document IS markdown-with-fenced-code, so the standard
+    ``sanitize_output`` is unusable here: it unwraps *any* leading ``` fence and
+    would eat the first (and last) ```lackpy block of a doc that opens with code.
+    This instead strips only a leading conversational preamble line and an
+    explicit OUTER ``` ```markdown ``` / ``` ```md ``` wrapper -- never the inner
+    ``` ```lackpy ``` fences the document is made of.
+    """
+    text = raw.strip()
+    if not text:
+        return ""
+    lines = text.split("\n")
+    while lines and any(m in lines[0].lower() for m in _LITERATE_PREAMBLE_MARKERS):
+        lines = lines[1:]
+    text = "\n".join(lines).strip()
+    first = text.split("\n", 1)[0].strip().lower()
+    if first in ("```markdown", "```md") and text.rstrip().endswith("```"):
+        body = text.split("\n", 1)[1] if "\n" in text else ""
+        text = body.rstrip()
+        if text.endswith("```"):
+            text = text[:-3].rstrip()
+    return text
+
+
 try:
     from kibitzer import KibitzerSession
     _HAS_KIBITZER = True
@@ -423,6 +452,12 @@ class LackpyService:
         # model/temperature is selected. Neither selected → identical to before (invariant 8).
         providers = self._providers_for(effective_model, effective_temp)
 
+        # Literate execution needs a literate DOCUMENT, not restricted Python, so it
+        # gets its own generation path (own hint + parse validation) rather than the
+        # strategy/dispatcher paths, which frame + validate output as Python.
+        if rp.execution == "literate":
+            return await self._generate_literate(intent, providers, resolved, params_desc, rules)
+
         effective_mode = mode or rp.mode or self._config.inference_mode
 
         if effective_mode and effective_mode in STRATEGIES:
@@ -592,6 +627,47 @@ class LackpyService:
             variables=result.metadata.get("variables", {}),
         )
 
+    async def _generate_literate(
+        self, intent: str, providers: list, resolved: Any,
+        params_desc: str | None, rules: list | None,
+    ) -> "GenerationResult":
+        """Generate a literate document (the ``execution == "literate"`` path).
+
+        A literate doc is markdown, not restricted Python, so it CANNOT go through
+        the standard dispatcher: that path runs ``sanitize_output`` +
+        ``deterministic_cleanup`` + validates the result AS Python + a Python
+        correction chain -- all of which reject or mangle a fenced document. This
+        runs the provider loop with the LiterateInterpreter system-prompt hint and
+        validates each candidate by PARSING it (``LiterateInterpreter.validate``),
+        returning the first that parses. Cleanup is literate-safe (outer wrapper /
+        preamble only). No Python sanitize/correction.
+        """
+        from .infer.dispatch import GenerationResult
+        from .interpreters.base import ExecutionContext
+        from .interpreters.literate import LiterateInterpreter
+
+        interp = LiterateInterpreter()
+        vctx = ExecutionContext(base_dir=str(self._workspace.resolve()), tools=resolved)
+        namespace_desc = resolved.description
+        start = time.perf_counter()
+        errors: dict[str, list[str]] = {}
+        for provider in providers:
+            if not provider.available():
+                continue
+            raw = await provider.generate(intent, namespace_desc, interpreter=interp)
+            if not raw:
+                continue
+            program = _strip_literate_wrapper(raw)
+            validation = interp.validate(program, vctx)
+            if validation.valid:
+                elapsed = (time.perf_counter() - start) * 1000
+                return GenerationResult(
+                    program=program, provider_name=provider.name,
+                    generation_time_ms=elapsed,
+                )
+            errors[provider.name] = validation.errors
+        raise RuntimeError(f"Literate generation failed. Errors: {errors}")
+
     async def run_program(self, program: str, profile: Profile | str | list[str] | dict | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
@@ -699,8 +775,12 @@ class LackpyService:
                         "correction_attempts": gen_result.correction_attempts,
                     }
 
-        exec_result = await self._execute(
-            gen_result.program, resolved.callables, param_values,
+        # Dispatch by the profile's execution axis (literate vs restricted Python),
+        # the same seam run_program uses. allowed=None preserves delegate's prior
+        # behaviour of not re-validating the generated program before _execute; the
+        # literate path validates internally by parsing.
+        exec_result = await self._execute_program(
+            gen_result.program, rp, resolved, param_values,
             kibitzer_session=self._kibitzer,
         )
 
