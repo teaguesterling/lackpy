@@ -463,3 +463,43 @@ class TestTransactionalWrites:
         result = await interpreter.execute(doc, ctx)
         assert not result.success
         assert (tmp_path / "hello.txt").read_text() == "Hello World\n"   # restored
+
+
+class TestInjectedToolJournaling:
+    """An injected (profile) write-tool with declared effect metadata is journaled
+    (rolled back on failure); without it the heuristic can't extract the literal
+    path, so it is not -- the targeted precision win over the grade heuristic.
+    """
+
+    @staticmethod
+    def _writer_tools(tmp_path, *, precise):
+        def mywrite(path, content):
+            (tmp_path / path).write_text(content)
+
+        meta = dict(effect_kind="write", path_arg="path", path_index=0) if precise else {}
+        spec = ToolSpec(name="mywrite", provider="python", description="w",
+                        args=[], returns="None", grade_w=3, effects_ceiling=3, **meta)
+        return ResolvedTools(tools={"mywrite": spec}, callables={"mywrite": mywrite},
+                             grade=Grade(3, 3), description="w")
+
+    DOC = '```lackpy\nmywrite("out.txt", "data")\n```\n\n```lackpy\nraise ValueError("boom")\n```'
+
+    @pytest.mark.asyncio
+    async def test_injected_write_with_path_metadata_is_rolled_back(self, interpreter, tmp_path):
+        resolved = self._writer_tools(tmp_path, precise=True)
+        ctx = ExecutionContext(base_dir=tmp_path, tools=resolved,
+                               config={"grade_ceiling": Grade(3, 3)})
+        result = await interpreter.execute(self.DOC, ctx)
+        assert not result.success
+        assert not (tmp_path / "out.txt").exists()      # journaled -> rolled back
+
+    @pytest.mark.asyncio
+    async def test_injected_write_without_metadata_is_not_rolled_back(self, interpreter, tmp_path):
+        # Heuristic fallback: kind=write but no declared path -> dynamic -> the
+        # journal never snapshots it, so the failed doc's write persists.
+        resolved = self._writer_tools(tmp_path, precise=False)
+        ctx = ExecutionContext(base_dir=tmp_path, tools=resolved,
+                               config={"grade_ceiling": Grade(3, 3)})
+        result = await interpreter.execute(self.DOC, ctx)
+        assert not result.success
+        assert (tmp_path / "out.txt").read_text() == "data"   # NOT rolled back

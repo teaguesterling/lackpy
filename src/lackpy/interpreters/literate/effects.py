@@ -83,6 +83,31 @@ def _load_tool_effects() -> dict[str, ToolEffect]:
 # of truth (tool_effects.toml). Injectable per-call via classify_effects().
 LITERATE_TOOL_EFFECTS: dict[str, ToolEffect] = _load_tool_effects()
 
+
+def tool_effect_from_spec(spec: object) -> ToolEffect:
+    """Derive a :class:`ToolEffect` from a ToolSpec-shaped object (duck-typed).
+
+    The single derivation the ceiling gate uses for profile/toolbox-injected tools.
+    ``effect_kind`` / ``path_arg`` / ``path_index`` on the spec make the tool
+    precise: an injected *write* tool with a declared path arg becomes journalable
+    (its literal target can be rolled back), and a w=3 *exec* tool is not mistaken
+    for a write. When the spec omits ``effect_kind``, ``kind`` falls back to the
+    grade heuristic (w>=3 write, w==2 exec, else read) -- only the grade matters for
+    the ceiling comparison, so an ungraded-kind tool is still gated correctly, just
+    not journaled (no path).
+    """
+    w = getattr(spec, "grade_w", 3)
+    d = getattr(spec, "effects_ceiling", 3)
+    kind = getattr(spec, "effect_kind", None)
+    if kind is None:
+        kind = "write" if w >= 3 else "exec" if w == 2 else "read"
+    return ToolEffect(
+        grade=Grade(w, d),
+        kind=kind,
+        path_arg=getattr(spec, "path_arg", None),
+        path_index=getattr(spec, "path_index", None),
+    )
+
 # Raw effect primitives that defeat name-based classification: code execution
 # (eval/exec/compile/__import__), dynamic attribute access (getattr/setattr/
 # delattr), file/stdin I/O (open/input). Calling any (or importing anything)
