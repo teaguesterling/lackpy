@@ -53,6 +53,14 @@ class ToolSpec:
         docs: Path to a markdown documentation file, relative to the
             provider's package root. Resolved lazily at query time via
             the provider's ``resolve_docs`` method.
+        effect_kind: Optional effect classification (``"read"`` | ``"write"`` |
+            ``"exec"``) for the literate interpreter's effect model. When set, the
+            ceiling gate + write journal grade this tool precisely instead of
+            guessing ``kind`` from ``grade_w`` (which can't tell a w=3 write from a
+            w=3 exec). Ignored by interpreters that don't journal. Default None.
+        path_arg / path_index: For a ``write``/``read`` tool, the name and
+            positional index of the argument carrying a file path. Lets the write
+            journal extract a literal target for rollback. Default None.
     """
 
     name: str
@@ -65,6 +73,10 @@ class ToolSpec:
     effects_ceiling: int = 3
     examples: list[dict] = field(default_factory=list)
     docs: str | None = None
+    # Optional effect metadata for the literate effect model (gate + journal).
+    effect_kind: str | None = None
+    path_arg: str | None = None
+    path_index: int | None = None
 
 
 class Toolbox:

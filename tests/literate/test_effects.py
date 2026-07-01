@@ -267,3 +267,46 @@ def test_as_grade_rejects_garbage_and_bool():
         as_grade("high")
     with pytest.raises(TypeError):
         as_grade(True)  # bool is an int subclass; reject the ambiguity
+
+
+# --- tool_effect_from_spec: one derivation for injected tools (spec-declared
+#     effect metadata makes an injected write tool precise + journalable) ---
+
+def test_spec_with_effect_metadata_is_precise_and_journalable():
+    from lackpy.interpreters.literate.effects import tool_effect_from_spec
+    from lackpy.tools.toolbox import ToolSpec
+    spec = ToolSpec(name="my_write", provider="python", description="w", args=[],
+                    returns="None", grade_w=3, effects_ceiling=3,
+                    effect_kind="write", path_arg="path", path_index=0)
+    te = tool_effect_from_spec(spec)
+    assert te.kind == "write" and te.path_arg == "path" and te.path_index == 0
+    # a literal-path call to it is journalable (its target lands in writes)
+    eff = classify_effects("my_write('out.txt', 'data')", tool_effects={"my_write": te})
+    assert eff.writes == frozenset({"out.txt"})
+    assert eff.transactional
+
+
+def test_spec_without_effect_kind_falls_back_to_the_grade_heuristic():
+    from lackpy.interpreters.literate.effects import tool_effect_from_spec
+    from lackpy.tools.toolbox import ToolSpec
+    spec = ToolSpec(name="w2", provider="python", description="w", args=[],
+                    returns="None", grade_w=3, effects_ceiling=3)  # no effect metadata
+    te = tool_effect_from_spec(spec)
+    assert te.kind == "write"          # heuristic from grade_w
+    assert te.path_arg is None
+    # no declared path -> the heuristic can't journal it (dynamic)
+    eff = classify_effects("w2('out.txt', 'data')", tool_effects={"w2": te})
+    assert eff.writes == frozenset()
+    assert eff.dynamic_paths and not eff.transactional
+
+
+def test_w3_exec_spec_is_not_mistaken_for_a_write():
+    # The heuristic maps w>=3 -> write; an explicit effect_kind="exec" fixes it.
+    from lackpy.interpreters.literate.effects import tool_effect_from_spec
+    from lackpy.tools.toolbox import ToolSpec
+    spec = ToolSpec(name="sh", provider="python", description="x", args=[],
+                    returns="None", grade_w=3, effects_ceiling=3, effect_kind="exec")
+    te = tool_effect_from_spec(spec)
+    assert te.kind == "exec"
+    eff = classify_effects("sh('rm -rf /tmp/x')", tool_effects={"sh": te})
+    assert eff.exec_calls == frozenset({"sh"}) and eff.needs_sandbox

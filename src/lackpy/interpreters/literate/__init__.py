@@ -18,7 +18,6 @@ import ast
 import time
 from typing import Any
 
-from ...lang.grader import Grade
 from ..base import (
     ExecutionContext,
     InterpreterExecutionResult,
@@ -32,6 +31,7 @@ from .effects import (
     classify_effects,
     combine,
     exceeds_ceiling,
+    tool_effect_from_spec,
 )
 from .journal import FileJournal
 from .kernel import LightweightKernel
@@ -242,10 +242,12 @@ def _gate_effects_map(context: ExecutionContext) -> dict[str, ToolEffect]:
     read-only ceiling -- the gate's validation surface must match the execution
     surface (``_build_namespace`` injects the same ``context.tools`` callables).
 
-    Injected tools carry no literate-specific path metadata, so ``kind`` is
-    derived from the grade (w>=3 write, w==2 exec, else read); only the grade
-    matters for the ceiling comparison. Conservative defaults (3/3) for tools
-    missing a grade fail closed -- safer to over-refuse than under-refuse.
+    Each injected tool is graded by ``tool_effect_from_spec``: a spec that declares
+    ``effect_kind`` + ``path_arg`` is graded precisely (and an injected write tool
+    with a literal path arg is journalable); a spec that omits them falls back to
+    the grade heuristic (kind from ``grade_w``, no path -> gated but not journaled).
+    Builtins win over injected tools of the same name (the literate ``write_file``
+    in the namespace is what actually runs), so their precise TOML entry stands.
     """
     effects_map = dict(LITERATE_TOOL_EFFECTS)
     resolved = context.tools
@@ -253,10 +255,7 @@ def _gate_effects_map(context: ExecutionContext) -> dict[str, ToolEffect]:
     for name, spec in (specs or {}).items():
         if name in effects_map:
             continue
-        w = getattr(spec, "grade_w", 3)
-        d = getattr(spec, "effects_ceiling", 3)
-        kind = "write" if w >= 3 else "exec" if w == 2 else "read"
-        effects_map[name] = ToolEffect(grade=Grade(w, d), kind=kind)
+        effects_map[name] = tool_effect_from_spec(spec)
     return effects_map
 
 
