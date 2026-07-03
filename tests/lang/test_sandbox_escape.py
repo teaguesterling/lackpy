@@ -73,6 +73,21 @@ class TestDunderTraversalEscapes:
         result = validate(prog)
         assert _attr_rejected(result), result.errors
 
+    def test_rejects_verbatim_reported_chain(self):
+        # The exact structure of the reported escape, with a BENIGN marker call
+        # target (never executed — validation rejects it first). Pins both the
+        # dunder-attribute guard AND the subscript-call default-deny in one test:
+        # the final ``g['marker'](...)`` has func=Subscript.
+        prog = (
+            "subs = ().__class__.__bases__[0].__subclasses__()\n"
+            "g = [c for c in subs if c.__name__ == 'marker'][0].__init__.__globals__\n"
+            "g['marker']('SENTINEL_NOT_EXECUTED')\n"
+        )
+        result = validate(prog)
+        assert not result.valid, result.errors
+        # Rejected for the attribute walk (dunder access), not merely the call form.
+        assert _attr_rejected(result), result.errors
+
 
 class TestPrivateAttributeEscapes:
     """Single-underscore private attributes: broader than the advisory's literal

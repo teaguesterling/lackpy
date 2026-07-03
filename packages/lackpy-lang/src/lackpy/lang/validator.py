@@ -134,7 +134,11 @@ def validate(
                 )
         elif isinstance(func, ast.Attribute):
             # Method call on a value; Step 3.5 already vetted the attribute name.
-            calls.append(func.attr)
+            # Intentionally NOT recorded in ``calls``: that list drives the
+            # kibitzer planned-tool-call pre-check, which must see only named
+            # (Name-target) tool/builtin calls — recording method names like
+            # ``split``/``items`` there would surface them as ungranted "tools".
+            pass
         else:
             # Call of a subscript / call result / other expression — default-deny.
             errors.append(
