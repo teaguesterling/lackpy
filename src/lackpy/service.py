@@ -814,11 +814,15 @@ class LackpyService:
                     }
 
         # Dispatch by the profile's execution axis (literate vs restricted Python),
-        # the same seam run_program uses. allowed=None preserves delegate's prior
-        # behaviour of not re-validating the generated program before _execute; the
+        # the same seam run_program uses. Defense-in-depth (GHSA-hpcj-3c97-43jm):
+        # re-validate the generated program against the same allowed names at the
+        # execution boundary, rather than trusting the generation-time gate alone.
+        # The restricted-Python path parses the identical source deterministically,
+        # so this closes the validate/execute gap without a differential; the
         # literate path validates internally by parsing.
         exec_result = await self._execute_program(
             gen_result.program, rp, resolved, param_values,
+            allowed=set(resolved.tools.keys()) | param_names,
             kibitzer_session=self._kibitzer,
         )
 

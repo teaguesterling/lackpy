@@ -5,7 +5,12 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
-from .grammar import ALLOWED_NODES, FORBIDDEN_NAMES, ALLOWED_BUILTINS
+from .grammar import (
+    ALLOWED_NODES,
+    FORBIDDEN_NAMES,
+    ALLOWED_BUILTINS,
+    DENIED_ATTRIBUTES,
+)
 
 
 @dataclass
@@ -83,16 +88,59 @@ def validate(
         if isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
             errors.append(f"Forbidden name: '{node.id}' at line {node.lineno}")
 
-    # Step 4: Namespace check — reject calls to unknown functions
+    # Step 3.5: Attribute check — the sandbox boundary (GHSA-hpcj-3c97-43jm).
+    #
+    # ast.Attribute is allowed (data objects legitimately expose methods like
+    # ``.split``/``.items``/``.get``), but attribute *names* are restricted so an
+    # attribute chain cannot walk from a benign value to a type or module object:
+    #   - any name starting with "_" is denied — this covers the entire dunder
+    #     traversal escape family (``__class__``/``__bases__``/``__subclasses__``/
+    #     ``__globals__``/``__mro__``/``__init__``/``__getattribute__``/…) as well
+    #     as single-underscore private gadgets (e.g. ``()._module``).
+    #   - a small set of non-underscore frame/generator internals (``f_globals``,
+    #     ``gi_frame``, …) is denied explicitly (see DENIED_ATTRIBUTES).
+    # This is an allow-by-shape / deny-by-name rule: it does not enumerate every
+    # safe attribute (that set is open-ended for arbitrary data), so it is a
+    # denylist on the dangerous shape. The known-complete escape surface in this
+    # subset is underscore-prefixed names; the explicit frame set covers the only
+    # non-underscore internals that expose a namespace.
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            name = node.func.id
+        if isinstance(node, ast.Attribute):
+            attr = node.attr
+            if attr.startswith("_") or attr in DENIED_ATTRIBUTES:
+                errors.append(
+                    f"Forbidden attribute access: '.{attr}' at line {node.lineno} "
+                    f"(private/dunder/internal attribute access is not permitted)"
+                )
+
+    # Step 4: Namespace check — reject calls to unknown / unresolvable functions.
+    #
+    # Every ast.Call is inspected (not only ``func is ast.Name``): a call whose
+    # target is an attribute (``data.split(...)``) is permitted only because the
+    # attribute name already passed Step 3.5; a call whose target is a Subscript
+    # or another Call/expression is default-denied here — those exotic call forms
+    # are not part of the intended subset and were an unchecked bypass before.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            name = func.id
             calls.append(name)
             if name not in all_allowed_calls and name not in FORBIDDEN_NAMES:
                 errors.append(
                     f"Unknown function: '{name}' at line {node.lineno} "
                     f"(not in kit or builtins)"
                 )
+        elif isinstance(func, ast.Attribute):
+            # Method call on a value; Step 3.5 already vetted the attribute name.
+            calls.append(func.attr)
+        else:
+            # Call of a subscript / call result / other expression — default-deny.
+            errors.append(
+                f"Unsupported call target ({type(func).__name__}) at line "
+                f"{node.lineno}: only named functions and method calls are allowed"
+            )
 
     # Step 5: For-loop check — must iterate over call result or variable
     for node in ast.walk(tree):

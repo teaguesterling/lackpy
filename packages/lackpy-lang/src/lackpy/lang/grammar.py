@@ -57,6 +57,25 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "os", "sys", "pathlib", "subprocess", "shutil",
 })
 
+# Attribute names that are always denied, even without an underscore prefix.
+# The primary attribute guard is a *prefix* rule (reject any attribute whose name
+# starts with "_"), which covers the whole dunder-traversal escape family
+# (__class__/__bases__/__subclasses__/__globals__/__mro__/__init__/…) and the
+# single-underscore private-attribute gadgets (e.g. ``()._module``).
+#
+# These names have NO leading underscore, so the prefix rule would miss them. They
+# are frame/generator/coroutine/traceback internals that expose a real namespace
+# (``f_globals``/``f_builtins``). They are believed UNREACHABLE in the current
+# subset (no GeneratorExp / Try / Raise / sys => no frame, generator, or traceback
+# object can be constructed), but they are denied explicitly as defense-in-depth
+# so a future grammar addition cannot silently re-open the route.
+DENIED_ATTRIBUTES: frozenset[str] = frozenset({
+    "f_globals", "f_builtins", "f_locals", "f_code", "f_back",
+    "gi_frame", "gi_code", "cr_frame", "cr_code",
+    "ag_frame", "ag_code", "tb_frame", "tb_next",
+    "func_globals", "func_code",
+})
+
 ALLOWED_BUILTINS: frozenset[str] = frozenset({
     "len", "sorted", "reversed", "enumerate", "zip", "range",
     "min", "max", "sum", "any", "all", "abs", "round",
