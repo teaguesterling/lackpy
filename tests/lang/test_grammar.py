@@ -2,7 +2,13 @@
 
 import ast
 
-from lackpy.lang.grammar import ALLOWED_NODES, FORBIDDEN_NODES, FORBIDDEN_NAMES, ALLOWED_BUILTINS
+from lackpy.lang.grammar import (
+    ALLOWED_NODES,
+    FORBIDDEN_NODES,
+    FORBIDDEN_NAMES,
+    ALLOWED_BUILTINS,
+    DENIED_ATTRIBUTES,
+)
 
 
 def test_allowed_and_forbidden_are_disjoint():
@@ -52,3 +58,11 @@ def test_key_builtins_present():
 
 def test_sort_by_in_builtins():
     assert "sort_by" in ALLOWED_BUILTINS
+
+
+def test_denied_attributes_cover_non_underscore_frame_internals():
+    # These have no leading underscore, so the attribute-prefix rule would miss
+    # them; the explicit deny set is the only thing that stops them.
+    for attr in ("f_globals", "f_builtins", "gi_frame", "cr_frame", "tb_frame"):
+        assert attr in DENIED_ATTRIBUTES
+        assert not attr.startswith("_")
