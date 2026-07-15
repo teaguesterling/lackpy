@@ -110,6 +110,142 @@ def strip_overlap(shown: str, emission: str, *, min_overlap: int = _MIN_OVERLAP)
     return emission
 
 
+#: The writer-controlled pause marker. A COMPLETE fenced cell
+#: (```lackpy @continue ... ```) pauses via the compiler sentinel; the textual
+#: fallback below catches the marker BEFORE a complete fence exists.
+CONTINUE_MARKER = "@continue"
+
+_FENCE_LINE_RE = re.compile(r"^```(\S.*)?\s*$")
+_FENCE_CLOSE_RE = re.compile(r"^```\s*$")
+
+
+def split_at_continue(doc: str) -> tuple[str, bool]:
+    """Textual fallback for the writer-controlled pause: cut at ``@continue``.
+
+    The compiler-sentinel path requires a COMPLETE fenced ``@continue`` cell.
+    A writer that signals the pause mid-emission -- a bare ``@continue`` line,
+    or an emission cut right at the marker by a client-side stop sequence --
+    never produces that fence. This fallback cuts the document at the FIRST
+    such marker and DISCARDS the remainder: content past a pause request is
+    reasoning-without-values and is protocol-correct to drop (the writer asked
+    to see values before continuing; anything it wrote after the ask was
+    written without them).
+
+    Returns ``(kept_document, continue_requested)``. Handled shapes:
+
+      - a bare ``@continue`` line outside any fence -> cut before it;
+      - a trailing UNCLOSED ````lackpy @continue`` fence-open (stop-sequence
+        cut right after the marker) -> drop the dangling open line;
+      - a bare ``@continue`` as the trailing content of an unclosed lackpy
+        fence (stop-sequence cut inside an open cell) -> drop the partial
+        cell whole rather than auto-close and execute a half-written cell.
+
+    NOT handled (on purpose): a complete fenced ``@continue`` cell (the
+    sentinel path owns it) and ``@continue`` inside a *closed* fence body
+    (that is code; static analysis reports it).
+    """
+    lines = doc.split("\n")
+    in_fence = False
+    fence_info = ""
+    fence_open_idx = -1
+
+    for i, line in enumerate(lines):
+        if in_fence:
+            if _FENCE_CLOSE_RE.match(line):
+                in_fence = False
+            continue
+        if line.strip() == CONTINUE_MARKER:
+            return "\n".join(lines[:i]).rstrip("\n"), True
+        m = _FENCE_LINE_RE.match(line)
+        if m:
+            in_fence = True
+            fence_info = (m.group(1) or "").strip()
+            fence_open_idx = i
+
+    if in_fence and fence_info.startswith("lackpy"):
+        if CONTINUE_MARKER in fence_info:
+            # Cut landed on the fence-open line itself: "```lackpy @continue".
+            return "\n".join(lines[:fence_open_idx]).rstrip("\n"), True
+        tail = [ln for ln in lines[fence_open_idx + 1:] if ln.strip()]
+        if tail and tail[-1].strip() == CONTINUE_MARKER:
+            return "\n".join(lines[:fence_open_idx]).rstrip("\n"), True
+
+    return doc, False
+
+
+class StopScanner:
+    """Client-side stop-sequence scanner for a streaming model call.
+
+    Feed the raw stream chunk by chunk; when a stop sequence appears, ``feed``
+    returns True, :attr:`text` holds everything up to AND INCLUDING the
+    matched marker, and the caller should abort the stream (closing the HTTP
+    connection makes Ollama cancel generation).
+
+    Why client-side rather than the API-native ``options.stop``:
+
+      1. Native stop STRIPS the matched text from the response, and
+         ``done_reason`` cannot distinguish a stop-sequence hit from a natural
+         end of turn -- the pause marker (the semantic payload) would be
+         silently lost, so the pause intent would be unrecoverable.
+      2. Native stop matches inside ``<think>`` reasoning blocks, so a
+         thinking model *musing* about ``@continue`` would be cut
+         mid-reasoning. This scanner suppresses matches inside think blocks.
+
+    Keeping the marker means the downstream textual fallback
+    (:func:`split_at_continue`) owns the pause semantics -- one source of
+    truth for both streaming and non-streaming clients.
+
+    Rescans the post-think region on each feed -- O(total^2) for pathological
+    chunk counts, fine for harness-scale responses.
+    """
+
+    def __init__(self, stops: list[str]) -> None:
+        self._stops = [s for s in stops if s]
+        self._text = ""
+        self._stopped = False
+
+    @property
+    def text(self) -> str:
+        """Accumulated text; cut at (and including) the marker once stopped."""
+        return self._text
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
+
+    def feed(self, chunk: str) -> bool:
+        """Accumulate ``chunk``; return True once a stop sequence has fired."""
+        if self._stopped:
+            return True
+        self._text += chunk
+        start = self._scan_start()
+        if start is None:
+            return False
+        region = self._text[start:]
+        best: tuple[int, str] | None = None
+        for stop in self._stops:
+            idx = region.find(stop)
+            if idx != -1 and (best is None or idx < best[0]):
+                best = (idx, stop)
+        if best is not None:
+            idx, stop = best
+            self._text = self._text[: start + idx + len(stop)]
+            self._stopped = True
+            return True
+        return False
+
+    def _scan_start(self) -> int | None:
+        """Start of the scannable region: after the close of the most recent
+        ``<think>`` block; None while one is still open (suppress matching)."""
+        last_open = self._text.rfind("<think")
+        if last_open == -1:
+            return 0
+        close = self._text.find("</think>", last_open)
+        if close == -1:
+            return None
+        return close + len("</think>")
+
+
 @dataclass
 class StepResult:
     """The Either returned by :meth:`LiterateSession.step`.
@@ -184,6 +320,16 @@ class LiterateSession:
                     ],
                 )
 
+        # Writer-controlled pause, textual fallback: a bare `@continue` (or an
+        # emission cut at the marker by a client-side stop sequence) pauses at
+        # the first occurrence; the remainder is discarded (see
+        # split_at_continue). The fenced form still pauses via the sentinel.
+        doc, marker_pause = split_at_continue(doc)
+        if marker_pause and not doc.strip():
+            # The emission was ONLY the pause marker -- an empty round that
+            # asks for values back, same Right shape as a lone fenced cell.
+            return StepResult(ok=True, clean_doc="", continue_requested=True)
+
         # Snapshot BEFORE running so a failed round can undo its name rebindings.
         snapshot = self._kernel.snapshot()
         result = await self._interpreter._run_document(doc, self._context, self._kernel)
@@ -201,7 +347,9 @@ class LiterateSession:
         return StepResult(
             ok=True,
             clean_doc=result.output or "",
-            continue_requested=bool(result.metadata.get("continue_requested")),
+            continue_requested=(
+                bool(result.metadata.get("continue_requested")) or marker_pause
+            ),
             variables=dict(result.metadata.get("variables", {})),
         )
 

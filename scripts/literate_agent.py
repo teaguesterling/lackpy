@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -22,7 +23,12 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
-from lackpy.interpreters.literate import LiterateInterpreter, LiterateSession
+from lackpy.interpreters.literate import (
+    CONTINUE_MARKER,
+    LiterateInterpreter,
+    LiterateSession,
+    StopScanner,
+)
 from lackpy.prompts import DEFAULT_PERSONA, PERSONAS, compose
 
 
@@ -47,28 +53,51 @@ async def call_ollama(
     system: str = "",
     num_predict: int = 8192,
     verbose: bool = False,
+    stop: list[str] | None = None,
 ) -> str:
-    """Call Ollama and return the response text."""
+    """Call Ollama and return the response text.
+
+    ``stop``: optional stop sequences, scanned CLIENT-SIDE over a streaming
+    response via :class:`StopScanner` (NOT the API-native ``options.stop`` --
+    native stop strips the matched marker and is indistinguishable from a
+    natural end of turn, and it fires inside <think> blocks; see StopScanner).
+    On a hit the HTTP stream is closed, which makes Ollama cancel generation;
+    the returned text ends with (and includes) the matched marker so the
+    session's textual fallback owns the pause semantics.
+    """
     indicator = asyncio.create_task(_progress_indicator("Generating")) if verbose else None
     start = time.perf_counter()
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "system": system,
+        "stream": bool(stop),
+        "options": {
+            "temperature": 0.7,
+            "num_predict": num_predict,
+        },
+    }
     try:
         async with httpx.AsyncClient(timeout=600.0) as client:
-            response = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "system": system,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "num_predict": num_predict,
-                    },
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["response"]
+            if not stop:
+                response = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
+                response.raise_for_status()
+                return response.json()["response"]
+
+            scanner = StopScanner(stop)
+            async with client.stream(
+                "POST", f"{OLLAMA_URL}/api/generate", json=payload
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    if scanner.feed(data.get("response", "")):
+                        break  # closing the stream cancels generation
+                    if data.get("done"):
+                        break
+            return scanner.text
     finally:
         if indicator:
             indicator.cancel()
@@ -122,7 +151,13 @@ async def run_literate_agent(
             print(f"Iteration {iteration + 1}/{max_iterations}", file=sys.stderr)
             print(f"{'='*60}", file=sys.stderr)
 
-        response = await call_ollama(full_prompt, model=model, system=system_prompt, num_predict=num_predict, verbose=verbose)
+        # Stop generation at the pause marker (client-side scan; the marker is
+        # kept and the session's textual fallback handles the pause + discard).
+        response = await call_ollama(
+            full_prompt, model=model, system=system_prompt,
+            num_predict=num_predict, verbose=verbose,
+            stop=[CONTINUE_MARKER],
+        )
 
         if verbose:
             print("\n--- Model Response ---", file=sys.stderr)
