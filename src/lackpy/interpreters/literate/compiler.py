@@ -29,9 +29,17 @@ import re
 from collections.abc import Callable
 from textwrap import indent
 
+from .display import DISPLAY_HELPER_NAME
 from .parser import Cell, ParseResult
 
 CONTINUE_SENTINEL = "__literate_continue__()"
+
+#: Call names the compiler emits that are runtime-internal plumbing, not tool
+#: calls the writer planned. Callers that enumerate a compiled document's
+#: called names for policy (e.g. kibitzer mode validation) must filter these.
+LITERATE_RUNTIME_INTERNALS: frozenset[str] = frozenset(
+    {"__literate_continue__", DISPLAY_HELPER_NAME}
+)
 
 _INTERPOLATION_START = re.compile(r"\{[A-Za-z_]")
 
@@ -123,11 +131,29 @@ def _compile_prose(cell: Cell) -> str:
     segments: list[str] = []
     for text, is_expr in parts:
         if is_expr:
-            segments.append(f'f"""{{{text}}}"""')
+            segments.append(_expr_segment(text))
         else:
             segments.append(repr(text))
 
     return f"print({' + '.join(segments)})"
+
+
+def _expr_segment(text: str) -> str:
+    """Compile one interpolated expression to an f-string segment.
+
+    Routes the expression through the namespace-injected display helper
+    (:data:`~.display.DISPLAY_HELPER_NAME`) so large values render truncated
+    (see display.py). An expression that can't be wrapped -- an f-string
+    conversion/format spec like ``{total:.2f}`` or ``{x!r}`` is not a valid
+    call argument -- falls back to the plain f-string: a formatted value is
+    already user-bounded. Like the @continue sentinel, the emitted call
+    requires the literate runtime namespace (the kernel injects it)."""
+    wrapped = f'f"""{{{DISPLAY_HELPER_NAME}({text})}}"""'
+    try:
+        compile(wrapped, "<prose>", "eval")
+    except SyntaxError:
+        return f'f"""{{{text}}}"""'
+    return wrapped
 
 
 def _compile_code(cell: Cell) -> str:

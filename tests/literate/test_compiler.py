@@ -9,6 +9,7 @@ from lackpy.interpreters.literate.compiler import (
     compile_cells,
     compile_document,
 )
+from lackpy.interpreters.literate.display import DISPLAY_HELPER_NAME, make_display
 from lackpy.interpreters.literate.parser import Cell, Frontmatter, ParseResult
 
 
@@ -23,9 +24,11 @@ class TestProseCompilation:
         assert "print(" in code and "Hello world" in code
 
     def test_prose_with_interpolation(self):
+        # Interpolated expressions route through the display helper so large
+        # values render truncated (see display.py).
         cells = [Cell(cell_type="prose", content="Value is {x}")]
         code = compile_cells(_make_result(cells))
-        assert "print(" in code and "{x}" in code
+        assert "print(" in code and f"{{{DISPLAY_HELPER_NAME}(x)}}" in code
 
     def test_empty_prose(self):
         cells = [Cell(cell_type="prose", content="   \n  ")]
@@ -46,27 +49,30 @@ class TestProseCompilation:
     def test_prose_with_attribute_interpolation(self):
         cells = [Cell(cell_type="prose", content="Type: {obj.name}")]
         code = compile_cells(_make_result(cells))
-        assert "{obj.name}" in code
+        assert f"{DISPLAY_HELPER_NAME}(obj.name)" in code
 
     def test_prose_with_function_call_interpolation(self):
         cells = [Cell(cell_type="prose", content="Count: {len(items)}")]
         code = compile_cells(_make_result(cells))
-        assert "{len(items)}" in code
+        assert f"{DISPLAY_HELPER_NAME}(len(items))" in code
 
     def test_prose_with_nested_call_interpolation(self):
         cells = [Cell(cell_type="prose", content="Count: {len(inv.items())}")]
         code = compile_cells(_make_result(cells))
-        assert "{len(inv.items())}" in code
+        assert f"{DISPLAY_HELPER_NAME}(len(inv.items()))" in code
 
     def test_prose_with_format_spec_interpolation(self):
+        # A format spec can't be helper-wrapped; the plain f-string remains
+        # (a formatted value is already user-bounded).
         cells = [Cell(cell_type="prose", content="Price: {total:.2f}")]
         code = compile_cells(_make_result(cells))
         assert "{total:.2f}" in code
+        assert DISPLAY_HELPER_NAME not in code
 
     def test_prose_with_subscript_interpolation(self):
         cells = [Cell(cell_type="prose", content="First: {items[0]}")]
         code = compile_cells(_make_result(cells))
-        assert "{items[0]}" in code
+        assert f"{DISPLAY_HELPER_NAME}(items[0])" in code
 
 
 class TestProseCompilationEdgeCases:
@@ -331,7 +337,7 @@ Total: {total}"""
         assert any("data = [1, 2, 3]" in l for l in lines)
         assert any("len(data)" in l for l in lines)
         assert any("total = sum(data)" in l for l in lines)
-        assert any("{total}" in l for l in lines)
+        assert any(f"{DISPLAY_HELPER_NAME}(total)" in l for l in lines)
 
 
 class TestCompilationExecutable:
@@ -352,7 +358,12 @@ class TestCompilationExecutable:
 
 
 def _safe_exec(code: object, ns: dict) -> None:
-    """Wrapper for exec used in tests — validates compiled literate output."""
+    """Wrapper for exec used in tests — validates compiled literate output.
+
+    Compiled prose interpolation calls the display helper, which the literate
+    kernel injects at runtime (like the @continue sentinel); standalone exec
+    must provide it too."""
+    ns.setdefault(DISPLAY_HELPER_NAME, make_display())
     exec(code, ns)  # noqa: S102
 
 

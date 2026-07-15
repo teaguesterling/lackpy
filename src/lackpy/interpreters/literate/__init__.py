@@ -24,6 +24,7 @@ from ..base import (
     InterpreterValidationResult,
 )
 from .compiler import compile_cell
+from .display import DEFAULT_DISPLAY_THRESHOLD, DISPLAY_HELPER_NAME, make_display
 from .effects import (
     LITERATE_TOOL_EFFECTS,
     ToolEffect,
@@ -227,7 +228,7 @@ class LiterateInterpreter:
 _INTERNAL_NAMES = frozenset({
     "read_file", "write_file", "apply_diff",
     "search_content", "run_command", "run_tests",
-    "__literate_continue__", "__builtins__",
+    "__literate_continue__", "__literate_display__", "__builtins__",
     "__continue_requested__",
 })
 
@@ -265,6 +266,14 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
 
     ns.update(make_tool_namespace(context.base_dir))
 
+    # Display helper for prose interpolation (see display.py), with the
+    # threshold configurable per run. The kernel injects a default-threshold
+    # helper when absent; this context-aware one takes precedence.
+    threshold = (context.config or {}).get(
+        "display_threshold", DEFAULT_DISPLAY_THRESHOLD
+    )
+    ns[DISPLAY_HELPER_NAME] = make_display(threshold)
+
     import builtins as _builtins_mod
     ns["__builtins__"] = _builtins_mod
 
@@ -280,4 +289,12 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
 
 # Re-export the multi-round fold API. Imported at the end (after LiterateInterpreter
 # and _build_namespace are defined) so session.py's lazy imports resolve cleanly.
-from .session import LiterateSession, StepResult, strip_think  # noqa: E402,F401
+from .session import (  # noqa: E402,F401
+    CONTINUE_MARKER,
+    LiterateSession,
+    StepResult,
+    StopScanner,
+    split_at_continue,
+    strip_overlap,
+    strip_think,
+)

@@ -20,6 +20,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
 from ..compiler import _COMPILERS
+from ..display import DISPLAY_HELPER_NAME, make_display
 from ..parser import Cell
 from .interface import CellResult
 from .static_analysis import StaticAnalysisError, check_cell
@@ -35,6 +36,13 @@ def _continue_sentinel() -> None:
 class LightweightKernel:
     def __init__(self, namespace: dict[str, Any] | None = None) -> None:
         self._namespace: dict[str, Any] = namespace or {}
+        # Compiled prose interpolations call the display helper (see
+        # display.py). Inject a default-threshold helper unless the caller
+        # provided a configured one (_build_namespace does, from
+        # context.config). Injected before _initial_keys is captured so
+        # restart() preserves it like the tools.
+        if DISPLAY_HELPER_NAME not in self._namespace:
+            self._namespace[DISPLAY_HELPER_NAME] = make_display()
         self._initial_keys: set[str] = set(self._namespace.keys())
         if "__builtins__" not in self._namespace:
             import builtins

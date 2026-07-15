@@ -692,11 +692,21 @@ class LackpyService:
         """
         if rp.execution == "literate":
             try:
-                from .interpreters.literate.compiler import compile_document
+                from .interpreters.literate.compiler import (
+                    LITERATE_RUNTIME_INTERNALS,
+                    compile_document,
+                )
                 program = compile_document(program)
             except Exception:
                 return []
-            calls = validate(program, allowed_names=allowed).calls
+            # The compiler emits runtime-internal calls (the @continue
+            # sentinel, the prose display helper) that are plumbing, not
+            # writer-planned tool calls -- filter them so mode policy doesn't
+            # see phantom tools.
+            calls = [
+                c for c in validate(program, allowed_names=allowed).calls
+                if c not in LITERATE_RUNTIME_INTERNALS
+            ]
         else:
             vr = validate(program, allowed_names=allowed)
             if not vr.valid:
