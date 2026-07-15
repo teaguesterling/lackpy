@@ -26,6 +26,17 @@ next -- the old loop rebuilt a fresh kernel each round and passed only
 Left's "state not advanced" is a rebinding-level guarantee: file writes and name
 rebindings roll back, but in-place mutations and effects beyond the journal do
 not -- cooperative, the same boundary as the effect gate.
+
+STATELESSNESS CONTRACT (the canonical mode): the writer holds NO hidden
+conversational state. Every round it is handed a fresh prompt containing the
+current document view, and the session folds its raw emission into the one
+persistent kernel. The document (plus the kernel state it produced) is the sole
+source of truth -- renders append/annotate, never silently rewrite authored
+content. One consequence: a stateless writer, shown the current view, may begin
+its emission by RE-ECHOING the tail of that view. Without a guard the echo is
+re-parsed -- re-executing its cells (harmful for non-idempotent ones) and
+re-printing its prose. :func:`strip_overlap` is that guard: it cuts an emission
+prefix that matches a suffix of the shown view, before parsing.
 """
 
 from __future__ import annotations
@@ -54,6 +65,49 @@ def strip_think(text: str) -> str:
     text = _THINK_RE.sub("", text)
     text = _UNCLOSED_THINK_RE.sub("", text)
     return text.strip()
+
+
+#: Minimum echoed-prefix length (chars) before strip_overlap cuts. Short
+#: coincidental matches (a shared ".\n", a stray word) must never strip.
+_MIN_OVERLAP = 8
+
+
+def strip_overlap(shown: str, emission: str, *, min_overlap: int = _MIN_OVERLAP) -> str:
+    """Cut a stateless writer's re-echo of the document view it was shown.
+
+    Finds the LONGEST suffix of ``shown`` that is a prefix of ``emission`` and
+    returns ``emission`` with that prefix removed. Everything the writer was
+    shown has already been parsed/executed/rendered -- re-parsing the echo would
+    re-print prose and re-execute cells (non-idempotent cells corrupt state).
+
+    Guards against false positives:
+      - the overlap must be at least ``min_overlap`` characters, and
+      - must contain non-whitespace (a run of shared newlines is not an echo).
+
+    A legitimate emission that *coincidentally* opens with >=``min_overlap``
+    characters equal to the view's tail is still stripped -- inherent to a
+    text-level guard; the cut applies only at the very start of the emission,
+    never mid-document.
+
+    Trailing whitespace of ``shown`` is ignored when matching: renders append
+    trailing newlines the writer never echoes (and ``strip_think`` has already
+    stripped the emission's leading whitespace), so requiring them would make
+    the guard miss nearly every real echo.
+
+    The descending scan is O(len(shown) * len(emission)) in the pathological
+    worst case (highly repetitive text); the common big case -- the writer
+    re-echoes the ENTIRE view -- matches on the first comparison.
+    """
+    shown = shown.rstrip()
+    limit = min(len(shown), len(emission))
+    for size in range(limit, min_overlap - 1, -1):
+        if emission.startswith(shown[-size:]):
+            if not emission[:size].strip():
+                # Whitespace-only match; every shorter match is a prefix of
+                # this one, hence also whitespace-only. Nothing to strip.
+                return emission
+            return emission[size:]
+    return emission
 
 
 @dataclass
@@ -93,8 +147,19 @@ class LiterateSession:
         self._kernel = LightweightKernel(namespace=_build_namespace(context))
         self._clean_parts: list[str] = []
 
-    async def step(self, raw: str) -> StepResult:
-        """Fold one raw model response into the session. See the module docstring."""
+    async def step(self, raw: str, shown: str | None = None) -> StepResult:
+        """Fold one raw model response into the session. See the module docstring.
+
+        Args:
+            raw: The writer's raw emission for this round.
+            shown: The exact document view the writer was prompted with, for
+                the overlap-strip guard (see :func:`strip_overlap`). Defaults
+                to the session's accumulated ``rendered`` -- correct for a thin
+                client that shows the writer the rendered document (a suffix
+                match against the last round's output is a suffix match
+                against ``rendered``). Pass explicitly when the client shows
+                something else (e.g. the raw document source).
+        """
         doc = strip_think(raw)
         if not doc:
             # Only reasoning / nothing survived the strip -- a Left (retry), never
@@ -103,6 +168,21 @@ class LiterateSession:
                 ok=False, raw=raw,
                 errors=["empty document after stripping <think> reasoning"],
             )
+
+        # Overlap-strip guard: cut the re-echoed tail of the shown view before
+        # parsing, so echoed cells are not re-executed nor echoed prose
+        # re-printed. Statelessness is the canonical mode (module docstring).
+        view = self.rendered if shown is None else shown
+        if view:
+            doc = strip_overlap(view, doc)
+            if not doc.strip():
+                return StepResult(
+                    ok=False, raw=raw,
+                    errors=[
+                        "emission was only a re-echo of the shown document "
+                        "(no new content after overlap-strip)"
+                    ],
+                )
 
         # Snapshot BEFORE running so a failed round can undo its name rebindings.
         snapshot = self._kernel.snapshot()
