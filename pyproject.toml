@@ -22,7 +22,9 @@ dependencies = [
     # Upper bound: woollama-core is pre-1.0 and fast-moving — cap the minor so a
     # breaking `complete()` change can't silently land. (A contract test guards the
     # signature within the allowed range; see tests/test_woollama_provider.py.)
-    "woollama-core>=0.5.2,<0.6",
+    # 0.7: `complete(model, messages, *, options, params, api_key, base_url)` is
+    # unchanged from 0.5.x — the 0.6/0.7 work was server-surface (/w1, fabric, vision).
+    "woollama-core>=0.7.0,<0.8",
 ]
 
 [project.optional-dependencies]
