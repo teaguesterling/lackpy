@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ..annotations import TRUNCATION_NOTE
 from ..parser import Cell
 from .interface import CellResult, KernelInterface
 from .plugins import PluginAdvice, merge_advice
@@ -104,9 +105,12 @@ class StreamingDriver:
             self._cell_counter += 1
 
             if cell.truncated:
-                self._output_parts.append(
-                    "[warning: cell may be truncated — model hit token limit]\n"
-                )
+                # Display path (flat stdout): kept as the bare [warning: …] form
+                # the streaming client already renders. The canonical channel
+                # form ([kernel] …) is emitted by render_markdown; both draw the
+                # note text from the single TRUNCATION_NOTE source so they can't
+                # drift.
+                self._output_parts.append(f"[warning: {TRUNCATION_NOTE}]\n")
 
             self._notify_start(cell, index)
             result = self._kernel.execute_cell(cell, index)

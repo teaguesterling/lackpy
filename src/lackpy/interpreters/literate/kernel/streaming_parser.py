@@ -13,10 +13,23 @@ from __future__ import annotations
 
 import re
 
+from ..annotations import strip_kernel_blocks
 from ..parser import (
     Cell, Frontmatter, _parse_info_string, _PATH_ANNOTATIONS,
     _extract_path_from_body, _BODY_ANNOTATION_RE, _ANNOTATION_TYPES,
 )
+
+
+def _prose_cell(text: str) -> Cell | None:
+    """Build a prose cell with the L2 annotation channel stripped.
+
+    ``[kernel]…[/kernel]`` spans are kernel-generated notes, inert on reparse —
+    they must never become prose. Returns ``None`` when nothing authored remains.
+    """
+    stripped = strip_kernel_blocks(text).strip()
+    if not stripped:
+        return None
+    return Cell(cell_type="prose", content=stripped)
 
 _FENCE_OPEN = re.compile(r"^```(\S.*)?$", re.MULTILINE)
 _FENCE_CLOSE = re.compile(r"^```\s*$", re.MULTILINE)
@@ -57,8 +70,9 @@ class StreamingCellParser:
             if info.startswith("lackpy"):
                 # Prose before the fence.
                 prose_before = buf[:open_match.start()].rstrip("\n")
-                if prose_before.strip():
-                    cells.append(Cell(cell_type="prose", content=prose_before.strip()))
+                prose_cell = _prose_cell(prose_before)
+                if prose_cell is not None:
+                    cells.append(prose_cell)
                 # Content after the fence open line (skip the newline).
                 after_open = open_match.end()
                 if after_open < len(buf) and buf[after_open] == "\n":
@@ -71,8 +85,9 @@ class StreamingCellParser:
                 return cells
 
         # No mid-fence: treat everything as prose.
-        if buf.strip():
-            cells.append(Cell(cell_type="prose", content=buf.strip()))
+        prose_cell = _prose_cell(buf)
+        if prose_cell is not None:
+            cells.append(prose_cell)
         self._buffer = ""
         return cells
 
@@ -155,8 +170,9 @@ class StreamingCellParser:
                 # The entire non-lackpy fence (including any prose before it)
                 # becomes a prose cell.  Emit prose-before first, then the fence.
                 prose_before = self._buffer[pos:open_match.start()].rstrip("\n")
-                if prose_before.strip():
-                    cells.append(Cell(cell_type="prose", content=prose_before.strip()))
+                prose_cell = _prose_cell(prose_before)
+                if prose_cell is not None:
+                    cells.append(prose_cell)
                 fence_text = self._buffer[open_match.start():close_match.end()]
                 cells.append(Cell(cell_type="prose", content=fence_text))
                 pos = close_match.end()
@@ -177,8 +193,9 @@ class StreamingCellParser:
 
             # Emit any prose before the fence open.
             prose_before = self._buffer[pos:open_match.start()].rstrip("\n")
-            if prose_before.strip():
-                cells.append(Cell(cell_type="prose", content=prose_before.strip()))
+            prose_cell = _prose_cell(prose_before)
+            if prose_cell is not None:
+                cells.append(prose_cell)
 
             content = self._buffer[content_start:close_match.start()].rstrip("\n")
             cells.append(self._make_fence_cell(info, content))

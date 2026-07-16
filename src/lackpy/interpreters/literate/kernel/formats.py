@@ -11,6 +11,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..annotations import (
+    TRUNCATION_NOTE,
+    kernel_note,
+    strip_kernel_annotations,
+)
 from ..parser import Cell, Frontmatter
 from .driver import CellExecutionEvent
 
@@ -122,9 +127,24 @@ def render_markdown(log: list[CellExecutionEvent], frontmatter: Frontmatter) -> 
             continue
 
         cell = event.cell
-        if cell.cell_type == "prose":
-            parts.append(cell.content)
+
+        # L2 annotation channel: emit kernel-derived notes through [kernel]…
+        # [/kernel] so they are inert if this render is fed back and reparsed.
+        # This is the canonical, source-preserving render — the "document" the
+        # round-trip law holds for (batch flat-stdout render is display-only).
+        if cell.truncated:
+            parts.append(kernel_note(TRUNCATION_NOTE))
             parts.append("")
+
+        if cell.cell_type == "prose":
+            # Strip-stale (mechanism b): remove any prior channel spans and the
+            # exact legacy bare kernel literals from authored prose BEFORE
+            # re-emitting, so annotations never stack across round-trips. Scoped
+            # to kernel formats — authored prose is otherwise untouched.
+            content = strip_kernel_annotations(cell.content).strip("\n")
+            if content.strip():
+                parts.append(content)
+                parts.append("")
         elif cell.cell_type == "code":
             parts.append("```lackpy")
             parts.append(cell.content)
