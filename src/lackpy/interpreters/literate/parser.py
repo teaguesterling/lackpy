@@ -23,6 +23,8 @@ from typing import Literal
 
 from markdown_it import MarkdownIt
 
+from .annotations import strip_kernel_blocks
+
 CellType = Literal[
     "prose", "code", "hidden", "gather", "continue",
     "read", "write", "diff", "scratch",
@@ -165,7 +167,9 @@ def parse(document: str) -> ParseResult:
     prev_end = 0
     for fence_start, fence_end, info, content in fence_regions:
         if fence_start > prev_end:
-            prose_text = "\n".join(source_lines[prev_end:fence_start])
+            # Strip the L2 annotation channel: [kernel]…[/kernel] spans are
+            # kernel-generated notes, inert on reparse — never prose cells.
+            prose_text = strip_kernel_blocks("\n".join(source_lines[prev_end:fence_start]))
             if prose_text.strip():
                 cells.append(Cell(
                     cell_type="prose",
@@ -220,7 +224,7 @@ def parse(document: str) -> ParseResult:
         prev_end = fence_end
 
     if prev_end < len(source_lines):
-        prose_text = "\n".join(source_lines[prev_end:])
+        prose_text = strip_kernel_blocks("\n".join(source_lines[prev_end:]))
         if prose_text.strip():
             cells.append(Cell(
                 cell_type="prose",
