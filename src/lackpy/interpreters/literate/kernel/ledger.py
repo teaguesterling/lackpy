@@ -19,11 +19,13 @@ in-repo, in-memory, queryable.
 
 Entry types
 -----------
-L1.0 records only the event kinds that already occur today — the streaming
-driver's cell statuses (``executed`` / ``pending`` / ``continue_requested`` /
-``recovered`` / ``skipped`` / ``aborted``).  The forgiveness semantics'
-entry types (``hole_opened``, ``error_reified``, ``superseded``,
-``pending_deferred``, …) are added by their own sub-PRs (L1.1+); nothing here
+The streaming driver records its cell statuses verbatim (``executed`` /
+``pending`` / ``continue_requested`` / ``recovered`` / ``skipped`` /
+``aborted``).  The batch/session path (L1.1/L1.2) records ``executed`` /
+``continue_requested`` plus the forgiveness entry types ``hole_opened`` and
+``error_reified`` (see :mod:`.forgiveness`, which also derives the aggregate
+per-round Either from them).  Later semantics (``superseded``,
+``pending_deferred``, …) are added by their own sub-PRs; nothing here
 constrains ``entry_type`` to a closed set.
 
 Payloads

@@ -146,6 +146,24 @@ class LightweightKernel:
             cell_index=cell_index,
         )
 
+    def known_names(self) -> set[str]:
+        """The name set a cell's static analysis resolves against — exactly
+        the ``known_names`` :meth:`execute_cell` passes to ``check_cell``.
+        Used by the batch path's forgiveness pre-pass (L1.1) so its undefined-
+        name detection can never disagree with the kernel's own check."""
+        return set(self._namespace.keys()) - {"__builtins__"}
+
+    def lookup(self, name: str, default: Any = None) -> Any:
+        """The live value bound to ``name`` (unfiltered, unlike get_scope)."""
+        return self._namespace.get(name, default)
+
+    def bind(self, name: str, value: Any) -> None:
+        """Bind ``name`` directly in the namespace.
+
+        The forgiveness reification path (L1.1/L1.2): holes and error values
+        are bound *by the runner*, not by executing cell code."""
+        self._namespace[name] = value
+
     def inspect(self, expr: str) -> str:
         try:
             result = eval(expr, self._namespace)  # noqa: S307

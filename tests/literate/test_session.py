@@ -45,8 +45,24 @@ class TestLiveThreading:
 
 
 class TestEitherSemantics:
+    """DELIBERATE CONTRACT CHANGE (L1.1/L1.2 — design conflict #2, option (c),
+    decided by Teague 2026-07-17).
+
+    Old contract (retired): a failed round was a control-flow abort — Left +
+    the kernel's name rebindings restored and file writes rolled back
+    ("partial state erased").
+
+    New two-layer contract: the Left result is PRESERVED as an aggregate view
+    derived from the session ledger, while the round's partial state is KEPT
+    as real values + forgiving values (typed holes / error values) — NOT
+    rolled back. The tests below assert the new contract; the rollback
+    assertions they replace are gone on purpose.
+    """
+
     @pytest.mark.asyncio
     async def test_failure_returns_left_with_raw_and_errors(self, context):
+        # Unchanged observable: a failed round still reports Left, with the
+        # exception info and the raw message for correction (aggregate layer).
         session = LiterateSession(context)
         raw = "```lackpy\nx = 1 / 0\n```"
         result = await session.step(raw)
@@ -55,23 +71,33 @@ class TestEitherSemantics:
         assert result.errors and "ZeroDivisionError" in result.errors[0]
 
     @pytest.mark.asyncio
-    async def test_left_does_not_advance_state(self, context):
+    async def test_left_keeps_partial_state_as_forgiving_values(self, context):
+        # WAS test_left_does_not_advance_state: "round 2 rebinds x then fails
+        # -> Left must restore x to 1". Under the two-layer contract the
+        # completed rebinding x = 2 is KEPT (no rollback) and the failure is
+        # ledgered instead.
         session = LiterateSession(context)
         assert (await session.step("```lackpy @hidden\nx = 1\n```")).ok
-        # round 2 rebinds x then fails -> Left must restore x to 1
         bad = await session.step("```lackpy\nx = 2\nraise ValueError('boom')\n```")
-        assert not bad.ok
-        # round 3 (corrected) sees x == 1, not the failed round's x == 2
+        assert not bad.ok                                   # Left preserved
+        assert session.ledger.query(entry_type="error_reified")  # failure ledgered
+        # round 3 sees the failed round's x == 2 — state kept, not rolled back
         r3 = await session.step("```lackpy\ny = x + 10\n```\n\ny={y}")
-        assert r3.ok and "y=11" in r3.clean_doc
+        assert r3.ok and "y=12" in r3.clean_doc
 
     @pytest.mark.asyncio
-    async def test_failed_round_is_not_added_to_rendered(self, context):
+    async def test_failed_round_output_is_kept_and_annotated(self, context):
+        # WAS test_failed_round_is_not_added_to_rendered. A Left round now
+        # COMPLETES: its rendered output joins the document, and the failure
+        # is annotated through the inert [kernel] channel — never silent,
+        # never erased.
         session = LiterateSession(context)
         await session.step("Good round.")
-        await session.step("```lackpy\nboom = 1 / 0\n```")   # Left
+        await session.step("Bad round.\n\n```lackpy\nboom = 1 / 0\n```")   # Left
         assert "Good round." in session.rendered
-        assert "boom" not in session.rendered
+        assert "Bad round." in session.rendered              # executed prose kept
+        assert "[kernel]" in session.rendered                # failure annotated
+        assert "ZeroDivisionError" in session.rendered
 
     @pytest.mark.asyncio
     async def test_continue_requested_surfaces(self, context):

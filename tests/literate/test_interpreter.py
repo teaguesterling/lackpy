@@ -402,35 +402,42 @@ class TestCeilingGate:
         assert not result.success
 
 
-class TestTransactionalWrites:
-    """@continue transactional journal: a failed document rolls its writes back.
+class TestWritesKeptUnderForgiveness:
+    """DELIBERATE CONTRACT CHANGE (L1.2 — design conflict #2, option (c),
+    decided by Teague 2026-07-17). Formerly TestTransactionalWrites: "a failed
+    document rolls its writes back."
 
-    The journal is always-on: it does not depend on a ceiling. Covers only
-    statically-known literal writes; exec / dynamic / unanalyzable effects are out
-    of scope (when a ceiling is set, it is what keeps those out of a policy-
-    governed run).
+    The write journal's failure-rollback is retired together with the abort it
+    served: a cell failure now reifies as a bound value + `error_reified`
+    ledger entry and the run COMPLETES — file writes stand like every other
+    binding (state kept), while the aggregate result still reports Left.
+    (FileJournal remains an unwired component; its unit tests in
+    test_journal.py are unchanged.)
     """
 
     OK_CEILING = {"grade_ceiling": Grade(3, 3)}  # gate present but permissive: writes allowed
 
     @pytest.mark.asyncio
-    async def test_failure_removes_a_newly_created_file(self, interpreter, tmp_path):
+    async def test_write_persists_when_a_later_cell_fails(self, interpreter, tmp_path):
+        # WAS test_failure_removes_a_newly_created_file (rollback).
         doc = ("```lackpy @write(out.txt)\nfresh\n```\n\n"
                "```lackpy\nraise ValueError('boom')\n```")
         ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
         result = await interpreter.execute(doc, ctx)
-        assert not result.success
-        assert not (tmp_path / "out.txt").exists()   # rolled back
+        assert not result.success                              # aggregate Left
+        assert (tmp_path / "out.txt").read_text() == "fresh"   # write KEPT
+        assert result.metadata["ledger"].query(entry_type="error_reified")
 
     @pytest.mark.asyncio
-    async def test_failure_restores_overwritten_file(self, interpreter, tmp_path):
+    async def test_overwrite_persists_when_a_later_cell_fails(self, interpreter, tmp_path):
+        # WAS test_failure_restores_overwritten_file (rollback to ORIGINAL).
         (tmp_path / "keep.txt").write_text("ORIGINAL")
         doc = ("```lackpy @write(keep.txt)\nNEW\n```\n\n"
                "```lackpy\nx = 1 / 0\n```")
         ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
         result = await interpreter.execute(doc, ctx)
         assert not result.success
-        assert (tmp_path / "keep.txt").read_text() == "ORIGINAL"   # restored
+        assert (tmp_path / "keep.txt").read_text() == "NEW"    # KEPT, not restored
 
     @pytest.mark.asyncio
     async def test_success_commits_the_write(self, interpreter, tmp_path):
@@ -440,20 +447,19 @@ class TestTransactionalWrites:
         assert (tmp_path / "out.txt").read_text() == "kept"
 
     @pytest.mark.asyncio
-    async def test_rollback_happens_without_a_ceiling(self, interpreter, tmp_path):
-        # The journal is always-on: rollback does not depend on a ceiling or a
-        # granted toolset. A bare run's failed write is still rolled back.
+    async def test_write_persists_without_a_ceiling(self, interpreter, tmp_path):
+        # WAS test_rollback_happens_without_a_ceiling. Forgiveness, like the
+        # old journal, does not depend on a ceiling or a granted toolset.
         doc = ("```lackpy @write(out.txt)\nfresh\n```\n\n"
                "```lackpy\nraise ValueError('boom')\n```")
         ctx = ExecutionContext(base_dir=tmp_path)  # no ceiling, no tools
         result = await interpreter.execute(doc, ctx)
         assert not result.success
-        assert not (tmp_path / "out.txt").exists()   # rolled back regardless
+        assert (tmp_path / "out.txt").read_text() == "fresh"
 
     @pytest.mark.asyncio
-    async def test_failure_restores_a_diffed_file(self, interpreter, tmp_path):
-        # apply_diff mutates an existing file -- the dangerous write-kind. A later
-        # failure must restore the original content.
+    async def test_diff_persists_when_a_later_cell_fails(self, interpreter, tmp_path):
+        # WAS test_failure_restores_a_diffed_file (rollback to Hello World).
         (tmp_path / "hello.txt").write_text("Hello World\n")
         doc = ("```lackpy @diff(hello.txt)\n"
                "--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n"
@@ -462,13 +468,16 @@ class TestTransactionalWrites:
         ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
         result = await interpreter.execute(doc, ctx)
         assert not result.success
-        assert (tmp_path / "hello.txt").read_text() == "Hello World\n"   # restored
+        assert (tmp_path / "hello.txt").read_text() == "Hello Universe\n"  # KEPT
 
 
-class TestInjectedToolJournaling:
-    """An injected (profile) write-tool with declared effect metadata is journaled
-    (rolled back on failure); without it the heuristic can't extract the literal
-    path, so it is not -- the targeted precision win over the grade heuristic.
+class TestInjectedToolWritesKept:
+    """DELIBERATE CONTRACT CHANGE (L1.2) — formerly TestInjectedToolJournaling,
+    which asserted that declared path metadata made an injected write-tool's
+    effect roll back on failure. With the rollback retired, both the precise
+    (declared path) and heuristic (no path) specs behave the same at this
+    level: the write persists and the failure is ledgered. The metadata still
+    drives effect grading/classification for the ceiling gate.
     """
 
     @staticmethod
@@ -485,21 +494,12 @@ class TestInjectedToolJournaling:
     DOC = '```lackpy\nmywrite("out.txt", "data")\n```\n\n```lackpy\nraise ValueError("boom")\n```'
 
     @pytest.mark.asyncio
-    async def test_injected_write_with_path_metadata_is_rolled_back(self, interpreter, tmp_path):
-        resolved = self._writer_tools(tmp_path, precise=True)
+    @pytest.mark.parametrize("precise", [True, False])
+    async def test_injected_write_persists_on_failure(self, interpreter, tmp_path, precise):
+        resolved = self._writer_tools(tmp_path, precise=precise)
         ctx = ExecutionContext(base_dir=tmp_path, tools=resolved,
                                config={"grade_ceiling": Grade(3, 3)})
         result = await interpreter.execute(self.DOC, ctx)
-        assert not result.success
-        assert not (tmp_path / "out.txt").exists()      # journaled -> rolled back
-
-    @pytest.mark.asyncio
-    async def test_injected_write_without_metadata_is_not_rolled_back(self, interpreter, tmp_path):
-        # Heuristic fallback: kind=write but no declared path -> dynamic -> the
-        # journal never snapshots it, so the failed doc's write persists.
-        resolved = self._writer_tools(tmp_path, precise=False)
-        ctx = ExecutionContext(base_dir=tmp_path, tools=resolved,
-                               config={"grade_ceiling": Grade(3, 3)})
-        result = await interpreter.execute(self.DOC, ctx)
-        assert not result.success
-        assert (tmp_path / "out.txt").read_text() == "data"   # NOT rolled back
+        assert not result.success                              # aggregate Left
+        assert (tmp_path / "out.txt").read_text() == "data"    # write KEPT
+        assert result.metadata["ledger"].query(entry_type="error_reified")
