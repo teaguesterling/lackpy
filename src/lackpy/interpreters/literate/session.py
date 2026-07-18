@@ -18,8 +18,9 @@ contract (L1.1/L1.2 — design conflict #2, option (c)):
     Returns the ledger-derived errors + the *raw* un-interpreted message so
     the model can correct its own work (cleaning would hide the bug); a
     corrected round simply rebinds the holes with real values.
-  - A pre-execution refusal (parse errors, effect-ceiling gate) is also a
-    Left, but nothing ran and no state changed.
+  - A pre-execution refusal (parse errors — since L1.5 the effect-ceiling
+    gate reifies per cell as ``source_unavailable`` instead of refusing the
+    document) is also a Left, but nothing ran and no state changed.
 
 The session is a PURE fold: ``step`` takes a raw string and returns a result. The
 model-call loop (prompt -> model -> step -> feed back) is a thin client's job, so
@@ -362,8 +363,9 @@ class LiterateSession:
         )
 
         if not result.metadata.get("completed"):
-            # Pre-execution refusal (parse errors, ceiling gate): no cell ran,
-            # no state changed — a plain Left with the refusal reason.
+            # Pre-execution refusal (parse errors; the ceiling gate reifies
+            # per cell since L1.5 and completes instead): no cell ran, no
+            # state changed — a plain Left with the refusal reason.
             return StepResult(
                 ok=False, raw=raw,
                 errors=[result.error or "execution failed"],
