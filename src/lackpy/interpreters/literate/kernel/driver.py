@@ -19,6 +19,7 @@ from typing import Any
 from ..annotations import TRUNCATION_NOTE
 from ..parser import Cell
 from .interface import CellResult, KernelInterface
+from .ledger import Ledger
 from .plugins import PluginAdvice, merge_advice
 from .recovery import NoRecoveryHandler, RecoveryAction, RecoveryContext, RecoveryHandler
 from .streaming_parser import StreamingCellParser
@@ -40,12 +41,15 @@ class StreamingDriver:
         kernel: KernelInterface,
         recovery: RecoveryHandler | None = None,
         plugins: list[Any] | None = None,
+        ledger: Ledger | None = None,
     ) -> None:
         self._kernel = kernel
         self._recovery = recovery or NoRecoveryHandler()
         self._plugins: list[Any] = plugins or []
         self._parser = StreamingCellParser()
-        self._log: list[CellExecutionEvent] = []
+        # NOT `ledger or Ledger()`: Ledger defines __len__, so an injected
+        # EMPTY ledger would be falsy and silently replaced.
+        self._ledger = ledger if ledger is not None else Ledger()
         self._output_parts: list[str] = []
         self._cell_counter: int = 0
         self._generation: int = 0
@@ -53,8 +57,45 @@ class StreamingDriver:
         self._continue_requested: bool = False
 
     @property
+    def ledger(self) -> Ledger:
+        """The queryable event ledger — the single store of execution events."""
+        return self._ledger
+
+    @property
     def execution_log(self) -> list[CellExecutionEvent]:
-        return list(self._log)
+        """Rich event objects, in order — a view DERIVED from the ledger.
+
+        Formerly backed by its own list (``self._log``); the ledger is now the
+        single store, with the event objects attached as row payloads.
+        """
+        return [
+            event
+            for event in self._ledger.payloads()
+            if isinstance(event, CellExecutionEvent)
+        ]
+
+    def _record(self, event: CellExecutionEvent) -> None:
+        """Route one execution event into the ledger (the ONLY append path).
+
+        ``entry_type`` is the event's existing status verbatim — L1.0 invents
+        no new entry types.  ``name`` stays ``None``: today's events concern
+        cells, which carry no binding name; the forgiveness semantics (L1.1+)
+        introduce named entries.  The event object rides along as the row
+        payload so ``execution_log`` / ``formats`` keep their rich view.
+        """
+        result = event.result
+        self._ledger.record(
+            event.status,
+            detail={
+                "cell_index": event.cell_index,
+                "cell_type": event.cell.cell_type,
+                "generation": event.generation,
+                "recovery_attempts": event.recovery_attempts,
+                "error": result.error if result else None,
+                "error_phase": result.error_phase if result else None,
+            },
+            payload=event,
+        )
 
     @property
     def rendered_output(self) -> str:
@@ -96,7 +137,7 @@ class StreamingDriver:
                     status="pending",
                     generation=self._generation,
                 )
-                self._log.append(event)
+                self._record(event)
                 events.append(event)
                 self._cell_counter += 1
                 continue
@@ -124,7 +165,7 @@ class StreamingDriver:
                         status="continue_requested",
                         generation=self._generation,
                     )
-                    self._log.append(event)
+                    self._record(event)
                     events.append(event)
                     self._continue_requested = True
                     continue
@@ -139,11 +180,11 @@ class StreamingDriver:
                     status="executed",
                     generation=self._generation,
                 )
-                self._log.append(event)
+                self._record(event)
                 events.append(event)
             else:
                 event = await self._handle_failure(cell, index, result)
-                self._log.append(event)
+                self._record(event)
                 events.append(event)
                 if event.status not in ("recovered", "skipped"):
                     self._interrupted = True

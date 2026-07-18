@@ -20,6 +20,7 @@ in a persistent namespace dict.
 
 from .driver import CellExecutionEvent, StreamingDriver
 from .interface import CellResult, KernelInterface
+from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
 from .lightweight import LightweightKernel
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
 from .recovery import (
@@ -32,11 +33,14 @@ from .recovery import (
 from .streaming_parser import StreamingCellParser
 
 __all__ = [
+    "AIDR_LEDGER_COLUMNS",
     "CellExecutionEvent",
     "CellResult",
     "ExecutionPlugin",
     "InferenceRecoveryHandler",
     "KernelInterface",
+    "Ledger",
+    "LedgerEntry",
     "LightweightKernel",
     "NoRecoveryHandler",
     "PluginAdvice",
