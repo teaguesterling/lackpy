@@ -47,6 +47,7 @@ from .kernel.forgiveness import (
 )
 from .kernel.ledger import Ledger
 from .kernel.static_analysis import BUILTIN_NAMES, collect_bindings, collect_names
+from .kernel.versions import SUPERSEDED, BindingVersions, value_kind
 from .parser import Cell, parse
 from .prompt import LITERATE_HINT
 from .tools import make_tool_namespace
@@ -101,6 +102,7 @@ class LiterateInterpreter:
         context: ExecutionContext,
         kernel: LightweightKernel,
         ledger: Ledger | None = None,
+        versions: BindingVersions | None = None,
     ) -> InterpreterExecutionResult:
         """Run a literate document through an ALREADY-BUILT kernel: classify ->
         ceiling gate -> run cells (forgiveness pre-pass + execute) -> render.
@@ -122,9 +124,20 @@ class LiterateInterpreter:
         Either for the run is DERIVED from the ledger at the end — ``success``
         is False iff any failure was reified, while the rendered output,
         namespace bindings, and file writes all stand.
+
+        ``versions`` is the L1.3 binding version history (ground rule 3:
+        bindings are immutable versions).  Every name a cell binds — a real
+        value, a hole, or an error value — is recorded as a new
+        :class:`~.kernel.versions.BindingVersion`; re-asserting a name marks
+        the prior version superseded and writes one ``superseded`` ledger
+        entry with the version transition.  The exec-namespace dict stays the
+        mutable latest-wins surface; immutability lives in this recorded
+        layer.  The session threads ONE history across rounds (like the
+        ledger); the batch path creates one per call.
         """
         start = time.perf_counter()
         ledger = ledger if ledger is not None else Ledger()
+        versions = versions if versions is not None else BindingVersions()
         run_mark = len(ledger)
 
         parsed = parse(program)
@@ -200,11 +213,14 @@ class LiterateInterpreter:
             # cannot resolve — unknown names, or references to already-bound
             # holes/error values — binds typed holes, is ledgered, and is
             # SKIPPED (never executed, so a hole can't flow into arithmetic).
-            reified = _reify_holes_for_cell(cell, index, kernel, ledger, assigned_names)
+            reified = _reify_holes_for_cell(
+                cell, index, kernel, ledger, versions, assigned_names
+            )
             if reified is not None:
                 output_parts.append(reified)
                 continue
 
+            known_before = kernel.known_names()
             result = kernel.execute_cell(cell, index)
 
             if not result.success:
@@ -218,7 +234,8 @@ class LiterateInterpreter:
                     output_parts.append(result.output)
                 output_parts.append(
                     _reify_error_for_cell(
-                        cell, index, result, kernel, ledger, assigned_names
+                        cell, index, result, kernel, ledger, versions,
+                        assigned_names, known_before,
                     )
                 )
                 continue
@@ -227,6 +244,22 @@ class LiterateInterpreter:
                 output_parts.append(result.output)
 
             assigned_names.update(result.namespace_delta.keys())
+
+            # L1.3 (binding layer): every name this cell bound is a new
+            # immutable version; a name with a prior version is a
+            # RE-ASSERTION — the prior version is marked superseded and one
+            # ``superseded`` ledger entry records the transition (nothing
+            # silent).  The kernel's namespace_delta is the runtime record of
+            # what the cell actually bound (identity-based, like all kernel
+            # delta tracking) — an assertion that rebinds the identical
+            # object is unobservable and not versioned.
+            cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
+            for name in sorted(result.namespace_delta):
+                if name.startswith("_"):
+                    continue  # __continue_requested__ / internals, not bindings
+                _record_assertion(
+                    name, result.namespace_delta[name], versions, ledger, cell_detail
+                )
 
             if result.namespace_delta.get("__continue_requested__"):
                 continue_requested = True
@@ -271,11 +304,44 @@ class LiterateInterpreter:
                 "cell_count": len(parsed.cells),
                 "completed": True,
                 "ledger": ledger,
+                "versions": versions,
                 "frontmatter": {
                     "echo": parsed.frontmatter.echo,
                     "output": parsed.frontmatter.output,
                     "interpreter": parsed.frontmatter.interpreter,
                 },
+            },
+        )
+
+
+def _record_assertion(
+    name: str,
+    value: Any,
+    versions: BindingVersions,
+    ledger: Ledger,
+    cell_detail: dict[str, Any],
+) -> None:
+    """Record one binding assertion in the version history (L1.3).
+
+    The single choke point for the binding layer: every bind — an executed
+    cell's namespace delta, a reified hole, an error value — passes through
+    here.  A first assertion just records version 1; a RE-ASSERTION marks the
+    prior version superseded and writes the one ``superseded`` ledger entry,
+    whose ``detail`` carries the version transition (mirroring AIDR's
+    ``_aidr_bindings`` version/``superseded_by`` model) plus the kind of the
+    superseded value (``value`` / ``hole`` / ``error`` — so a hole filled by
+    a real definition is visibly a versioned transition, not a mutation).
+    """
+    new, prior = versions.assert_binding(name, value)
+    if prior is not None:
+        ledger.record(
+            SUPERSEDED,
+            name=name,
+            detail={
+                "from_version": prior.version,
+                "to_version": new.version,
+                "prior": value_kind(prior.value),
+                **cell_detail,
             },
         )
 
@@ -292,6 +358,7 @@ def _reify_holes_for_cell(
     index: int,
     kernel: LightweightKernel,
     ledger: Ledger,
+    versions: BindingVersions,
     assigned_names: set[str],
 ) -> str | None:
     """Binding-layer forgiveness pre-pass for one cell (L1.1, typed holes).
@@ -342,7 +409,9 @@ def _reify_holes_for_cell(
     notes: list[str] = []
 
     for name in sorted(undefined):
-        kernel.bind(name, Hole(name))
+        hole = Hole(name)
+        kernel.bind(name, hole)
+        _record_assertion(name, hole, versions, ledger, base_detail)
         ledger.record(
             HOLE_OPENED, name=name, detail={"reason": "unbound", **base_detail}
         )
@@ -354,7 +423,12 @@ def _reify_holes_for_cell(
         # A name may be among its own causes (`x = x + 1` with x holed);
         # prefer naming the *other* causes, fall back to the self-cause.
         cause = tuple(sorted(causes - {name})) or tuple(sorted(causes))
-        kernel.bind(name, Hole(name, blocked_by=cause))
+        hole = Hole(name, blocked_by=cause)
+        kernel.bind(name, hole)
+        # A chained hole may overwrite a REAL prior value (`x = missing + 1`
+        # with x previously bound): that too is a versioned supersession,
+        # ledgered by _record_assertion — nothing silent.
+        _record_assertion(name, hole, versions, ledger, base_detail)
         ledger.record(
             HOLE_OPENED,
             name=name,
@@ -386,7 +460,9 @@ def _reify_error_for_cell(
     result: CellResult,
     kernel: LightweightKernel,
     ledger: Ledger,
+    versions: BindingVersions,
     assigned_names: set[str],
+    known_before: set[str],
 ) -> str:
     """Binding-layer error reification for one failed cell (L1.2).
 
@@ -427,9 +503,12 @@ def _reify_error_for_cell(
     missing = sorted(n for n in bindings if n not in known)
     kept = sorted(n for n in bindings if n in known)
 
+    cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
     if missing:
         for name in missing:
-            kernel.bind(name, ErrorValue(name=name, error=error, error_phase=phase))
+            error_value = ErrorValue(name=name, error=error, error_phase=phase)
+            kernel.bind(name, error_value)
+            _record_assertion(name, error_value, versions, ledger, cell_detail)
             ledger.record(
                 ERROR_REIFIED, name=name, detail={**base_detail, "kept": kept}
             )
@@ -438,6 +517,23 @@ def _reify_error_for_cell(
         ledger.record(ERROR_REIFIED, name=None, detail={**base_detail, "kept": kept})
     # Partial bindings the cell completed before failing surface as variables.
     assigned_names.update(kept)
+
+    # L1.3: those partial bindings are real assertions and must be versioned
+    # too — a failed CellResult carries no namespace_delta, so observe them
+    # directly.  A kept name absent before this cell ran is a first assertion
+    # (or a supersession of a deleted name's history); a kept name whose live
+    # value now differs (identity, like all kernel delta tracking) from its
+    # recorded current version was RE-ASSERTED before the failure — silent
+    # overwrite is exactly what ground rule 3 forbids.  A kept pre-existing
+    # name with no version history is an environment name (no version 0 by
+    # design) whose change is unobservable here; it stays unversioned.
+    for name in kept:
+        live = kernel.lookup(name)
+        current = versions.current(name)
+        if name not in known_before:
+            _record_assertion(name, live, versions, ledger, cell_detail)
+        elif current is not None and current.value is not live:
+            _record_assertion(name, live, versions, ledger, cell_detail)
 
     note = f"error: {error}"
     if missing:

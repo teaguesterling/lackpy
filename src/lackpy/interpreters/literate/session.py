@@ -286,7 +286,7 @@ class LiterateSession:
         # Lazy imports avoid a circular import with the package __init__ (which
         # re-exports this module).
         from . import LiterateInterpreter, _build_namespace
-        from .kernel import Ledger, LightweightKernel
+        from .kernel import BindingVersions, Ledger, LightweightKernel
 
         self._context = context
         self._interpreter = interpreter or LiterateInterpreter()
@@ -295,6 +295,11 @@ class LiterateSession:
         # record of the session's execution + reified failures. Each step's
         # aggregate Either is derived from this ledger, per-round slice.
         self._ledger = Ledger()
+        # ONE binding version history threaded across every round (L1.3):
+        # bindings are immutable versions; re-asserting a name in a later
+        # round supersedes the prior version and is ledgered. The kernel's
+        # namespace dict stays the mutable latest-wins surface.
+        self._versions = BindingVersions()
         self._clean_parts: list[str] = []
 
     async def step(self, raw: str, shown: str | None = None) -> StepResult:
@@ -352,7 +357,8 @@ class LiterateSession:
         # nothing to restore either way.
         round_mark = len(self._ledger)
         result = await self._interpreter._run_document(
-            doc, self._context, self._kernel, ledger=self._ledger
+            doc, self._context, self._kernel,
+            ledger=self._ledger, versions=self._versions,
         )
 
         if not result.metadata.get("completed"):
@@ -395,6 +401,16 @@ class LiterateSession:
         rounds. Reified failures (``hole_opened`` / ``error_reified``) live
         here; the per-round Left is derived from it, never thrown."""
         return self._ledger
+
+    @property
+    def versions(self):
+        """The session's binding version history (L1.3) — one across all
+        rounds. Every name a cell binds is an immutable
+        :class:`~.kernel.versions.BindingVersion`; re-assertion supersedes
+        (``superseded_by`` + a ``superseded`` ledger entry), so prior
+        versions are never lost even though the exec namespace is
+        latest-wins."""
+        return self._versions
 
     @property
     def rendered(self) -> str:

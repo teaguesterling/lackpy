@@ -34,6 +34,7 @@ from .interface import CellResult, KernelInterface
 from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
 from .lightweight import LightweightKernel
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
+from .versions import SUPERSEDED, BindingVersion, BindingVersions
 from .recovery import (
     InferenceRecoveryHandler,
     NoRecoveryHandler,
@@ -45,11 +46,14 @@ from .streaming_parser import StreamingCellParser
 
 __all__ = [
     "AIDR_LEDGER_COLUMNS",
+    "BindingVersion",
+    "BindingVersions",
     "CellExecutionEvent",
     "CellResult",
     "ERROR_REIFIED",
     "ErrorValue",
     "ExecutionPlugin",
+    "SUPERSEDED",
     "FORGIVENESS_ENTRY_TYPES",
     "HOLE_OPENED",
     "Hole",
