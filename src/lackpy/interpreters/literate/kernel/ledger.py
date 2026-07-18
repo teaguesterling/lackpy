@@ -21,12 +21,15 @@ Entry types
 -----------
 The streaming driver records its cell statuses verbatim (``executed`` /
 ``pending`` / ``continue_requested`` / ``recovered`` / ``skipped`` /
-``aborted``).  The batch/session path (L1.1/L1.2) records ``executed`` /
-``continue_requested`` plus the forgiveness entry types ``hole_opened`` and
-``error_reified`` (see :mod:`.forgiveness`, which also derives the aggregate
-per-round Either from them).  Later semantics (``superseded``,
-``pending_deferred``, …) are added by their own sub-PRs; nothing here
-constrains ``entry_type`` to a closed set.
+``aborted``).  The batch/session path records ``executed`` /
+``continue_requested`` plus the forgiveness entry types ``hole_opened``
+(L1.1), ``error_reified`` (L1.2), and ``source_unavailable`` (L1.5) — see
+:mod:`.forgiveness`, which also derives the aggregate per-round Either from
+them — and ``superseded`` (L1.3, :mod:`.versions`).  NOTE the deliberate
+naming (design conflict #4): the driver's ``pending`` status means "not
+executed due to @continue pause"; the L1.5 unavailable-source semantic never
+uses the word "pending", so the two can't be confused in ledger queries.
+Nothing here constrains ``entry_type`` to a closed set.
 
 Payloads
 --------

@@ -1,4 +1,5 @@
-"""Typed holes + error values — the L1 binding-layer forgiveness values.
+"""Typed holes + error values + unavailable sources — the L1 binding-layer
+forgiveness values.
 
 The two-layer forgiveness contract (design conflict #2, DECIDED option (c)):
 
@@ -6,11 +7,13 @@ The two-layer forgiveness contract (design conflict #2, DECIDED option (c)):
   execution is REIFIED AS A BOUND VALUE and ledgered; execution continues and
   nothing rolls back.  An unknown name binds a :class:`Hole`
   (``hole_opened``); a runtime error binds an :class:`ErrorValue`
-  (``error_reified``).  A cell that *references* a hole or error value cannot
-  produce a real value, so its own bindings become chained holes.  Chaining is
-  detected **statically** — a referenced name bound to a forgiving value
-  blocks the cell before it executes — so a forgiving value never flows into
-  arithmetic and never has to survive ``+``/``:.2f``/etc.
+  (``error_reified``); a name whose SOURCE the kernel refuses to run right
+  now — a cell over the effect ceiling gate — binds an :class:`Unavailable`
+  (``source_unavailable``).  A cell that *references* any forgiving value
+  cannot produce a real value, so its own bindings become chained holes.
+  Chaining is detected **statically** — a referenced name bound to a
+  forgiving value blocks the cell before it executes — so a forgiving value
+  never flows into arithmetic and never has to survive ``+``/``:.2f``/etc.
 * **Aggregate layer (the preserved signal).**  The per-round Either/Left the
   session's callers rely on SURVIVES as a view derived from the ledger:
   :func:`round_is_left` — a round containing any reified failure still
@@ -41,8 +44,17 @@ HOLE_OPENED = "hole_opened"
 #: value/ledger entry instead of an abort.
 ERROR_REIFIED = "error_reified"
 
+#: Ledger entry type for an unavailable source (L1.5): a cell the effect
+#: ceiling gate refuses to run binds its names as :class:`Unavailable` values
+#: instead of refusing the whole document.  Deliberately NOT named "pending"
+#: (design conflict #4): the streaming driver's ``pending`` status means "not
+#: executed due to @continue pause" — a different concept on a different path.
+SOURCE_UNAVAILABLE = "source_unavailable"
+
 #: The entry types that make a round Left under the aggregate view.
-FORGIVENESS_ENTRY_TYPES: frozenset[str] = frozenset({HOLE_OPENED, ERROR_REIFIED})
+FORGIVENESS_ENTRY_TYPES: frozenset[str] = frozenset(
+    {HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE}
+)
 
 
 @dataclass(frozen=True)
@@ -81,9 +93,35 @@ class ErrorValue:
         return f"⟨{self.name}: error {self.error}⟩"
 
 
+@dataclass(frozen=True)
+class Unavailable:
+    """An unavailable source reified as a value (L1.5).
+
+    Bound to the names a cell would have bound when the kernel REFUSES to run
+    the cell's required effect right now — concretely, the effect ceiling
+    gate (:func:`..effects.exceeds_ceiling`): the cell's statically-classified
+    effects exceed the profile's grade ceiling, so its source is unavailable
+    under the current ceiling.  Not unknown (that's a :class:`Hole`), not a
+    runtime failure (that's an :class:`ErrorValue`) — the source exists and
+    would run under a raised ceiling / different profile.  A later
+    within-ceiling assertion of the name supersedes this value through the
+    normal L1.3 versioning path.
+
+    ``reason`` carries the gate's human-readable refusal (the
+    "effect ceiling exceeded: ..." line).
+    """
+
+    name: str
+    reason: str
+
+    def __repr__(self) -> str:
+        return f"⟨{self.name}: unavailable — {self.reason}⟩"
+
+
 def is_forgiving(value: Any) -> bool:
-    """True for the binding-layer forgiveness values (holes, error values)."""
-    return isinstance(value, (Hole, ErrorValue))
+    """True for the binding-layer forgiveness values (holes, error values,
+    unavailable sources)."""
+    return isinstance(value, (Hole, ErrorValue, Unavailable))
 
 
 def reified_failures(entries: Iterable[LedgerEntry]) -> list[LedgerEntry]:
@@ -111,4 +149,9 @@ def describe_failure(entry: LedgerEntry) -> str:
         if entry.name:
             return f"error: {err} ('{entry.name}' bound as error value)"
         return f"error: {err}"
+    if entry.entry_type == SOURCE_UNAVAILABLE:
+        reason = entry.detail.get("reason", "source unavailable")
+        if entry.name:
+            return f"unavailable: '{entry.name}' — {reason}"
+        return f"unavailable: {reason}"
     return f"{entry.entry_type}: {entry.name or ''}".rstrip(": ")

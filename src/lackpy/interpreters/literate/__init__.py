@@ -31,7 +31,6 @@ from .effects import (
     ToolEffect,
     as_grade,
     classify_effects,
-    combine,
     exceeds_ceiling,
     tool_effect_from_spec,
 )
@@ -39,8 +38,10 @@ from .kernel import CellResult, LightweightKernel
 from .kernel.forgiveness import (
     ERROR_REIFIED,
     HOLE_OPENED,
+    SOURCE_UNAVAILABLE,
     ErrorValue,
     Hole,
+    Unavailable,
     describe_failure,
     is_forgiving,
     reified_failures,
@@ -149,52 +150,42 @@ class LiterateInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
-        # Effects-core-to-the-step: classify the document once (statically, before
-        # any cell runs), then drive two mechanisms off the result -- an always-on
-        # write journal and a conditional ceiling gate.
+        # Ceiling gate (conditional), PER CELL since L1.5: classify each cell
+        # statically and record which cells exceed the ceiling -- those cells'
+        # sources are UNAVAILABLE (the gate refuses to run their required
+        # effect right now) and are reified in the execution loop below
+        # instead of refusing the whole document up front. The gate's
+        # refuse-before-running guarantee is kept per cell: an over-ceiling
+        # cell is never executed, so its effect never happens; within-ceiling
+        # cells run normally (no abort).
         #
-        # Cells that don't parse are skipped here so the kernel reports the precise
-        # syntax error rather than a misleading refusal. (Cells are compiled here
-        # and again by the kernel -- cheap for small docs; a later slice can compile
-        # once and feed both. This gates/journals only the batch path; the
-        # StreamingDriver path is a follow-up slice.)
-        effects_map = _gate_effects_map(context)
-        cell_effects = []
-        for cell in parsed.cells:
-            src = compile_cell(cell)
-            try:
-                ast.parse(src)
-            except SyntaxError:
-                continue
-            cell_effects.append(classify_effects(src, tool_effects=effects_map))
-        doc_effects = combine(cell_effects)
-
-        # Ceiling gate (conditional): refuse a document whose aggregate effects
-        # exceed the ceiling, before any cell runs. Profile -> ceiling wiring: an
-        # explicit context.config["grade_ceiling"] wins; otherwise the ceiling
-        # DEFAULTS to the granted toolset's grade (ResolvedProfile.grade == its
-        # tools' grade) -- a document may not exceed the effect grade of the tools
-        # its profile granted. No ceiling and no toolset => no gate. (End-to-end
-        # enforcement in the agent path additionally needs execution-axis dispatch
-        # to run literate under a profile -- a separate slice.)
+        # Profile -> ceiling wiring unchanged: an explicit
+        # context.config["grade_ceiling"] wins; otherwise the ceiling DEFAULTS
+        # to the granted toolset's grade (ResolvedProfile.grade == its tools'
+        # grade) -- a document may not exceed the effect grade of the tools its
+        # profile granted. No ceiling and no toolset => no gate. Cells that
+        # don't compile/parse are skipped here so the kernel reports the
+        # precise syntax error rather than a misleading refusal. (This gates
+        # only the batch/session path; the StreamingDriver path is untouched.)
         raw_ceiling = (context.config or {}).get("grade_ceiling")
         if raw_ceiling is None:
             raw_ceiling = getattr(context.tools, "grade", None)
+        gate_violations: dict[int, str] = {}
         if raw_ceiling is not None:
             ceiling = as_grade(raw_ceiling)
-            violation = exceeds_ceiling(doc_effects, ceiling)
-            if violation:
-                return InterpreterExecutionResult(
-                    success=False,
-                    error=f"effect ceiling exceeded: {violation}",
-                    output_format="none",
-                    duration_ms=(time.perf_counter() - start) * 1000,
-                    metadata={
-                        "effects": doc_effects,
-                        "ceiling": ceiling,
-                        "needs_sandbox": doc_effects.needs_sandbox,
-                    },
-                )
+            effects_map = _gate_effects_map(context)
+            for index, cell in enumerate(parsed.cells):
+                try:
+                    src = compile_cell(cell)
+                    ast.parse(src)
+                except (ValueError, SyntaxError):
+                    continue
+                effects = classify_effects(src, tool_effects=effects_map)
+                violation = exceeds_ceiling(effects, ceiling)
+                if violation:
+                    gate_violations[index] = (
+                        f"effect ceiling exceeded: {violation}"
+                    )
 
         # NOTE (L1.2, contract change): the always-on write journal that
         # rolled a failed document's file writes back is RETIRED on this path
@@ -209,6 +200,21 @@ class LiterateInterpreter:
         assigned_names: set[str] = set()
 
         for index, cell in enumerate(parsed.cells):
+            # Unavailable-source reification (L1.5, binding layer): a cell the
+            # ceiling gate refuses binds Unavailable values for the names it
+            # would have bound, is ledgered (`source_unavailable`), and is
+            # SKIPPED — never executed, so the refused effect never happens.
+            # Gate-first: the refusal is about the cell's required effects,
+            # independent of whether its names would resolve.
+            if index in gate_violations:
+                output_parts.append(
+                    _reify_unavailable_for_cell(
+                        cell, index, gate_violations[index], kernel, ledger,
+                        versions, assigned_names,
+                    )
+                )
+                continue
+
             # Forgiveness pre-pass (L1.1, binding layer): a cell whose names
             # cannot resolve — unknown names, or references to already-bound
             # holes/error values — binds typed holes, is ledgered, and is
@@ -289,8 +295,9 @@ class LiterateInterpreter:
         # DERIVED FROM THE LEDGER — Left iff any failure was reified — while
         # the output, bindings, and writes above all stand.  ``completed``
         # distinguishes a finished run (Right or aggregate-Left) from a
-        # pre-execution refusal (parse errors, ceiling gate), which returns
-        # earlier and never touches state.
+        # pre-execution refusal (parse errors — since L1.5 the ceiling gate
+        # reifies per cell instead of refusing), which returns earlier and
+        # never touches state.
         failures = reified_failures(ledger.entries()[run_mark:])
         return InterpreterExecutionResult(
             success=not failures,
@@ -539,6 +546,69 @@ def _reify_error_for_cell(
     if missing:
         note += f" — bound as error value: {', '.join(missing)}"
     return kernel_note(note) + "\n"
+
+
+def _reify_unavailable_for_cell(
+    cell: Cell,
+    index: int,
+    reason: str,
+    kernel: LightweightKernel,
+    ledger: Ledger,
+    versions: BindingVersions,
+    assigned_names: set[str],
+) -> str:
+    """Binding-layer unavailable-source reification for one gated cell (L1.5).
+
+    The cell's required effect exceeds the ceiling, so the gate refuses to run
+    it — its source is UNAVAILABLE right now (a raised ceiling / different
+    profile would run it).  Instead of refusing the whole document:
+
+    * each name the cell would have bound binds an :class:`Unavailable`
+      carrying the gate's reason — one ``source_unavailable`` ledger entry
+      per name (nothing silent);
+    * a cell that binds nothing (e.g. a bare ``@write`` directive) still gets
+      one ``source_unavailable`` entry (``name=None``);
+    * the cell is never executed, so the refused effect never happens
+      (refuse-before-running, kept per cell);
+    * downstream cells that reference an Unavailable name chain as blocked
+      holes via the L1.1 pre-pass (``is_forgiving`` covers Unavailable), and
+      a later within-ceiling assertion supersedes it via L1.3 versioning.
+
+    Only called for cells that already compiled+parsed during gate
+    classification, so ``compile_cell``/``ast.parse`` cannot fail here.
+    Returns the kernel-channel annotation to append to the rendered output.
+
+    NAMING (design conflict #4): this concept never uses the word "pending" —
+    the streaming driver's ``pending`` status means "not executed due to
+    @continue pause", a different thing on an untouched path.
+    """
+    bindings = collect_bindings(ast.parse(compile_cell(cell)))
+    base_detail = {
+        "cell_index": index,
+        "cell_type": cell.cell_type,
+        "reason": reason,
+    }
+    cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
+
+    notes: list[str] = []
+    if bindings:
+        for name in sorted(bindings):
+            value = Unavailable(name=name, reason=reason)
+            kernel.bind(name, value)
+            # A supersession of a real prior value by an Unavailable is a
+            # versioned transition like any other, ledgered by
+            # _record_assertion — nothing silent.
+            _record_assertion(name, value, versions, ledger, cell_detail)
+            ledger.record(SOURCE_UNAVAILABLE, name=name, detail=dict(base_detail))
+            notes.append(f"'{name}' unavailable")
+        assigned_names.update(bindings)
+    else:
+        # Nothing binds, but the skipped cell must still be ledgered and the
+        # round must still report Left.
+        ledger.record(SOURCE_UNAVAILABLE, name=None, detail=dict(base_detail))
+        notes.append("cell skipped")
+
+    return kernel_note(f"unavailable ({reason}): " + "; ".join(notes)) + "\n"
 
 
 _INTERNAL_NAMES = frozenset({

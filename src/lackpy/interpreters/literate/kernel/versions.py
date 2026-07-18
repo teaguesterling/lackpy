@@ -68,16 +68,19 @@ class BindingVersion:
 
 
 def value_kind(value: Any) -> str:
-    """``"hole"`` / ``"error"`` / ``"value"`` — the binding-layer kind of a
-    version's value, for the ``superseded`` entry's detail."""
+    """``"hole"`` / ``"error"`` / ``"unavailable"`` / ``"value"`` — the
+    binding-layer kind of a version's value, for the ``superseded`` entry's
+    detail."""
     # Local import: forgiveness imports nothing from here, but keep the
     # modules decoupled at import time regardless of future direction.
-    from .forgiveness import ErrorValue, Hole
+    from .forgiveness import ErrorValue, Hole, Unavailable
 
     if isinstance(value, Hole):
         return "hole"
     if isinstance(value, ErrorValue):
         return "error"
+    if isinstance(value, Unavailable):
+        return "unavailable"
     return "value"
 
 
