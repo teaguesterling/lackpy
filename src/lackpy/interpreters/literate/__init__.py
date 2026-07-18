@@ -23,6 +23,7 @@ from ..base import (
     InterpreterExecutionResult,
     InterpreterValidationResult,
 )
+from .annotations import kernel_note
 from .compiler import compile_cell
 from .display import DEFAULT_DISPLAY_THRESHOLD, DISPLAY_HELPER_NAME, make_display
 from .effects import (
@@ -36,7 +37,16 @@ from .effects import (
 )
 from .journal import FileJournal
 from .kernel import LightweightKernel
-from .parser import parse
+from .kernel.forgiveness import (
+    HOLE_OPENED,
+    Hole,
+    describe_failure,
+    is_forgiving,
+    reified_failures,
+)
+from .kernel.ledger import Ledger
+from .kernel.static_analysis import BUILTIN_NAMES, collect_bindings, collect_names
+from .parser import Cell, parse
 from .prompt import LITERATE_HINT
 from .tools import make_tool_namespace
 
@@ -89,16 +99,33 @@ class LiterateInterpreter:
         program: str,
         context: ExecutionContext,
         kernel: LightweightKernel,
+        ledger: Ledger | None = None,
     ) -> InterpreterExecutionResult:
         """Run a literate document through an ALREADY-BUILT kernel: classify ->
-        ceiling gate -> write journal -> run cells -> render.
+        ceiling gate -> write journal -> run cells (forgiveness pre-pass +
+        execute) -> render.
 
         Shared by the batch ``execute()`` (a fresh kernel each call) and
         ``LiterateSession.step()`` (one persistent kernel threaded across rounds).
         The kernel owns the namespace, so this must NOT rebuild it -- doing so
         would wipe state threaded from prior rounds.
+
+        ``ledger`` is the L1.0 event ledger this path records into (the batch
+        path previously had no ledger wiring at all — only the streaming
+        driver did).  The session threads ONE ledger across rounds; the batch
+        ``execute()`` creates one per call.  Every cell outcome is recorded:
+        ``executed`` / ``continue_requested`` on success, ``hole_opened`` /
+        ``error_reified`` when a failure is reified (nothing silent).
+
+        Forgiveness (two-layer contract, conflict #2 option (c)): a cell whose
+        names cannot resolve binds typed holes and is skipped; the aggregate
+        Either for the run is DERIVED from the ledger at the end — ``success``
+        is False iff any failure was reified, while the rendered output,
+        namespace bindings, and file writes all stand.
         """
         start = time.perf_counter()
+        ledger = ledger if ledger is not None else Ledger()
+        run_mark = len(ledger)
 
         parsed = parse(program)
         if parsed.errors:
@@ -171,12 +198,30 @@ class LiterateInterpreter:
         assigned_names: set[str] = set()
 
         for index, cell in enumerate(parsed.cells):
+            # Forgiveness pre-pass (L1.1, binding layer): a cell whose names
+            # cannot resolve — unknown names, or references to already-bound
+            # holes/error values — binds typed holes, is ledgered, and is
+            # SKIPPED (never executed, so a hole can't flow into arithmetic).
+            reified = _reify_holes_for_cell(cell, index, kernel, ledger, assigned_names)
+            if reified is not None:
+                output_parts.append(reified)
+                continue
+
             result = kernel.execute_cell(cell, index)
 
             if not result.success:
                 # Roll the document's known writes back to their pre-run state so a
                 # failed document does not leave half-applied files behind.
                 journal.rollback()
+                ledger.record(
+                    "aborted",
+                    detail={
+                        "cell_index": index,
+                        "cell_type": cell.cell_type,
+                        "error": result.error,
+                        "error_phase": result.error_phase,
+                    },
+                )
                 return InterpreterExecutionResult(
                     success=False,
                     error=result.error or "Unknown error",
@@ -191,8 +236,17 @@ class LiterateInterpreter:
 
             if result.namespace_delta.get("__continue_requested__"):
                 continue_requested = True
+                ledger.record(
+                    "continue_requested",
+                    detail={"cell_index": index, "cell_type": cell.cell_type},
+                )
+            else:
+                ledger.record(
+                    "executed",
+                    detail={"cell_index": index, "cell_type": cell.cell_type},
+                )
 
-        # Every cell ran: accept the writes (drop the snapshots).
+        # Every cell ran or was reified: accept the writes (drop the snapshots).
         journal.commit()
 
         elapsed = (time.perf_counter() - start) * 1000
@@ -207,15 +261,25 @@ class LiterateInterpreter:
 
         rendered = "".join(output_parts)
 
+        # Aggregate layer (conflict #2 option (c)): the run's Either is a VIEW
+        # DERIVED FROM THE LEDGER — Left iff any failure was reified — while
+        # the output, bindings, and writes above all stand.  ``completed``
+        # distinguishes a finished run (Right or aggregate-Left) from a
+        # pre-execution refusal (parse errors, ceiling gate), which returns
+        # earlier and never touches state.
+        failures = reified_failures(ledger.entries()[run_mark:])
         return InterpreterExecutionResult(
-            success=True,
+            success=not failures,
             output=rendered,
+            error="; ".join(describe_failure(e) for e in failures) or None,
             output_format="markdown",
             duration_ms=elapsed,
             metadata={
                 "variables": variables,
                 "continue_requested": continue_requested,
                 "cell_count": len(parsed.cells),
+                "completed": True,
+                "ledger": ledger,
                 "frontmatter": {
                     "echo": parsed.frontmatter.echo,
                     "output": parsed.frontmatter.output,
@@ -223,6 +287,106 @@ class LiterateInterpreter:
                 },
             },
         )
+
+
+_HOLE_EXEMPT_NAMES = frozenset({
+    # Kernel-injected at execution time for @continue cells; never an unknown
+    # name even though it is absent from the namespace between cells.
+    "__literate_continue__",
+})
+
+
+def _reify_holes_for_cell(
+    cell: Cell,
+    index: int,
+    kernel: LightweightKernel,
+    ledger: Ledger,
+    assigned_names: set[str],
+) -> str | None:
+    """Binding-layer forgiveness pre-pass for one cell (L1.1, typed holes).
+
+    Resolves the cell's referenced names against the kernel namespace with the
+    SAME rules as the kernel's own static check (`check_cell`), so the two can
+    never disagree.  When a referenced name is unknown (an *origin* hole) or
+    is bound to an already-reified forgiving value (the *chain*), the cell
+    cannot produce real values, so it is reified instead of executed:
+
+    * each unknown referenced name binds ``Hole(name)`` — the typed hole
+      ⟨name: unbound⟩;
+    * each name the cell would have bound binds a CHAINED hole recording its
+      upstream causes (statically skipped, so a hole never reaches ``+``);
+    * one ``hole_opened`` ledger entry per hole — nothing silent;
+    * the returned kernel-channel note is appended to the rendered output
+      (renders annotate, never rewrite), and is inert on reparse (L2).
+
+    Returns the annotation line when the cell was reified/skipped, or ``None``
+    when the cell resolves cleanly (the caller executes it).  Syntax errors
+    and unknown cell types are not name problems — they return ``None`` and
+    take the error path.
+    """
+    try:
+        src = compile_cell(cell)
+    except ValueError:
+        return None  # unknown cell type — the kernel reports it precisely
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None  # not a name problem — handled on the error path
+
+    defined, referenced = collect_names(tree)
+    known = kernel.known_names()
+    undefined = referenced - known - BUILTIN_NAMES - defined - _HOLE_EXEMPT_NAMES
+    # A referenced name the cell itself defines is satisfied by that definition
+    # (check_cell's own rule: available = known | builtins | defined) — so a
+    # cell that REDEFINES a holed name is how a hole gets filled, not blocked.
+    blocked = {
+        n
+        for n in (referenced - defined) & known
+        if is_forgiving(kernel.lookup(n))
+    }
+    if not undefined and not blocked:
+        return None
+
+    base_detail = {"cell_index": index, "cell_type": cell.cell_type}
+    notes: list[str] = []
+
+    for name in sorted(undefined):
+        kernel.bind(name, Hole(name))
+        ledger.record(
+            HOLE_OPENED, name=name, detail={"reason": "unbound", **base_detail}
+        )
+        notes.append(f"'{name}' unbound")
+
+    causes = undefined | blocked
+    bindings = collect_bindings(tree)
+    for name in sorted(bindings):
+        # A name may be among its own causes (`x = x + 1` with x holed);
+        # prefer naming the *other* causes, fall back to the self-cause.
+        cause = tuple(sorted(causes - {name})) or tuple(sorted(causes))
+        kernel.bind(name, Hole(name, blocked_by=cause))
+        ledger.record(
+            HOLE_OPENED,
+            name=name,
+            detail={"reason": "blocked", "blocked_by": list(cause), **base_detail},
+        )
+        notes.append(f"'{name}' blocked by {', '.join(cause)}")
+
+    if not undefined and not bindings:
+        # Nothing binds (e.g. prose interpolating a hole), but the skipped
+        # cell must still be ledgered and the round must still report Left.
+        ledger.record(
+            HOLE_OPENED,
+            name=None,
+            detail={
+                "reason": "blocked",
+                "blocked_by": sorted(blocked),
+                **base_detail,
+            },
+        )
+        notes.append(f"cell skipped (blocked by {', '.join(sorted(blocked))})")
+
+    assigned_names.update(undefined | bindings)
+    return kernel_note("holes: " + "; ".join(notes)) + "\n"
 
 
 _INTERNAL_NAMES = frozenset({

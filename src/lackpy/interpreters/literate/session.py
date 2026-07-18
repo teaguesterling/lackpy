@@ -276,11 +276,15 @@ class LiterateSession:
         # Lazy imports avoid a circular import with the package __init__ (which
         # re-exports this module).
         from . import LiterateInterpreter, _build_namespace
-        from .kernel import LightweightKernel
+        from .kernel import Ledger, LightweightKernel
 
         self._context = context
         self._interpreter = interpreter or LiterateInterpreter()
         self._kernel = LightweightKernel(namespace=_build_namespace(context))
+        # ONE ledger threaded across every round (L1.0/L1.1): the queryable
+        # record of the session's execution + reified failures. Each step's
+        # aggregate Either is derived from this ledger, per-round slice.
+        self._ledger = Ledger()
         self._clean_parts: list[str] = []
 
     async def step(self, raw: str, shown: str | None = None) -> StepResult:
@@ -330,32 +334,65 @@ class LiterateSession:
             # asks for values back, same Right shape as a lone fenced cell.
             return StepResult(ok=True, clean_doc="", continue_requested=True)
 
-        # Snapshot BEFORE running so a failed round can undo its name rebindings.
-        snapshot = self._kernel.snapshot()
-        result = await self._interpreter._run_document(doc, self._context, self._kernel)
+        from .kernel.forgiveness import describe_failure, reified_failures
 
-        if not result.success:
-            # _run_document already rolled the write journal back; restore the
-            # kernel's name rebindings so state is not advanced.
+        # Snapshot BEFORE running so an ABORTED round (a failure that is not
+        # yet reified — currently the runtime-error path) can undo its name
+        # rebindings. Reified failures (holes) complete the round and keep
+        # their state; only the abort path restores.
+        snapshot = self._kernel.snapshot()
+        round_mark = len(self._ledger)
+        result = await self._interpreter._run_document(
+            doc, self._context, self._kernel, ledger=self._ledger
+        )
+
+        if not result.metadata.get("completed"):
+            # Pre-execution refusal (parse errors, ceiling gate) or an abort:
+            # state is not advanced — the journal was rolled back by
+            # _run_document; restore the kernel's name rebindings.
             self._kernel.restore(snapshot)
             return StepResult(
                 ok=False, raw=raw,
                 errors=[result.error or "execution failed"],
             )
 
+        # The round COMPLETED — its output and bindings stand, even when
+        # failures were reified. The Either below is the aggregate view
+        # derived from this round's ledger slice (conflict #2 option (c)).
         self._clean_parts.append(result.output or "")
+        continue_requested = (
+            bool(result.metadata.get("continue_requested")) or marker_pause
+        )
+        variables = dict(result.metadata.get("variables", {}))
+
+        failures = reified_failures(self._ledger.entries()[round_mark:])
+        if failures:
+            return StepResult(
+                ok=False,
+                raw=raw,
+                errors=[describe_failure(e) for e in failures],
+                clean_doc=result.output or "",
+                continue_requested=continue_requested,
+                variables=variables,
+            )
         return StepResult(
             ok=True,
             clean_doc=result.output or "",
-            continue_requested=(
-                bool(result.metadata.get("continue_requested")) or marker_pause
-            ),
-            variables=dict(result.metadata.get("variables", {})),
+            continue_requested=continue_requested,
+            variables=variables,
         )
 
     @property
+    def ledger(self):
+        """The session's queryable event ledger (L1.0) — one across all
+        rounds. Reified failures (``hole_opened`` / ``error_reified``) live
+        here; the per-round Left is derived from it, never thrown."""
+        return self._ledger
+
+    @property
     def rendered(self) -> str:
-        """The accumulated clean document across all successful rounds."""
+        """The accumulated clean document across all completed rounds
+        (including aggregate-Left rounds — their output stands, annotated)."""
         return "".join(self._clean_parts)
 
     @property

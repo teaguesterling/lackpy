@@ -19,6 +19,17 @@ in a persistent namespace dict.
 """
 
 from .driver import CellExecutionEvent, StreamingDriver
+from .forgiveness import (
+    ERROR_REIFIED,
+    FORGIVENESS_ENTRY_TYPES,
+    HOLE_OPENED,
+    ErrorValue,
+    Hole,
+    describe_failure,
+    is_forgiving,
+    reified_failures,
+    round_is_left,
+)
 from .interface import CellResult, KernelInterface
 from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
 from .lightweight import LightweightKernel
@@ -36,7 +47,12 @@ __all__ = [
     "AIDR_LEDGER_COLUMNS",
     "CellExecutionEvent",
     "CellResult",
+    "ERROR_REIFIED",
+    "ErrorValue",
     "ExecutionPlugin",
+    "FORGIVENESS_ENTRY_TYPES",
+    "HOLE_OPENED",
+    "Hole",
     "InferenceRecoveryHandler",
     "KernelInterface",
     "Ledger",
@@ -49,5 +65,9 @@ __all__ = [
     "RecoveryHandler",
     "StreamingCellParser",
     "StreamingDriver",
+    "describe_failure",
+    "is_forgiving",
     "merge_advice",
+    "reified_failures",
+    "round_is_left",
 ]
