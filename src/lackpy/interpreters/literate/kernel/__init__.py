@@ -36,6 +36,7 @@ from .interface import CellResult, KernelInterface
 from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
 from .lightweight import LightweightKernel
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
+from .reactive import DIRTY, DependencyGraph
 from .versions import SUPERSEDED, BindingVersion, BindingVersions
 from .recovery import (
     InferenceRecoveryHandler,
@@ -52,6 +53,8 @@ __all__ = [
     "BindingVersions",
     "CellExecutionEvent",
     "CellResult",
+    "DIRTY",
+    "DependencyGraph",
     "ERROR_REIFIED",
     "ErrorValue",
     "ExecutionPlugin",
