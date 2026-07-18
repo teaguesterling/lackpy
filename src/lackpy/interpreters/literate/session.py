@@ -1,16 +1,25 @@
 """Multi-round literate fold -- the interpreter-as-fold-returning-Either.
 
 A literate *session* folds model responses across rounds. Each round is one
-``step(raw) -> StepResult``:
+``step(raw) -> StepResult``, an Either under the TWO-LAYER forgiveness
+contract (L1.1/L1.2 — design conflict #2, option (c)):
 
   - Right (success): the round's document ran cleanly. Returns the clean rendered
     output (``<think>`` reasoning stripped) + advanced state -- the kernel is
-    mutated in place and the write journal is committed. ``@continue`` in the doc
-    surfaces as ``continue_requested`` so the caller feeds the next round.
-  - Left (failure): the round failed. Returns the errors + the *raw* un-interpreted
-    message so the model can correct its own work (cleaning would hide the bug).
-    State is NOT advanced -- file writes are rolled back (journal) and kernel name
-    rebindings are restored.
+    mutated in place. ``@continue`` in the doc surfaces as
+    ``continue_requested`` so the caller feeds the next round.
+  - Left (failure): the round contained at least one REIFIED failure — an
+    unknown name bound as a typed hole (``hole_opened``) or a runtime error
+    bound as an error value (``error_reified``). The Left is an AGGREGATE
+    VIEW derived from the session ledger's per-round slice, NOT a
+    control-flow abort: the round still completes, its output joins
+    ``rendered`` (annotated through the [kernel] channel), and its partial
+    state is KEPT as real values + forgiving values — nothing rolls back.
+    Returns the ledger-derived errors + the *raw* un-interpreted message so
+    the model can correct its own work (cleaning would hide the bug); a
+    corrected round simply rebinds the holes with real values.
+  - A pre-execution refusal (parse errors, effect-ceiling gate) is also a
+    Left, but nothing ran and no state changed.
 
 The session is a PURE fold: ``step`` takes a raw string and returns a result. The
 model-call loop (prompt -> model -> step -> feed back) is a thin client's job, so
@@ -23,9 +32,10 @@ objects defined in one round are genuinely available (as live objects) to the
 next -- the old loop rebuilt a fresh kernel each round and passed only
 ``repr(v)[:200]`` text, which dropped functions entirely.
 
-Left's "state not advanced" is a rebinding-level guarantee: file writes and name
-rebindings roll back, but in-place mutations and effects beyond the journal do
-not -- cooperative, the same boundary as the effect gate.
+Historical note: before L1.1/L1.2 a Left was an abort — the write journal
+rolled file writes back and the kernel's name rebindings were restored. That
+rollback contract is retired (deliberately, with its tests): forgiveness keeps
+the work and records the failure in the queryable session ledger instead.
 
 STATELESSNESS CONTRACT (the canonical mode): the writer holds NO hidden
 conversational state. Every round it is handed a fresh prompt containing the
@@ -336,21 +346,18 @@ class LiterateSession:
 
         from .kernel.forgiveness import describe_failure, reified_failures
 
-        # Snapshot BEFORE running so an ABORTED round (a failure that is not
-        # yet reified — currently the runtime-error path) can undo its name
-        # rebindings. Reified failures (holes) complete the round and keep
-        # their state; only the abort path restores.
-        snapshot = self._kernel.snapshot()
+        # No snapshot/rollback (L1.1/L1.2 contract change): failures during a
+        # round reify as bound values (holes / error values) and the round
+        # completes; a pre-execution refusal never runs a cell, so there is
+        # nothing to restore either way.
         round_mark = len(self._ledger)
         result = await self._interpreter._run_document(
             doc, self._context, self._kernel, ledger=self._ledger
         )
 
         if not result.metadata.get("completed"):
-            # Pre-execution refusal (parse errors, ceiling gate) or an abort:
-            # state is not advanced — the journal was rolled back by
-            # _run_document; restore the kernel's name rebindings.
-            self._kernel.restore(snapshot)
+            # Pre-execution refusal (parse errors, ceiling gate): no cell ran,
+            # no state changed — a plain Left with the refusal reason.
             return StepResult(
                 ok=False, raw=raw,
                 errors=[result.error or "execution failed"],

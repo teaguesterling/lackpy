@@ -144,3 +144,83 @@ class TestTypedHoles:
         ledger = result.metadata["ledger"]
         assert ledger.query(entry_type="hole_opened", name="x")
         assert ledger.query(entry_type="hole_opened", name="y")
+
+
+class TestErrorAsValue:
+    """L1.2 — a runtime error binds an error value; no abort, no rollback."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_binds_error_value(self, context):
+        session = LiterateSession(context)
+        result = await session.step("```lackpy\nx = 1 / 0\n```")
+
+        # Binding layer: the failure is reified — bound + ledgered.
+        entries = session.ledger.query(entry_type="error_reified", name="x")
+        assert len(entries) == 1
+        assert "ZeroDivisionError" in entries[0].detail["error"]
+
+        ns = session._kernel.get_namespace()
+        assert isinstance(ns["x"], ErrorValue)
+        assert "ZeroDivisionError" in repr(ns["x"])
+
+        # Aggregate layer: Left preserved, with the exception info surfaced.
+        assert not result.ok
+        assert "ZeroDivisionError" in result.errors[0]
+
+    @pytest.mark.asyncio
+    async def test_round_continues_after_error_no_rollback(self, context):
+        # The load-bearing L1.2 shape: the round does NOT abort at the failed
+        # cell — later cells run, earlier bindings stay, nothing rolls back.
+        session = LiterateSession(context)
+        result = await session.step(
+            "```lackpy @hidden\nbefore = 1\n```\n\n"
+            "```lackpy\nboom = 1 / 0\n```\n\n"
+            "```lackpy\nafter = before + 1\n```"
+        )
+        assert not result.ok                     # aggregate Left
+        ns = session._kernel.get_namespace()
+        assert ns["before"] == 1                 # kept, not rolled back
+        assert ns["after"] == 2                  # later cell RAN
+        assert isinstance(ns["boom"], ErrorValue)
+
+    @pytest.mark.asyncio
+    async def test_partial_bindings_keep_their_real_values(self, context):
+        # `x = 2` completed before the raise: completed work is kept as its
+        # real value — the failure itself is what gets ledgered.
+        session = LiterateSession(context)
+        result = await session.step(
+            "```lackpy\nx = 2\nraise ValueError('boom')\n```"
+        )
+        assert not result.ok
+        assert session._kernel.get_namespace()["x"] == 2
+        errs = session.ledger.query(entry_type="error_reified")
+        assert errs and "ValueError" in errs[0].detail["error"]
+
+    @pytest.mark.asyncio
+    async def test_error_value_chains_to_dependent_cell(self, context):
+        # An error value blocks a dependent cell the same way a hole does.
+        session = LiterateSession(context)
+        await session.step(
+            "```lackpy\ne = 1 / 0\n```\n\n```lackpy\nf = e + 1\n```"
+        )
+        ns = session._kernel.get_namespace()
+        assert isinstance(ns["e"], ErrorValue)
+        assert isinstance(ns["f"], Hole)
+        assert ns["f"].blocked_by == ("e",)
+        assert session.ledger.query(entry_type="hole_opened", name="f")
+
+    @pytest.mark.asyncio
+    async def test_aggregate_view_covers_errors(self, context):
+        session = LiterateSession(context)
+        mark = len(session.ledger)
+        await session.step("```lackpy\nz = 1 / 0\n```")
+        round_entries = session.ledger.entries()[mark:]
+        assert round_is_left(round_entries)
+        assert reified_failures(round_entries)[0].entry_type == "error_reified"
+
+    @pytest.mark.asyncio
+    async def test_batch_path_reifies_error_and_ledgers(self, interpreter, context):
+        result = await interpreter.execute("```lackpy\nx = 1 / 0\n```", context)
+        assert not result.success                     # aggregate Left
+        assert "ZeroDivisionError" in (result.error or "")
+        assert result.metadata["ledger"].query(entry_type="error_reified", name="x")

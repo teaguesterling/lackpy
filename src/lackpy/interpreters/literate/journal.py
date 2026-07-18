@@ -1,4 +1,10 @@
-"""Transactional file journal for the literate batch path.
+"""Transactional file journal — an available component, currently unwired.
+
+STATUS (since L1.2): the batch path no longer uses this journal. Under the
+two-layer forgiveness contract a cell failure reifies as a bound value +
+ledger entry and the run completes, so the "roll writes back on failure"
+transaction this journal implemented has no trigger left. The component (and
+its unit tests) remain for a future opt-in strict/transactional mode.
 
 Snapshots a set of files before a document's write-cells run, so the whole
 document's *statically known, literal-path* writes can be rolled back atomically

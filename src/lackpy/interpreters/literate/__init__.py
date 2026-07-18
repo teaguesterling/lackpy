@@ -35,10 +35,11 @@ from .effects import (
     exceeds_ceiling,
     tool_effect_from_spec,
 )
-from .journal import FileJournal
-from .kernel import LightweightKernel
+from .kernel import CellResult, LightweightKernel
 from .kernel.forgiveness import (
+    ERROR_REIFIED,
     HOLE_OPENED,
+    ErrorValue,
     Hole,
     describe_failure,
     is_forgiving,
@@ -102,8 +103,7 @@ class LiterateInterpreter:
         ledger: Ledger | None = None,
     ) -> InterpreterExecutionResult:
         """Run a literate document through an ALREADY-BUILT kernel: classify ->
-        ceiling gate -> write journal -> run cells (forgiveness pre-pass +
-        execute) -> render.
+        ceiling gate -> run cells (forgiveness pre-pass + execute) -> render.
 
         Shared by the batch ``execute()`` (a fresh kernel each call) and
         ``LiterateSession.step()`` (one persistent kernel threaded across rounds).
@@ -183,16 +183,14 @@ class LiterateInterpreter:
                     },
                 )
 
-        # Write journal (always-on): snapshot the document's statically known
-        # literal writes (doc_effects.writes) so the whole batch run is atomic for
-        # those files -- any cell failure rolls them back, so a failed document
-        # leaves the filesystem as it was. Dynamic-path/exec/unanalyzable effects
-        # are out of the journal's reach (see journal.py); when a ceiling is set it
-        # is what keeps those out of a policy-governed run. Transaction boundary is
-        # the whole execute() call; per-@continue commit points are a later slice.
-        journal = FileJournal(context.base_dir)
-        journal.snapshot(doc_effects.writes)
-
+        # NOTE (L1.2, contract change): the always-on write journal that
+        # rolled a failed document's file writes back is RETIRED on this path
+        # together with the abort itself -- under the two-layer forgiveness
+        # contract a cell failure reifies as a value + ledger entry and the
+        # run completes, so there is no failure point left to roll back from.
+        # File writes stand, like every other binding (state kept, failure
+        # ledgered). journal.FileJournal remains available as a component for
+        # a future opt-in strict/transactional mode.
         output_parts: list[str] = []
         continue_requested = False
         assigned_names: set[str] = set()
@@ -210,24 +208,20 @@ class LiterateInterpreter:
             result = kernel.execute_cell(cell, index)
 
             if not result.success:
-                # Roll the document's known writes back to their pre-run state so a
-                # failed document does not leave half-applied files behind.
-                journal.rollback()
-                ledger.record(
-                    "aborted",
-                    detail={
-                        "cell_index": index,
-                        "cell_type": cell.cell_type,
-                        "error": result.error,
-                        "error_phase": result.error_phase,
-                    },
+                # L1.2 (binding layer): the failure is reified — an error
+                # value bound to the names the cell declared but did not
+                # reach, one `error_reified` ledger entry per bound name
+                # (nothing silent) — and the run CONTINUES. No abort, no
+                # rollback: partial output and partial bindings are completed
+                # work and stand.
+                if result.output:
+                    output_parts.append(result.output)
+                output_parts.append(
+                    _reify_error_for_cell(
+                        cell, index, result, kernel, ledger, assigned_names
+                    )
                 )
-                return InterpreterExecutionResult(
-                    success=False,
-                    error=result.error or "Unknown error",
-                    output_format="text",
-                    duration_ms=(time.perf_counter() - start) * 1000,
-                )
+                continue
 
             if result.output:
                 output_parts.append(result.output)
@@ -245,9 +239,6 @@ class LiterateInterpreter:
                     "executed",
                     detail={"cell_index": index, "cell_type": cell.cell_type},
                 )
-
-        # Every cell ran or was reified: accept the writes (drop the snapshots).
-        journal.commit()
 
         elapsed = (time.perf_counter() - start) * 1000
 
@@ -387,6 +378,71 @@ def _reify_holes_for_cell(
 
     assigned_names.update(undefined | bindings)
     return kernel_note("holes: " + "; ".join(notes)) + "\n"
+
+
+def _reify_error_for_cell(
+    cell: Cell,
+    index: int,
+    result: CellResult,
+    kernel: LightweightKernel,
+    ledger: Ledger,
+    assigned_names: set[str],
+) -> str:
+    """Binding-layer error reification for one failed cell (L1.2).
+
+    The failed :class:`CellResult` becomes ledger entries + bound values
+    instead of an abort:
+
+    * names the cell declared but did NOT reach bind an :class:`ErrorValue`
+      carrying the exception info — one ``error_reified`` entry per name;
+    * names the cell bound *before* the error keep their real values
+      (completed work is kept; the kernel executes in place and no longer
+      rolls anything back) — recorded in the entry's ``kept`` detail;
+    * a cell that binds nothing (a bare statement, a syntax error, an unknown
+      cell type) still gets one ``error_reified`` entry (``name=None``) —
+      nothing silent.
+
+    Returns the kernel-channel annotation to append to the rendered output.
+    """
+    error = result.error or "unknown error"
+    phase = result.error_phase or "runtime"
+    base_detail = {
+        "cell_index": index,
+        "cell_type": cell.cell_type,
+        "error": error,
+        "error_phase": phase,
+    }
+
+    bindings: set[str] = set()
+    if phase == "runtime":
+        # Static phases (syntax error, unknown type) have no parseable AST /
+        # no meaningful bindings; runtime failures tell us which names the
+        # cell was going to bind.
+        try:
+            bindings = collect_bindings(ast.parse(compile_cell(cell)))
+        except (ValueError, SyntaxError):
+            bindings = set()
+
+    known = kernel.known_names()
+    missing = sorted(n for n in bindings if n not in known)
+    kept = sorted(n for n in bindings if n in known)
+
+    if missing:
+        for name in missing:
+            kernel.bind(name, ErrorValue(name=name, error=error, error_phase=phase))
+            ledger.record(
+                ERROR_REIFIED, name=name, detail={**base_detail, "kept": kept}
+            )
+        assigned_names.update(missing)
+    else:
+        ledger.record(ERROR_REIFIED, name=None, detail={**base_detail, "kept": kept})
+    # Partial bindings the cell completed before failing surface as variables.
+    assigned_names.update(kept)
+
+    note = f"error: {error}"
+    if missing:
+        note += f" — bound as error value: {', '.join(missing)}"
+    return kernel_note(note) + "\n"
 
 
 _INTERNAL_NAMES = frozenset({
