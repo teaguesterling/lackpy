@@ -327,6 +327,24 @@ class LiterateSession:
         # feedback loop is round-trippable (exp1 close) while `clean_doc` stays
         # the flat "what printed this round" view.
         self._rendered_parts: list[str] = []
+        # L7 startup self-test: BEFORE this session accepts any work, the
+        # kernel proves it can evaluate (known value, hole, error, unavailable,
+        # round-trip) — see selftest.run_selftest.  The outcome is observable
+        # (the `selftest` property) and ledgered; on failure the kernel is
+        # disabled and every step() returns the structured refusal (fail
+        # closed: a session whose kernel cannot evaluate must refuse, not
+        # produce garbage).  The probe battery uses a throwaway ledger, so
+        # this session ledger records only the one summary entry.
+        from .selftest import SELFTEST_FAILED, SELFTEST_PASSED, run_selftest
+
+        self._selftest = run_selftest(self._kernel, self._interpreter)
+        if self._selftest.ok:
+            self._ledger.record(
+                SELFTEST_PASSED,
+                detail={"probes": [p.probe for p in self._selftest.probes]},
+            )
+        else:
+            self._ledger.record(SELFTEST_FAILED, detail=self._selftest.summary())
 
     async def step(self, raw: str, shown: str | None = None) -> StepResult:
         """Fold one raw model response into the session. See the module docstring.
@@ -341,6 +359,15 @@ class LiterateSession:
                 against ``rendered``). Pass explicitly when the client shows
                 something else (e.g. the raw document source).
         """
+        # L7 fail-closed refusal: a session whose startup self-test failed
+        # refuses EVERY work attempt with the legible structured refusal
+        # (headline + which probe failed, expected vs got) — before any
+        # bookkeeping, because a dead session folds nothing.
+        if not self._selftest.ok:
+            return StepResult(
+                ok=False, raw=raw, errors=self._selftest.refusal_lines()
+            )
+
         # L4 budget consumption: every fold of a writer emission — including
         # ones that end in a Left or a marker-only pause — consumed one model
         # call in the client loop, so it consumes one budget unit here.
@@ -443,6 +470,14 @@ class LiterateSession:
             continue_requested=continue_requested,
             variables=variables,
         )
+
+    @property
+    def selftest(self):
+        """The L7 startup self-test report (:class:`~.selftest.SelfTestReport`)
+        — the observable liveness status.  ``selftest.ok`` False means the
+        kernel is disabled and every :meth:`step` refuses with
+        ``selftest.refusal_lines()``."""
+        return self._selftest
 
     @property
     def ledger(self):
