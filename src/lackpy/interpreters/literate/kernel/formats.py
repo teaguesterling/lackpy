@@ -103,7 +103,28 @@ def from_notebook(nb: dict[str, Any]) -> tuple[Frontmatter, list[Cell]]:
     return frontmatter, cells
 
 
-def render_markdown(log: list[CellExecutionEvent], frontmatter: Frontmatter) -> str:
+def render_markdown_from_cells(
+    cells: list[Cell],
+    frontmatter: Frontmatter,
+    annotations: dict[int, list[str]] | None = None,
+) -> str:
+    """Source-preserving render of ``cells`` — the canonical "document".
+
+    The round-trip law (L2) holds for this render: prose and code SOURCE are
+    preserved verbatim (never replaced by interpolated values or flat stdout),
+    and every kernel-derived note rides the ``[kernel]…[/kernel]`` channel so a
+    rendered doc fed back to a stateless writer re-parses cleanly instead of
+    re-printing and stacking.
+
+    ``annotations`` maps a cell's index (into ``cells``) to the note texts to
+    emit through the channel AFTER that cell — the single place the batch/
+    session path routes its LEDGER-derived forgiveness notes (holes / error
+    values / unavailable sources / supersessions / dirty re-execs). The
+    streaming path passes only the per-cell truncation note (see
+    :func:`render_markdown`). Reusing this one renderer + the one channel keeps
+    a single annotation path (no parallel emitters).
+    """
+    annotations = annotations or {}
     parts: list[str] = []
 
     has_non_default_fm = (
@@ -122,20 +143,7 @@ def render_markdown(log: list[CellExecutionEvent], frontmatter: Frontmatter) -> 
         parts.append("---")
         parts.append("")
 
-    for event in log:
-        if event.status in ("skipped", "aborted", "pending"):
-            continue
-
-        cell = event.cell
-
-        # L2 annotation channel: emit kernel-derived notes through [kernel]…
-        # [/kernel] so they are inert if this render is fed back and reparsed.
-        # This is the canonical, source-preserving render — the "document" the
-        # round-trip law holds for (batch flat-stdout render is display-only).
-        if cell.truncated:
-            parts.append(kernel_note(TRUNCATION_NOTE))
-            parts.append("")
-
+    for index, cell in enumerate(cells):
         if cell.cell_type == "prose":
             # Strip-stale (mechanism b): remove any prior channel spans and the
             # exact legacy bare kernel literals from authored prose BEFORE
@@ -159,4 +167,29 @@ def render_markdown(log: list[CellExecutionEvent], frontmatter: Frontmatter) -> 
             parts.append("```")
             parts.append("")
 
+        # Kernel-derived notes for THIS cell, through the L2 channel (inert on
+        # reparse). Emitted after the cell so they annotate its outcome.
+        for note in annotations.get(index, []):
+            parts.append(kernel_note(note))
+            parts.append("")
+
     return "\n".join(parts).rstrip("\n") + "\n"
+
+
+def render_markdown(log: list[CellExecutionEvent], frontmatter: Frontmatter) -> str:
+    """Canonical render of a streaming-driver execution log.
+
+    Skipped/aborted/pending cells are omitted; the only kernel note the
+    streaming path emits is the per-cell truncation warning. Delegates to
+    :func:`render_markdown_from_cells` so both paths share one source-preserving
+    renderer and one annotation channel.
+    """
+    cells: list[Cell] = []
+    annotations: dict[int, list[str]] = {}
+    for event in log:
+        if event.status in ("skipped", "aborted", "pending"):
+            continue
+        if event.cell.truncated:
+            annotations.setdefault(len(cells), []).append(TRUNCATION_NOTE)
+        cells.append(event.cell)
+    return render_markdown_from_cells(cells, frontmatter, annotations)

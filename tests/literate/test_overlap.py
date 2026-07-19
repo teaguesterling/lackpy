@@ -70,17 +70,25 @@ class TestStripOverlapUnit:
 class TestSessionOverlapGuard:
     @pytest.mark.asyncio
     async def test_reechoed_prose_not_rendered_twice(self, context):
+        # exp1 close (L2 conflict #5): the writer is shown the canonical
+        # SOURCE-PRESERVING render (session.rendered), so its re-echo is of the
+        # source template "The count is {n}." — NOT the interpolated flat stdout
+        # "The count is 42." (the old fed-back form). The overlap guard cuts the
+        # echo either way; what changed is the fed-back document is now
+        # round-trippable. Interpolated values live in clean_doc, per round.
         session = LiterateSession(context)
         r1 = await session.step("```lackpy @hidden\nn = 42\n```\n\nThe count is {n}.")
         assert r1.ok, r1.errors
-        assert session.rendered.count("The count is 42.") == 1
+        assert "The count is 42." in r1.clean_doc                  # interpolated
+        assert session.rendered.count("The count is {n}.") == 1    # source, once
 
-        # Round 2: the writer re-echoes the tail of the rendered view, then
-        # adds new content.
-        r2 = await session.step("The count is 42.\n\nAnd n squared is {n * n}.")
+        # Round 2: the writer re-echoes the tail of the rendered view (the
+        # source form it was shown), then adds new content.
+        r2 = await session.step("The count is {n}.\n\nAnd n squared is {n * n}.")
         assert r2.ok, r2.errors
-        assert "1764" in session.rendered
-        assert session.rendered.count("The count is 42.") == 1
+        assert "1764" in r2.clean_doc                              # interpolated
+        assert "And n squared is {n * n}." in session.rendered
+        assert session.rendered.count("The count is {n}.") == 1    # not stacked
 
     @pytest.mark.asyncio
     async def test_non_idempotent_cell_not_reexecuted(self, context):
