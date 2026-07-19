@@ -301,7 +301,15 @@ class LiterateSession:
         # round supersedes the prior version and is ledgered. The kernel's
         # namespace dict stays the mutable latest-wins surface.
         self._versions = BindingVersions()
+        # Flat stdout per round (printed values, `@scratch` summaries): the
+        # `clean_doc` view used by the Left-correction path.
         self._clean_parts: list[str] = []
+        # Canonical SOURCE-PRESERVING render per round (authored prose + code
+        # source + ledger-derived [kernel] notes): the `rendered` view fed back
+        # to a stateless writer. Kept separate from `_clean_parts` so the
+        # feedback loop is round-trippable (exp1 close) while `clean_doc` stays
+        # the flat "what printed this round" view.
+        self._rendered_parts: list[str] = []
 
     async def step(self, raw: str, shown: str | None = None) -> StepResult:
         """Fold one raw model response into the session. See the module docstring.
@@ -375,6 +383,10 @@ class LiterateSession:
         # failures were reified. The Either below is the aggregate view
         # derived from this round's ledger slice (conflict #2 option (c)).
         self._clean_parts.append(result.output or "")
+        # Accumulate the canonical source-preserving render for this round —
+        # what `rendered` (the fed-back document) exposes. Derived in
+        # `_run_document` from this round's cells + ledger slice.
+        self._rendered_parts.append(result.metadata.get("rendered_markdown", ""))
         continue_requested = (
             bool(result.metadata.get("continue_requested")) or marker_pause
         )
@@ -416,9 +428,26 @@ class LiterateSession:
 
     @property
     def rendered(self) -> str:
-        """The accumulated clean document across all completed rounds
-        (including aggregate-Left rounds — their output stands, annotated)."""
-        return "".join(self._clean_parts)
+        """The canonical SOURCE-PRESERVING document across all completed rounds
+        (including aggregate-Left rounds — their source stands, annotated).
+
+        This is the exp1 close: what a thin client feeds back to the stateless
+        writer is THIS render — authored prose + code source preserved, with
+        each round's forgiveness state (holes / error values / unavailable
+        sources / supersessions) drawn FROM THE LEDGER and routed through the
+        inert ``[kernel]`` channel — NOT the flat stdout (``clean_doc``). Fed
+        back and re-emitted, it re-parses cleanly: the channel notes are
+        stripped by the parser (never re-printed) and the overlap guard cuts an
+        echoed tail, so notes do not stack across rounds (the L2 round-trip
+        law). Live values reach the writer through :attr:`scope`, not by
+        interpolating them into this document.
+
+        Rounds are joined by a BLANK LINE (each fragment already ends in one
+        ``\\n``; the join adds the second) so a round boundary is a real
+        markdown block break — two authored prose rounds never glue into one
+        cell, and the concatenated document re-parses to the same cell
+        structure."""
+        return "\n".join(self._rendered_parts)
 
     @property
     def scope(self) -> dict[str, str]:

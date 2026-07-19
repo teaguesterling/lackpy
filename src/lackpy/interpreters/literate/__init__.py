@@ -47,7 +47,8 @@ from .kernel.forgiveness import (
     is_forgiving,
     reified_failures,
 )
-from .kernel.ledger import Ledger
+from .kernel.formats import render_markdown_from_cells
+from .kernel.ledger import Ledger, LedgerEntry
 from .kernel.reactive import DIRTY, DependencyGraph
 from .kernel.static_analysis import BUILTIN_NAMES, collect_bindings, collect_names
 from .kernel.versions import SUPERSEDED, BindingVersions, value_kind
@@ -267,7 +268,20 @@ class LiterateInterpreter:
         # pre-execution refusal (parse errors — since L1.5 the ceiling gate
         # reifies per cell instead of refusing), which returns earlier and
         # never touches state.
-        failures = reified_failures(ledger.entries()[run_mark:])
+        round_entries = ledger.entries()[run_mark:]
+        failures = reified_failures(round_entries)
+
+        # Canonical source-preserving render (conflict #5, Teague-approved): the
+        # "document" the round-trip law holds for — authored prose + code SOURCE
+        # preserved, with this round's LEDGER-derived forgiveness notes routed
+        # through the L2 [kernel] channel (inert on reparse). This — NOT the flat
+        # stdout in `output` — is what the session feeds back to a stateless
+        # writer, closing the exp1 loop. `output` stays flat stdout for the
+        # Left-correction path and existing callers.
+        rendered_markdown = render_markdown_from_cells(
+            parsed.cells, parsed.frontmatter, _annotations_from_ledger(round_entries)
+        )
+
         return InterpreterExecutionResult(
             success=not failures,
             output=rendered,
@@ -281,6 +295,7 @@ class LiterateInterpreter:
                 "completed": True,
                 "ledger": ledger,
                 "versions": versions,
+                "rendered_markdown": rendered_markdown,
                 "frontmatter": {
                     "echo": parsed.frontmatter.echo,
                     "output": parsed.frontmatter.output,
@@ -520,6 +535,54 @@ def _record_assertion(
                 **cell_detail,
             },
         )
+
+
+def _annotation_text(entry: LedgerEntry) -> str | None:
+    """The [kernel]-channel note text for ONE ledger entry, or ``None``.
+
+    The ledger→annotation projection that closes exp1 (L1 ledger → L2 channel):
+    a notable forgiveness / versioning / reactive entry becomes one inert
+    channel note on the cell it concerns; a plain ``executed`` /
+    ``continue_requested`` entry carries no note (the source itself is the
+    record).  :func:`~.kernel.forgiveness.describe_failure` supplies the
+    hole/error/unavailable text — so the error string (e.g. the exception type)
+    survives into the canonical render — and supersede / dirty get one-liners.
+    """
+    et = entry.entry_type
+    if et in (HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE):
+        return describe_failure(entry)
+    if et == SUPERSEDED:
+        name = entry.name or "binding"
+        frm = entry.detail.get("from_version")
+        to = entry.detail.get("to_version")
+        prior = entry.detail.get("prior", "value")
+        return f"superseded: '{name}' v{frm}→v{to} (prior {prior})"
+    if et == DIRTY:
+        triggered = ", ".join(entry.detail.get("triggered_by") or [])
+        if entry.detail.get("reexecuted"):
+            return f"re-executed (dirty: {triggered})"
+        reason = entry.detail.get("reason", "withheld")
+        return f"dirty (not re-executed: {reason}; triggered by {triggered})"
+    return None
+
+
+def _annotations_from_ledger(entries: list[LedgerEntry]) -> dict[int, list[str]]:
+    """Project a round's ledger slice to ``cell_index -> [note text, …]``.
+
+    The single source the canonical render draws its ``[kernel]`` notes from —
+    NO parallel annotation emitter.  Entries with no ``cell_index`` (or no
+    notable text) contribute nothing; the render passes the result straight to
+    :func:`~.kernel.formats.render_markdown_from_cells`.
+    """
+    ann: dict[int, list[str]] = {}
+    for entry in entries:
+        index = entry.detail.get("cell_index")
+        if index is None:
+            continue
+        note = _annotation_text(entry)
+        if note:
+            ann.setdefault(index, []).append(note)
+    return ann
 
 
 _HOLE_EXEMPT_NAMES = frozenset({

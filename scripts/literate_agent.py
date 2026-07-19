@@ -187,11 +187,15 @@ async def run_literate_agent(
         if not result.continue_requested:
             return session.rendered
 
-        # Right + @continue: feed what is LIVE (session.scope), not repr text, so the
-        # model keeps building on the real objects already in the kernel.
+        # Right + @continue: feed back the CANONICAL source-preserving document
+        # (session.rendered) — round-trippable, kernel notes inert — NOT the
+        # flat stdout (result.clean_doc), which re-prints/stacks kernel strings
+        # when fed forward (the exp1 poisoning L2 closed). Live values reach the
+        # model through session.scope (real objects already in the kernel), not
+        # by interpolating them into the fed-back document.
         scope_summary = "\n".join(f"  {k} = {v}" for k, v in session.scope.items())
         full_prompt = (
-            f"Previous output:\n{result.clean_doc}\n\n"
+            f"Document so far:\n{session.rendered}\n\n"
             f"Live variables (already in scope — do not redefine):\n{scope_summary}\n\n"
             f"Continue writing the document from where @continue left off."
         )

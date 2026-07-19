@@ -205,8 +205,14 @@ class TestSegmentLoop:
         assert r3.ok, r3.errors
         assert not r3.continue_requested
 
+        # exp1 close (L2 conflict #5): `rendered` is now the canonical
+        # SOURCE-PRESERVING document — authored prose templates verbatim, NOT
+        # the interpolated flat stdout. The interpolated values are asserted in
+        # `clean_doc` per round above (segments 1–2); the fed-back document
+        # keeps the source so it re-parses cleanly. Live values reach the writer
+        # via `session.scope`, not by interpolating them into this doc.
         rendered = session.rendered
-        assert "Gathered 3 items." in rendered
-        assert "The total is 6." in rendered
-        assert "Done: 3 was the largest." in rendered
+        assert "Gathered {len(data)} items." in rendered
+        assert "The total is {sum(data)}." in rendered
+        assert "Done: {max(data)} was the largest." in rendered
         assert "@continue" not in rendered
