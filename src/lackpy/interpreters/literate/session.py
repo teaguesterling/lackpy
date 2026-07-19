@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..base import ExecutionContext
+from .annotations import session_manifest
 
 # <think>...</think> reasoning blocks (a thinking model's scratch space) must not
 # reach the parser -- as prose they would print verbatim into the clean doc and
@@ -283,13 +284,29 @@ class LiterateSession:
     ``result.errors`` + ``result.raw`` back for correction.
     """
 
-    def __init__(self, context: ExecutionContext, interpreter: Any = None) -> None:
+    def __init__(
+        self,
+        context: ExecutionContext,
+        interpreter: Any = None,
+        *,
+        max_rounds: int | None = None,
+    ) -> None:
         # Lazy imports avoid a circular import with the package __init__ (which
         # re-exports this module).
         from . import LiterateInterpreter, _build_namespace
         from .kernel import BindingVersions, Ledger, LightweightKernel
 
         self._context = context
+        # L4: the client loop's REAL round cap (max_iterations), surfaced to the
+        # writer through the per-splice manifest. None = no cap configured. The
+        # session does not enforce it — the client loop does — it makes the
+        # budget VISIBLE (the writer otherwise never sees max_iterations).
+        self._max_rounds = max_rounds
+        # L4 segment counter: writer emissions folded so far. One step() = one
+        # writer call = one budget unit (mirrors the client's for-loop over
+        # max_iterations, which spends an iteration on Lefts and marker-only
+        # pause rounds too — so those consume here as well).
+        self._segments = 0
         self._interpreter = interpreter or LiterateInterpreter()
         self._kernel = LightweightKernel(namespace=_build_namespace(context))
         # ONE ledger threaded across every round (L1.0/L1.1): the queryable
@@ -324,6 +341,11 @@ class LiterateSession:
                 against ``rendered``). Pass explicitly when the client shows
                 something else (e.g. the raw document source).
         """
+        # L4 budget consumption: every fold of a writer emission — including
+        # ones that end in a Left or a marker-only pause — consumed one model
+        # call in the client loop, so it consumes one budget unit here.
+        self._segments += 1
+
         doc = strip_think(raw)
         if not doc:
             # Only reasoning / nothing survived the strip -- a Left (retry), never
@@ -385,8 +407,21 @@ class LiterateSession:
         self._clean_parts.append(result.output or "")
         # Accumulate the canonical source-preserving render for this round —
         # what `rendered` (the fed-back document) exposes. Derived in
-        # `_run_document` from this round's cells + ledger slice.
-        self._rendered_parts.append(result.metadata.get("rendered_markdown", ""))
+        # `_run_document` from this round's cells + ledger slice. L4: every
+        # splice OPENS with the session manifest, a [kernel] block (inert on
+        # reparse, covered by strip-stale like any channel note) reporting the
+        # segment index, the remaining pause budget (cap − segments consumed,
+        # from the client's real max_iterations), and the observation count
+        # drawn from the queryable ledger at render time (post-round — the
+        # count covers everything delivered THROUGH this splice).
+        manifest = session_manifest(
+            segment=self._segments,
+            observations=len(self._ledger),
+            cap=self._max_rounds,
+        )
+        self._rendered_parts.append(
+            manifest + "\n\n" + result.metadata.get("rendered_markdown", "")
+        )
         continue_requested = (
             bool(result.metadata.get("continue_requested")) or marker_pause
         )
@@ -415,6 +450,27 @@ class LiterateSession:
         rounds. Reified failures (``hole_opened`` / ``error_reified``) live
         here; the per-round Left is derived from it, never thrown."""
         return self._ledger
+
+    @property
+    def segments_consumed(self) -> int:
+        """L4: writer emissions folded so far (one per :meth:`step` call —
+        Lefts and marker-only pause rounds consumed a model call too). The
+        manifest's segment index is this counter at splice time."""
+        return self._segments
+
+    @property
+    def max_rounds(self) -> int | None:
+        """L4: the client loop's round cap (``max_iterations``) as configured,
+        or ``None`` when the client set no cap. Surfaced, not enforced."""
+        return self._max_rounds
+
+    @property
+    def budget_remaining(self) -> int | None:
+        """L4: ``max_rounds - segments_consumed`` (``None`` when uncapped) —
+        the same arithmetic the manifest prints at each splice."""
+        if self._max_rounds is None:
+            return None
+        return self._max_rounds - self._segments
 
     @property
     def versions(self):

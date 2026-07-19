@@ -56,8 +56,11 @@ class TestExp1FeedbackLoopClosed:
         doc1 = session.rendered
         assert "[kernel]" in doc1
         assert "numerator" in doc1  # the hole names its unbound cause
-        notes_after_r1 = doc1.count("[kernel]")
-        assert notes_after_r1 >= 1
+        # L4: each splice also OPENS with one manifest [kernel] block, so the
+        # no-accretion invariant is stated on NOTE TEXT (must never stack) and
+        # manifests (exactly one per splice), not on a raw [kernel] count.
+        assert doc1.count("hole: 'numerator' unbound") == 1
+        assert doc1.count("manifest: segment") == 1
 
         # The fed-back render re-parses with NO [kernel] prose cells (the parser
         # strips the channel span) — the note is inert, it cannot re-print.
@@ -73,7 +76,10 @@ class TestExp1FeedbackLoopClosed:
         # not re-executed and the [kernel] note is not re-printed or stacked.
         await session.step(doc1 + "\n\nStill working on it.")
         assert "Still working on it." in session.rendered
-        assert session.rendered.count("[kernel]") == notes_after_r1  # no accretion
+        # No accretion: the hole note still appears exactly once; the only new
+        # [kernel] block is round 2's own manifest (one per splice, L4).
+        assert session.rendered.count("hole: 'numerator' unbound") == 1
+        assert session.rendered.count("manifest: segment") == 2
 
         # Round 3: the writer IMITATES the kernel — reproducing a [kernel] line
         # MID-document (not a clean prefix, so overlap-strip won't catch it).
@@ -87,10 +93,11 @@ class TestExp1FeedbackLoopClosed:
         final = session.rendered
         assert "Here is my summary." in final
         assert "Final note." in final
-        assert final.count("[kernel]") == notes_after_r1  # STILL no accretion
-        # The imitated note text did not STACK: it appears exactly once (round
-        # 1's real ledger note), the round-3 imitation added no second copy.
+        # STILL no accretion: the imitated note text did not STACK — it appears
+        # exactly once (round 1's real ledger note), the round-3 imitation
+        # added no second copy — and manifests stay one-per-splice.
         assert final.count("hole: 'numerator' unbound") == 1
+        assert final.count("manifest: segment") == 3
 
     @pytest.mark.asyncio
     async def test_concatenated_multiround_render_reparses_cleanly(self, context):
