@@ -236,8 +236,19 @@ class LiterateInterpreter:
         # from context.config like display_threshold / grade_ceiling, so it
         # threads unchanged through both the batch execute() and the session
         # (which passes its one context every round).  Validated up front: a
-        # typo'd mode must fail loudly, not silently mean "strict".
-        reactive_mode = _reactive_mode(context)
+        # typo'd mode must fail loudly, not silently mean "strict" — and
+        # loudly HERE means the structured pre-execution refusal parse
+        # errors use (success=False + error, nothing executed), not an
+        # uncaught ValueError out of execute()/step().
+        try:
+            reactive_mode = _reactive_mode(context)
+        except ValueError as exc:
+            return InterpreterExecutionResult(
+                success=False,
+                error=f"Configuration error: {exc}",
+                output_format="none",
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
 
         # What each executed cell was OBSERVED to do (audit-hook events from
         # its execution scope; see effects.observe_effects) — the evidence
@@ -283,7 +294,8 @@ class LiterateInterpreter:
         # through the very same per-cell pipeline the linear walk used.
         self._reexecute_dirty_subgraph(
             parsed.cells, graph, kernel, ledger, versions, assigned_names,
-            reactive_mode, observed_effects, run_mark, output_parts,
+            reactive_mode, observed_effects, gate_violations, run_mark,
+            output_parts,
         )
 
         elapsed = (time.perf_counter() - start) * 1000
@@ -358,8 +370,10 @@ class LiterateInterpreter:
         makes dirty re-execution COMPOSE with forgiveness for free — a re-run
         that now hits an unknown name or raises reifies + versions exactly as a
         first run does, no special-casing.  (The ceiling gate / L1.5
-        unavailable path stays in the caller: a gated cell is effectful, so the
-        re-exec pass never re-runs it.)
+        unavailable path stays in the callers: the linear walk reifies a gated
+        cell instead of calling this, and the re-exec pass withholds it via
+        its explicit ``gate_violations`` check — a gated cell never reaches
+        this body on either pass.)
 
         Returns the rendered fragment for this cell, whether it requested a
         ``@continue`` pause, whether it actually executed, and what world
@@ -447,6 +461,7 @@ class LiterateInterpreter:
         assigned_names: set[str],
         reactive_mode: str,
         observed_effects: dict[int, tuple[str, ...]],
+        gate_violations: dict[int, str],
         run_mark: int,
         output_parts: list[str],
     ) -> None:
@@ -476,12 +491,28 @@ class LiterateInterpreter:
           dependent whose first run was observed effect-free is re-run —
           including method-call dependents (``name.upper()``) and
           helper-wrapped computations, which a static source gate cannot
-          grade.  A cell with NO entry in ``observed_effects`` never executed
-          this round (it was reified/skipped), so running it now is its
-          FIRST execution, not a replay — it runs.
+          grade.
         * ``permissive`` (opt-in) — ALL dirty dependents re-run, effects and
           all; for interactive/exploratory use where re-firing an effect is
           acceptable.  The re-run's own observed events are ledgered.
+
+        NEVER-EXECUTED CELLS — two absences, two meanings.  A cell with no
+        entry in ``observed_effects`` never executed this round, but that
+        absence is AMBIGUOUS and the two causes get opposite treatment:
+
+        * **ceiling-refused** (``gate_violations``): the effect ceiling
+          refused the cell before it ran — a POLICY refusal, static over the
+          cell's source, so it holds identically on re-execution.  The cell
+          is withheld in BOTH modes (permissive waives replay caution, not
+          policy): its bindings stay ``Unavailable`` and the ``dirty`` entry
+          records the withhold with the gate's reason.  Running it here
+          would execute the exact effect the gate refused.
+        * **hole-skipped** (the forgiveness pre-pass reified it because a
+          referenced name was unresolved): re-running when the hole fills is
+          the L1.4 point — it is a safe FIRST execution and it runs.
+
+        The disambiguator is the gate's own verdict (``gate_violations``),
+        not the absence of observation evidence.
 
         BEST-EFFORT, stated plainly: observation sees effects that flow
         through Python's audited APIs.  A C extension issuing raw syscalls,
@@ -523,6 +554,23 @@ class LiterateInterpreter:
                 "triggered_by": triggered_by,
                 "mode": reactive_mode,
             }
+            if index in gate_violations:
+                # Ceiling-refused, NOT hole-skipped: the gate's verdict is
+                # static over the cell's source, so it stands on re-exec in
+                # every mode.  Executing here would run the refused effect
+                # (the linear pass never did).  Withheld and ledgered; the
+                # cell's bindings remain the reified Unavailable values.
+                detail["reexecuted"] = False
+                detail["gate_violation"] = gate_violations[index]
+                detail["reason"] = (
+                    "over effect ceiling ("
+                    + gate_violations[index]
+                    + ") — refused on the linear pass and not re-executed:"
+                    " the policy refusal stands"
+                )
+                ledger.record(DIRTY, name=None, detail=detail)
+                continue
+
             first_run = observed_effects.get(index, ())
             if reactive_mode == "strict" and first_run:
                 # Withheld: the first run was observed performing a world
@@ -610,8 +658,12 @@ def _reactive_mode(context: ExecutionContext) -> str:
     ``display_threshold`` and ``grade_ceiling`` use, so it threads unchanged
     through ``LiterateInterpreter.execute`` and every ``LiterateSession``
     round (the session passes its one context each ``step``).  Defaults to
-    ``strict``.  An unrecognized value raises rather than silently meaning
-    strict — a mode typo must not masquerade as a safety choice.
+    ``strict``.  An unrecognized value raises ``ValueError`` rather than
+    silently meaning strict — a mode typo must not masquerade as a safety
+    choice.  ``_run_document`` catches that raise and returns it as the
+    structured pre-execution refusal parse errors use (``success=False`` +
+    ``error``), so a config typo surfaces on the normal error surface
+    instead of crashing the round.
     """
     mode = (context.config or {}).get("reactive_mode", "strict")
     if mode not in REACTIVE_MODES:

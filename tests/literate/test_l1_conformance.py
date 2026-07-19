@@ -694,13 +694,54 @@ class TestRuntimeEffectObservation:
         assert result.metadata["variables"]["label"] == "BOB"
 
     @pytest.mark.asyncio
+    async def test_stdlib_fs_mutation_is_observed_and_withheld(
+        self, context, tmp_path
+    ):
+        # Event-set completeness (third review): os.symlink and Path.touch
+        # fire PROPER audit events (os.symlink / os.utime — not the accepted
+        # flags-based os.open gap), so a cell using them must tag effectful
+        # and be withheld in strict mode: each effect fires exactly once.
+        base = str(tmp_path)
+        doc = lackpy_doc(
+            "import os, pathlib",
+            f"base = pathlib.Path({base!r})\nseed = 'a'",
+            "os.symlink(base / 'target', base / ('lnk_' + seed))\n"
+            "(base / ('touched_' + seed)).touch()\n"
+            "done = seed",
+            "seed = 'b'",  # re-assert → dirties the effectful cell
+        )
+        result = await run_batch(context, doc)
+        dirty = {
+            e.detail["cell_index"]: e
+            for e in result.metadata["ledger"].query(entry_type=DIRTY)
+        }
+        assert dirty[2].detail["reexecuted"] is False
+        assert dirty[2].detail["mode"] == "strict"
+        observed = dirty[2].detail["observed_effects"]
+        assert "os.symlink" in observed
+        assert "os.utime" in observed  # Path.touch's observable half
+        # Fired once: only the 'a' artifacts exist, never the 'b' ones.
+        assert (tmp_path / "lnk_a").is_symlink()
+        assert not (tmp_path / "lnk_b").exists()
+        assert (tmp_path / "touched_a").exists()
+        assert not (tmp_path / "touched_b").exists()
+
+    @pytest.mark.asyncio
     async def test_invalid_reactive_mode_rejected(self, tmp_path):
-        # A mode typo must fail loudly, not silently mean "strict".
+        # A mode typo must fail loudly, not silently mean "strict" — but as
+        # a STRUCTURED pre-execution refusal on the same surface as parse
+        # errors (success=False + error), not an uncaught ValueError out of
+        # execute().  (Updated by the third-review fixes: the raise was
+        # inconsistent with the structured error contract.)
         context = ExecutionContext(
             base_dir=tmp_path, config={"reactive_mode": "yolo"}
         )
-        with pytest.raises(ValueError, match="reactive_mode"):
-            await run_batch(context, lackpy_doc("a = 1"))
+        result = await run_batch(context, lackpy_doc("a = 1"))
+        assert result.success is False
+        assert "reactive_mode" in result.error
+        assert "yolo" in result.error
+        # Pre-execution refusal: nothing ran, nothing bound.
+        assert result.metadata.get("variables") is None
 
 
 class TestInjectedAndIdentityRebindConformance:

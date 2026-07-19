@@ -267,6 +267,94 @@ class TestDirtySubgraphReexecution:
         assert not (tmp_path / "b.txt").exists()
 
     @pytest.mark.asyncio
+    async def test_ceiling_refused_dependent_stays_refused_on_reexec(
+        self, tmp_path
+    ):
+        # Ceiling-gate soundness on the REACTIVE path: a cell the effect
+        # ceiling refused on the linear pass has no observed_effects entry
+        # (it never ran), but that absence means REFUSED, not "safe first
+        # execution" — the re-exec pass must keep it refused, not run it.
+        # (Regression: the observation-gated re-exec ran refused cells,
+        # executing the over-ceiling effect the gate had refused.)
+        from lackpy.interpreters.literate.kernel.forgiveness import Unavailable
+        from lackpy.lang.grader import Grade
+
+        context = ExecutionContext(
+            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
+        )
+        result = await _run(
+            context,
+            "```lackpy\nname = 'out1.txt'\n```\n\n"
+            "```lackpy\nw = write_file(name, 'DANGER')\n```\n\n"
+            "```lackpy\nname = 'out2.txt'\n```",  # re-assert → dirties cell 1
+        )
+        # The refused effect never fires — on either pass.
+        assert not (tmp_path / "out1.txt").exists()
+        assert not (tmp_path / "out2.txt").exists()
+        ledger = result.metadata["ledger"]
+        dirty = _dirty(ledger)
+        assert [e.detail["cell_index"] for e in dirty] == [1]
+        # Withheld for the ceiling — honestly ledgered as such, not claimed
+        # as a clean re-execution.
+        assert dirty[0].detail["reexecuted"] is False
+        assert "effect ceiling" in dirty[0].detail["reason"]
+        assert "gate_violation" in dirty[0].detail
+        # w stays Unavailable — its single reified version, never re-bound.
+        w_hist = result.metadata["versions"].history("w")
+        assert len(w_hist) == 1
+        assert isinstance(w_hist[0].value, Unavailable)
+
+    @pytest.mark.asyncio
+    async def test_ceiling_refused_stays_refused_in_permissive_mode(
+        self, tmp_path
+    ):
+        # The ceiling refusal is POLICY, not replay caution: permissive mode
+        # (which accepts effect replay) still may not run a refused cell.
+        from lackpy.lang.grader import Grade
+
+        context = ExecutionContext(
+            base_dir=tmp_path,
+            config={
+                "grade_ceiling": Grade(1, 1),
+                "reactive_mode": "permissive",
+            },
+        )
+        result = await _run(
+            context,
+            "```lackpy\nname = 'out1.txt'\n```\n\n"
+            "```lackpy\nw = write_file(name, 'DANGER')\n```\n\n"
+            "```lackpy\nname = 'out2.txt'\n```",
+        )
+        assert not (tmp_path / "out1.txt").exists()
+        assert not (tmp_path / "out2.txt").exists()
+        dirty = _dirty(result.metadata["ledger"])
+        assert [e.detail["cell_index"] for e in dirty] == [1]
+        assert dirty[0].detail["reexecuted"] is False
+        assert "effect ceiling" in dirty[0].detail["reason"]
+
+    @pytest.mark.asyncio
+    async def test_hole_skipped_dependent_reruns_when_hole_fills(self, context):
+        # CONTRAST with the ceiling case: a cell skipped because a referenced
+        # name was UNRESOLVED (hole-skipped, also absent from observed_effects)
+        # SHOULD run when the hole fills — that absence really is a safe first
+        # execution.  Distinguishing these two absences is the point of the
+        # gate_violations check.
+        result = await _run(
+            context,
+            "```lackpy\ny = x + 1\n```\n\n"  # x unknown → hole-skipped
+            "```lackpy\nx = 5\n```",  # fills the hole → supersedes Hole(x)
+        )
+        dirty = _dirty(result.metadata["ledger"])
+        assert [e.detail["cell_index"] for e in dirty] == [0]
+        assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "clean"
+        # The re-run was its FIRST execution: y is now real, hole superseded.
+        assert result.metadata["variables"]["y"] == 6
+        y_hist = result.metadata["versions"].history("y")
+        assert isinstance(y_hist[0].value, Hole)
+        assert y_hist[-1].value == 6
+
+    @pytest.mark.asyncio
     async def test_session_reexec_within_round(self, context):
         # The session path shares _run_document, so dirty re-exec works there
         # too — within a single round's cells.

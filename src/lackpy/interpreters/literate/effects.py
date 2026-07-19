@@ -350,10 +350,26 @@ def _const_str(node: ast.expr) -> str | None:
 # HONEST FRAMING — this is best-effort observation, not proof.  It sees
 # effects that flow through Python's audited APIs.  Known gaps, by design:
 #
+# * THE FLAGS-BASED ``os.open`` GAP (read this one first): the ``open``
+#   audit event with a non-string mode — ``os.open`` and everything the
+#   stdlib builds on it — is deliberately ignored (counting it would
+#   false-positive the import machinery's bytecode-cache writes, whose tmp
+#   files defeat any path filter).  Concretely, a cell that CREATES a file
+#   only through that route is observed pure and can DOUBLE-FIRE on a
+#   permitted re-exec.  The enumerable stdlib entry points are handled or
+#   bounded as follows:
+#
+#   - ``tempfile`` (``mkstemp`` / ``mkdtemp`` and the wrappers built on
+#     them: ``NamedTemporaryFile``, ``TemporaryDirectory``, ...) — COVERED:
+#     they raise their own ``tempfile.*`` audit events, which are counted.
+#   - ``Path.touch()`` with the default ``exist_ok=True`` — COVERED: it
+#     calls ``os.utime`` first (the audit event fires at call time, even
+#     when the file does not yet exist), which is counted.
+#   - ``Path.touch(exist_ok=False)`` and raw ``os.open`` writes — NOT
+#     OBSERVED.  A cell writer who needs the observer's protection should
+#     use ``open()`` / the literate tools instead.
+#
 # * a C extension issuing raw syscalls raises no audit event;
-# * flags-based opens (``os.open``) are ignored (see ``_observe_audit_event``
-#   — counting them would false-positive the import machinery's bytecode-
-#   cache writes), so a raw ``os.open`` write is missed;
 # * an effect performed on a thread the cell spawned runs in that thread's
 #   own context, where no observation is active;
 # * observation records what the FIRST run did — a cell whose first run
@@ -373,6 +389,22 @@ _WORLD_EFFECT_EVENTS: frozenset[str] = frozenset({
     "os.mkdir",
     "os.rmdir",
     "os.chmod",
+    "os.chown",
+    "os.link",
+    "os.symlink",
+    "os.truncate",  # also raised by os.ftruncate / file.truncate()
+    # os.utime mutates metadata AND is the observable half of Path.touch():
+    # touch(exist_ok=True) — the default — calls os.utime FIRST, and audit
+    # events fire at call time (before the OSError on a missing file), so
+    # default touch is observed even when its create falls through to the
+    # unobserved flags-based os.open.
+    "os.utime",
+    # tempfile raises its own proper audit events (the create itself routes
+    # through flags-based os.open, which the observer must ignore — see
+    # _observe_audit_event); counting these covers mkstemp/mkdtemp and
+    # everything built on them (NamedTemporaryFile, TemporaryDirectory, ...).
+    "tempfile.mkstemp",
+    "tempfile.mkdtemp",
     "socket.connect",
     "socket.bind",
     "subprocess.Popen",
