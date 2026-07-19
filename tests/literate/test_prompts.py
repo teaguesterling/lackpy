@@ -58,3 +58,65 @@ class TestCompose:
             assert len(result) < 6000, (
                 f"Persona {name!r} composed to {len(result)} chars"
             )
+
+
+class TestL5ForgivenessConventions:
+    """L5: surface conventions ship WITH the kernel and advertise forgiveness.
+
+    The assertions anchor on STABLE tokens (``hole``, ``⟨…⟩``, ``forward``,
+    ``@continue``, ``manifest``/``budget``, ``[kernel]``), never on the exact
+    provisional sentence of the bind-through-holes clause — that wording is a
+    PARKED open question (L5 decay flag) Teague will swap after his taught-arm
+    ablation. Anchoring on tokens keeps the wording tunable and keeps these
+    tests from encoding (i.e. resolving) the parked question.
+    """
+
+    def _hint(self) -> str:
+        return LiterateInterpreter().system_prompt_hint()
+
+    def test_conventions_teach_bind_through_holes(self):
+        """The shipped conventions teach bind-through-the-unknown: an unknown
+        name binds a hole and forward references are legal."""
+        hint = self._hint()
+        assert "hole" in hint
+        assert "⟨name: unbound⟩" in hint  # the merged Hole repr
+        assert "forward" in hint  # forward references are now legal
+
+    def test_old_define_before_using_hint_removed(self):
+        """The REVERSAL: the old 'define before using / no forward references'
+        guidance (and the streaming-path 'patch-forward' framing) is GONE."""
+        hint = self._hint()
+        assert "No forward references" not in hint
+        assert "define variables BEFORE" not in hint
+        assert "patch-forward" not in hint
+        assert "caught before execution" not in hint
+
+    def test_conventions_cover_four_affordances(self):
+        """All four L5 affordances are present in the shipped conventions."""
+        hint = self._hint()
+        # 1. bind-through-the-unknown
+        assert "hole" in hint
+        # 2. kernel arithmetic authority (kernel computes/evaluates; the
+        #    reserved [kernel] channel is the kernel's, not the writer's)
+        assert "kernel computes and evaluates" in hint
+        assert "[kernel]" in hint
+        # 3. pause protocol
+        assert "@continue" in hint
+        # 4. visible budget
+        assert "manifest" in hint
+        assert "budget" in hint
+
+    def test_conventions_shipped_with_kernel(self):
+        """The conventions are reachable from the KERNEL's prompt surface —
+        the interpreter's own hint and every composed persona — not just a
+        standalone doc file."""
+        # Reachable from the interpreter (the kernel deliverable's surface).
+        hint = self._hint()
+        assert "⟨name: unbound⟩" in hint
+        # And they ship through the composition surface every persona uses.
+        interp = LiterateInterpreter()
+        for name in list_personas():
+            composed = compose(name, interp)
+            assert "hole" in composed
+            assert "@continue" in composed
+            assert "manifest" in composed
