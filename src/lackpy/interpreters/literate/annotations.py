@@ -66,6 +66,52 @@ def kernel_note(text: str) -> str:
 _KERNEL_SPAN_RE = re.compile(r"\[kernel\].*?\[/kernel\]", re.DOTALL)
 
 
+# --- L4 session manifest ---------------------------------------------------
+
+#: The manifest's fixed affirmation line: the stateless writer sees a VIEW of
+#: the session, but the kernel retains everything — the ledger and the binding
+#: version history are append-only, so nothing shown-then-compacted is lost.
+RETENTION_NOTE = "full history retained by kernel"
+
+
+def session_manifest(*, segment: int, observations: int, cap: int | None) -> str:
+    """L4: the manifest block that OPENS each kernel splice.
+
+    Emitted by :class:`~.session.LiterateSession` at the head of every rendered
+    segment it splices into the fed-back document, through this SAME channel
+    (block form) — so it is inert on reparse and covered by the strip-stale
+    paths exactly like every other kernel note. Fields (all from real sources,
+    nothing fabricated):
+
+    * ``segment`` — 1-based index of this emission segment: the count of writer
+      emissions the session has folded, including this one (each ``step()`` is
+      one writer call, mirroring the client loop's one-model-call-per-iteration
+      budget unit).
+    * pause budget remaining — ``cap - segment``: the client loop's real round
+      cap (``max_iterations`` in ``scripts/literate_agent.py``), which the
+      writer otherwise never sees. ``cap=None`` means the client configured no
+      cap; the manifest says so rather than inventing a number. The session
+      SURFACES the budget; enforcement stays in the client loop.
+    * ``observations`` — how many entries the session's queryable ledger holds
+      through the end of this segment. The LEDGER is the source (L1), not a
+      journal: executed cells, holes, error values, supersessions, pauses —
+      every delivered observation is a ledger row.
+    * :data:`RETENTION_NOTE` — fixed line, see above.
+    """
+    if cap is None:
+        budget = "unbounded (no round cap configured)"
+    else:
+        budget = f"{cap - segment} of {cap}"
+    return "\n".join([
+        KERNEL_OPEN,
+        f"manifest: segment {segment}",
+        f"pause budget remaining: {budget}",
+        f"observations delivered: {observations} ledger entries",
+        RETENTION_NOTE,
+        KERNEL_CLOSE,
+    ])
+
+
 # --- Legacy kernel-emitted bare literals (pre-channel) ---------------------
 #
 # These are the EXACT formats the kernel emitted before the annotation channel

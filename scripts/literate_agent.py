@@ -133,7 +133,11 @@ async def run_literate_agent(
     # objects defined in one round are live in the next; step() strips <think>,
     # gates + journals the doc, and returns Either. This thin client just does the
     # model-call loop and feeds the next round.
-    session = LiterateSession(context, interpreter=interpreter)
+    # max_rounds surfaces THIS loop's real budget (max_iterations) to the
+    # writer via the L4 per-splice manifest; the loop below still enforces it.
+    session = LiterateSession(
+        context, interpreter=interpreter, max_rounds=max_iterations
+    )
 
     if verbose:
         print(f"Persona: {persona}", file=sys.stderr)
