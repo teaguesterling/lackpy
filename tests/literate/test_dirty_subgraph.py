@@ -10,9 +10,11 @@ DIRTY (a ``dirty`` ledger entry each) and re-run in dependency order against the
 updated namespace, re-versioning (L1.3) and re-forgiving (L1.1/1.2/1.5) as
 needed.
 
-Effect-replay safety: only EFFECT-FREE (pure) dependents are re-run; a dependent
-with a world effect is marked dirty but withheld (``reexecuted=False``), so
-re-execution can never write a file twice.
+Effect-replay safety (strict mode, the default): every cell's first execution
+is OBSERVED through the audit-hook scope (``effects.observe_effects``); a
+dependent observed performing a world effect is marked dirty but withheld
+(``reexecuted=False`` + the observed events), so an observed effect is not
+replayed.  Best-effort, not proof — see the honest framing in ``effects.py``.
 
 These tests cover the batch/session path (``LiterateInterpreter._run_document``);
 the streaming driver is untouched.
@@ -199,12 +201,13 @@ class TestDirtySubgraphReexecution:
     @pytest.mark.asyncio
     async def test_reexec_into_runtime_error_is_ledgered_not_crash(self, context):
         # A dependent whose re-exec now RAISES is LEDGERED as a failure rather
-        # than crashing the run (composition with L1.2) — but note the honest
-        # limit: because the dependent was ALREADY bound on the first pass, the
-        # raise leaves that (now-stale) value in place, so L1.2's kept/missing
-        # logic records a `name=None` error_reified (q in `kept`) instead of
-        # rebinding q as an ErrorValue or re-versioning it.  The run still
-        # completes and reports Left — no crash, nothing silent.
+        # than crashing the run (composition with L1.2).  The dependent was
+        # already bound on the first pass, and the failed re-bind must NOT
+        # silently keep that stale value: q reifies as an ErrorValue,
+        # superseding the first-pass value (value→error, a new version), with
+        # a NAMED error_reified entry and a truthful dirty entry.  (This test
+        # previously pinned the pre-fix stale-keep behavior as an "honest
+        # limit"; that was the Finding-1 defect — updated to the contract.)
         result = await _run(
             context,
             "```lackpy\na = 1\n```\n\n"
@@ -217,21 +220,30 @@ class TestDirtySubgraphReexecution:
         assert result.metadata["completed"] is True
         dirty = _dirty(ledger)
         assert [e.detail["cell_index"] for e in dirty] == [1]
-        # The re-exec's ZeroDivisionError is ledgered (error_reified), Left.
+        # The dirty entry tells the truth: re-executed, but the re-run failed
+        # and was reified — it does not claim a clean refresh.
+        assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "reified"
+        assert dirty[0].detail["reified"] == ["q"]
+        # The re-exec's ZeroDivisionError is ledgered (error_reified) WITH the
+        # name — q was the intended re-bind and did not complete — and Left.
         err = ledger.query(entry_type="error_reified")
-        assert err and err[-1].name is None and err[-1].detail["kept"] == ["q"]
+        assert err and err[-1].name == "q" and err[-1].detail["kept"] == []
         assert round_is_left(ledger.entries())
-        # Honest limit: q keeps its stale first-pass value; it is NOT rebound
-        # as an ErrorValue and NOT re-versioned (single version).
-        assert result.metadata["variables"]["q"] == 1.0
-        assert len(versions.history("q")) == 1
+        # q is an ErrorValue, not the stale first-pass value, and the
+        # transition is versioned: v1 (1.0, superseded) → v2 (error).
+        assert isinstance(result.metadata["variables"]["q"], ErrorValue)
+        q_hist = versions.history("q")
+        assert [type(v.value).__name__ for v in q_hist] == ["float", "ErrorValue"]
+        assert q_hist[0].superseded_by == q_hist[1].version
+        assert ledger.query(entry_type="superseded", name="q")
 
     @pytest.mark.asyncio
     async def test_effectful_dependent_is_dirtied_but_not_reexecuted(
         self, tmp_path
     ):
-        # Effect-replay guard: a dependent that WRITES a file is marked dirty
-        # but NOT re-run (its effect must not fire twice).
+        # Effect-replay guard (strict mode): a dependent OBSERVED writing a
+        # file on its first run is marked dirty but NOT re-run.
         context = ExecutionContext(base_dir=tmp_path)
         result = await _run(
             context,
@@ -244,10 +256,103 @@ class TestDirtySubgraphReexecution:
         assert len(dirty) == 1
         assert dirty[0].detail["cell_index"] == 1
         assert dirty[0].detail["reexecuted"] is False
-        assert "effectful" in dirty[0].detail["reason"]
+        assert dirty[0].detail["mode"] == "strict"
+        assert "observed to perform a world effect" in dirty[0].detail["reason"]
+        # The observed evidence is on the entry — the write open, at least.
+        assert any(
+            e.startswith("open:") for e in dirty[0].detail["observed_effects"]
+        )
         # The write happened exactly once (only a.txt exists — never b.txt).
         assert (tmp_path / "a.txt").exists()
         assert not (tmp_path / "b.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_ceiling_refused_dependent_stays_refused_on_reexec(
+        self, tmp_path
+    ):
+        # Ceiling-gate soundness on the REACTIVE path: a cell the effect
+        # ceiling refused on the linear pass has no observed_effects entry
+        # (it never ran), but that absence means REFUSED, not "safe first
+        # execution" — the re-exec pass must keep it refused, not run it.
+        # (Regression: the observation-gated re-exec ran refused cells,
+        # executing the over-ceiling effect the gate had refused.)
+        from lackpy.interpreters.literate.kernel.forgiveness import Unavailable
+        from lackpy.lang.grader import Grade
+
+        context = ExecutionContext(
+            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
+        )
+        result = await _run(
+            context,
+            "```lackpy\nname = 'out1.txt'\n```\n\n"
+            "```lackpy\nw = write_file(name, 'DANGER')\n```\n\n"
+            "```lackpy\nname = 'out2.txt'\n```",  # re-assert → dirties cell 1
+        )
+        # The refused effect never fires — on either pass.
+        assert not (tmp_path / "out1.txt").exists()
+        assert not (tmp_path / "out2.txt").exists()
+        ledger = result.metadata["ledger"]
+        dirty = _dirty(ledger)
+        assert [e.detail["cell_index"] for e in dirty] == [1]
+        # Withheld for the ceiling — honestly ledgered as such, not claimed
+        # as a clean re-execution.
+        assert dirty[0].detail["reexecuted"] is False
+        assert "effect ceiling" in dirty[0].detail["reason"]
+        assert "gate_violation" in dirty[0].detail
+        # w stays Unavailable — its single reified version, never re-bound.
+        w_hist = result.metadata["versions"].history("w")
+        assert len(w_hist) == 1
+        assert isinstance(w_hist[0].value, Unavailable)
+
+    @pytest.mark.asyncio
+    async def test_ceiling_refused_stays_refused_in_permissive_mode(
+        self, tmp_path
+    ):
+        # The ceiling refusal is POLICY, not replay caution: permissive mode
+        # (which accepts effect replay) still may not run a refused cell.
+        from lackpy.lang.grader import Grade
+
+        context = ExecutionContext(
+            base_dir=tmp_path,
+            config={
+                "grade_ceiling": Grade(1, 1),
+                "reactive_mode": "permissive",
+            },
+        )
+        result = await _run(
+            context,
+            "```lackpy\nname = 'out1.txt'\n```\n\n"
+            "```lackpy\nw = write_file(name, 'DANGER')\n```\n\n"
+            "```lackpy\nname = 'out2.txt'\n```",
+        )
+        assert not (tmp_path / "out1.txt").exists()
+        assert not (tmp_path / "out2.txt").exists()
+        dirty = _dirty(result.metadata["ledger"])
+        assert [e.detail["cell_index"] for e in dirty] == [1]
+        assert dirty[0].detail["reexecuted"] is False
+        assert "effect ceiling" in dirty[0].detail["reason"]
+
+    @pytest.mark.asyncio
+    async def test_hole_skipped_dependent_reruns_when_hole_fills(self, context):
+        # CONTRAST with the ceiling case: a cell skipped because a referenced
+        # name was UNRESOLVED (hole-skipped, also absent from observed_effects)
+        # SHOULD run when the hole fills — that absence really is a safe first
+        # execution.  Distinguishing these two absences is the point of the
+        # gate_violations check.
+        result = await _run(
+            context,
+            "```lackpy\ny = x + 1\n```\n\n"  # x unknown → hole-skipped
+            "```lackpy\nx = 5\n```",  # fills the hole → supersedes Hole(x)
+        )
+        dirty = _dirty(result.metadata["ledger"])
+        assert [e.detail["cell_index"] for e in dirty] == [0]
+        assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "clean"
+        # The re-run was its FIRST execution: y is now real, hole superseded.
+        assert result.metadata["variables"]["y"] == 6
+        y_hist = result.metadata["versions"].history("y")
+        assert isinstance(y_hist[0].value, Hole)
+        assert y_hist[-1].value == 6
 
     @pytest.mark.asyncio
     async def test_session_reexec_within_round(self, context):

@@ -39,9 +39,12 @@ re-runs the stale dependents.  Two rules make "only the stale dependents" exact:
 
 The graph is DERIVED/ADVISORY, so the dependency edges are approximate: static
 def/ref only.  Dynamic names, ``import *``, and aliasing are NOT tracked; nor is
-in-memory mutation (``lst.append(x)``).  Callers must bound re-execution to
-effect-free cells (see ``_run_document``'s purity gate) so the approximation can
-never replay a world effect.
+in-memory mutation (``lst.append(x)``).  Callers bound the effect-replay risk
+via RUNTIME EFFECT OBSERVATION (see ``_run_document``'s re-exec pass): in the
+default strict mode a dependent that was observed performing a world effect on
+its first run is withheld from re-execution.  That gate is best-effort — it
+observes effects that flow through Python's audited APIs, it does not prove
+their absence (the sandbox is the outer defense).
 """
 
 from __future__ import annotations
@@ -50,10 +53,16 @@ from collections import defaultdict
 
 #: Ledger entry type for a dirtied cell (L1.4): a cell marked stale by an
 #: upstream re-assertion.  ``detail`` carries ``cell_index``, ``triggered_by``
-#: (the re-asserted upstream names), and ``reexecuted`` (whether the cell was
-#: actually re-run — False when it was withheld because re-execution would
-#: replay a world effect).  Nothing silent: every dirtied cell is ledgered even
-#: when it is not re-run.
+#: (the re-asserted upstream names), ``mode`` (the reactive mode this run used:
+#: strict|permissive), and ``reexecuted`` (whether the cell was actually
+#: re-run — False, with a ``reason`` and the ``observed_effects``, when strict
+#: mode withheld it because its first run was OBSERVED performing a world
+#: effect).  A re-run cell's entry is recorded AFTER the re-run and carries
+#: ``outcome`` — ``"clean"`` for a clean refresh, ``"reified"`` (plus the
+#: ``reified`` names) when the re-run failed and was reified through the
+#: forgiveness pipeline — and ``observed_effects`` when the re-run itself
+#: performed any.  Nothing silent: every dirtied cell is ledgered even when
+#: it is not re-run.
 DIRTY = "dirty"
 
 

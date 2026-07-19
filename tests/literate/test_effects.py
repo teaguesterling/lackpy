@@ -310,3 +310,78 @@ def test_w3_exec_spec_is_not_mistaken_for_a_write():
     assert te.kind == "exec"
     eff = classify_effects("sh('rm -rf /tmp/x')", tool_effects={"sh": te})
     assert eff.exec_calls == frozenset({"sh"}) and eff.needs_sandbox
+
+
+class TestRuntimeObservationEventSet:
+    """The runtime observer's world-effect event set (unit level).
+
+    Third-review completeness fixes: stdlib fs mutations that fire PROPER
+    (non-``os.open``) audit events must be counted, or cells using them tag
+    "pure" and double-fire on a permitted re-exec.  These execute the real
+    operations against tmp_path — the point is what the audit hook SEES.
+    """
+
+    def test_symlink_link_truncate_chown_utime_are_observed(self, tmp_path):
+        import os
+
+        from lackpy.interpreters.literate.effects import observe_effects
+
+        target = tmp_path / "t.txt"
+        target.write_text("x")
+        with observe_effects() as obs:
+            os.symlink(target, tmp_path / "lnk")
+        assert "os.symlink" in obs.events
+        with observe_effects() as obs:
+            os.link(target, tmp_path / "hard")
+        assert "os.link" in obs.events
+        with observe_effects() as obs:
+            os.truncate(target, 0)
+        assert "os.truncate" in obs.events
+        with observe_effects() as obs:
+            os.utime(target, None)
+        assert "os.utime" in obs.events
+        with observe_effects() as obs:
+            os.chown(target, -1, -1)  # keep-ids no-op: works unprivileged
+        assert "os.chown" in obs.events
+
+    def test_path_touch_is_observed_even_for_a_new_file(self, tmp_path):
+        # Path.touch(exist_ok=True) — the default — calls os.utime FIRST,
+        # and audit events fire at call time, BEFORE the OSError on a
+        # missing file.  So touch's create case is observed even though the
+        # create itself goes through the unobserved flags-based os.open.
+        from lackpy.interpreters.literate.effects import observe_effects
+
+        new = tmp_path / "new.txt"
+        assert not new.exists()
+        with observe_effects() as obs:
+            new.touch()
+        assert "os.utime" in obs.events
+
+    def test_tempfile_creation_is_observed_via_its_own_events(self, tmp_path):
+        # tempfile's create half routes through flags-based os.open (the
+        # documented observer gap), but mkstemp/mkdtemp raise their OWN
+        # audit events — counted, covering NamedTemporaryFile and
+        # TemporaryDirectory too.
+        import os
+        import tempfile
+
+        from lackpy.interpreters.literate.effects import observe_effects
+
+        with observe_effects() as obs:
+            fd, _path = tempfile.mkstemp(dir=tmp_path)
+            os.close(fd)
+        assert "tempfile.mkstemp" in obs.events
+        with observe_effects() as obs:
+            tempfile.mkdtemp(dir=tmp_path)
+        assert "tempfile.mkdtemp" in obs.events
+        with observe_effects() as obs:
+            with tempfile.NamedTemporaryFile(dir=tmp_path):
+                pass
+        assert "tempfile.mkstemp" in obs.events
+
+    def test_pure_computation_observes_nothing(self):
+        from lackpy.interpreters.literate.effects import observe_effects
+
+        with observe_effects() as obs:
+            _ = "pure".upper() + str(1 + 2)
+        assert obs.events == set()

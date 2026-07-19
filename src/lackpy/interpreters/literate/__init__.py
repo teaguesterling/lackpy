@@ -33,6 +33,7 @@ from .effects import (
     as_grade,
     classify_effects,
     exceeds_ceiling,
+    observe_effects,
     tool_effect_from_spec,
 )
 from .kernel import CellResult, LightweightKernel
@@ -230,7 +231,31 @@ class LiterateInterpreter:
         # every cell below (executed or reified) so the post-loop closure is
         # complete; consumed by the re-exec pass after the linear walk.
         graph = DependencyGraph()
-        effects_map = _gate_effects_map(context)
+
+        # Reactive re-exec mode (strict|permissive, default strict) — read
+        # from context.config like display_threshold / grade_ceiling, so it
+        # threads unchanged through both the batch execute() and the session
+        # (which passes its one context every round).  Validated up front: a
+        # typo'd mode must fail loudly, not silently mean "strict" — and
+        # loudly HERE means the structured pre-execution refusal parse
+        # errors use (success=False + error, nothing executed), not an
+        # uncaught ValueError out of execute()/step().
+        try:
+            reactive_mode = _reactive_mode(context)
+        except ValueError as exc:
+            return InterpreterExecutionResult(
+                success=False,
+                error=f"Configuration error: {exc}",
+                output_format="none",
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        # What each executed cell was OBSERVED to do (audit-hook events from
+        # its execution scope; see effects.observe_effects) — the evidence
+        # the re-exec pass gates on.  A cell absent from this map never
+        # executed this round (reified/skipped), so re-running it is a FIRST
+        # execution, not a replay.
+        observed_effects: dict[int, tuple[str, ...]] = {}
 
         for index, cell in enumerate(parsed.cells):
             refs, binds = _static_ref_bind_sets(cell)
@@ -254,6 +279,8 @@ class LiterateInterpreter:
             outcome = self._run_resolved_cell(
                 cell, index, kernel, ledger, versions, assigned_names
             )
+            if outcome.executed:
+                observed_effects[index] = outcome.observed_effects
             output_parts.append(outcome.rendered)
             if outcome.continue_requested:
                 continue_requested = True
@@ -267,7 +294,8 @@ class LiterateInterpreter:
         # through the very same per-cell pipeline the linear walk used.
         self._reexecute_dirty_subgraph(
             parsed.cells, graph, kernel, ledger, versions, assigned_names,
-            effects_map, run_mark, output_parts,
+            reactive_mode, observed_effects, gate_violations, run_mark,
+            output_parts,
         )
 
         elapsed = (time.perf_counter() - start) * 1000
@@ -342,11 +370,16 @@ class LiterateInterpreter:
         makes dirty re-execution COMPOSE with forgiveness for free — a re-run
         that now hits an unknown name or raises reifies + versions exactly as a
         first run does, no special-casing.  (The ceiling gate / L1.5
-        unavailable path stays in the caller: a gated cell is effectful, so the
-        re-exec pass never re-runs it.)
+        unavailable path stays in the callers: the linear walk reifies a gated
+        cell instead of calling this, and the re-exec pass withholds it via
+        its explicit ``gate_violations`` check — a gated cell never reaches
+        this body on either pass.)
 
-        Returns the rendered fragment for this cell and whether it requested a
-        ``@continue`` pause.  Mutates ``kernel`` / ``ledger`` / ``versions`` /
+        Returns the rendered fragment for this cell, whether it requested a
+        ``@continue`` pause, whether it actually executed, and what world
+        effects its execution was OBSERVED to perform (audit-hook events; see
+        :func:`.effects.observe_effects`) — the evidence the reactive re-exec
+        pass gates on.  Mutates ``kernel`` / ``ledger`` / ``versions`` /
         ``assigned_names`` in place, like the original inline body.
         """
         # Forgiveness pre-pass (L1.1): a cell whose names cannot resolve binds
@@ -359,7 +392,13 @@ class LiterateInterpreter:
             return _CellOutcome(rendered=reified, continue_requested=False)
 
         known_before = kernel.known_names()
-        result = kernel.execute_cell(cell, index)
+        # Observe the execution we are doing anyway: the audit hook records
+        # any world effect the cell performs (best-effort — see the honest
+        # framing in effects.py) so the re-exec pass can gate on what the
+        # cell DID rather than on what its source looks like.
+        with observe_effects() as observation:
+            result = kernel.execute_cell(cell, index)
+        observed = tuple(sorted(observation.events))
 
         if not result.success:
             # L1.2: the failure is reified — an error value bound to the names
@@ -374,7 +413,10 @@ class LiterateInterpreter:
                     assigned_names, known_before,
                 )
             )
-            return _CellOutcome(rendered="".join(parts), continue_requested=False)
+            return _CellOutcome(
+                rendered="".join(parts), continue_requested=False,
+                executed=True, observed_effects=observed,
+            )
 
         parts = []
         if result.output:
@@ -396,10 +438,18 @@ class LiterateInterpreter:
             )
 
         cont = bool(result.namespace_delta.get("__continue_requested__"))
+        # The executed entry records what the cell was observed to DO (when
+        # anything was) — the ledger-visible face of the effect observation.
+        exec_detail = dict(cell_detail)
+        if observed:
+            exec_detail["observed_effects"] = list(observed)
         ledger.record(
-            "continue_requested" if cont else "executed", detail=cell_detail
+            "continue_requested" if cont else "executed", detail=exec_detail
         )
-        return _CellOutcome(rendered="".join(parts), continue_requested=cont)
+        return _CellOutcome(
+            rendered="".join(parts), continue_requested=cont,
+            executed=True, observed_effects=observed,
+        )
 
     def _reexecute_dirty_subgraph(
         self,
@@ -409,7 +459,9 @@ class LiterateInterpreter:
         ledger: Ledger,
         versions: BindingVersions,
         assigned_names: set[str],
-        effects_map: dict[str, ToolEffect],
+        reactive_mode: str,
+        observed_effects: dict[int, tuple[str, ...]],
+        gate_violations: dict[int, str],
         run_mark: int,
         output_parts: list[str],
     ) -> None:
@@ -419,24 +471,66 @@ class LiterateInterpreter:
         ``superseded`` ledger entry in this run's slice.  Those re-asserted
         names seed :meth:`DependencyGraph.dirty_closure`, which returns the
         transitive dependent cells in dependency order.  Each dirtied cell is
-        LEDGERED (a ``dirty`` entry — nothing silent) and, when it is safe to
-        re-run, executed again through the shared per-cell pipeline so its
-        bindings refresh against the updated namespace (and re-version / re-
-        forgive as needed).
+        LEDGERED (a ``dirty`` entry — nothing silent) and, mode permitting,
+        executed again through the shared per-cell pipeline so its bindings
+        refresh against the updated namespace (and re-version / re-forgive as
+        needed).
 
-        EFFECT-REPLAY (the key risk, per the brief).  Re-running a cell's source
-        replays its side effects — a dependent that writes a file would write it
-        twice.  Mitigation: a dirtied cell is re-run ONLY if it is statically
-        EFFECT-FREE (world-coupling grade ``w == 0`` under the same effects map
-        the ceiling gate uses).  Any cell with a read/write/exec effect, or an
-        unanalyzable escape hatch (``import``/``open``/raw ``exec``), is marked
-        dirty but NOT re-run — its ``dirty`` entry records
-        ``reexecuted=False`` + the reason.  Pure cells are idempotent under
-        re-execution (recomputing ``b = a + 1`` cannot leak an effect), so this
-        is a SAFE partial reactive engine — not the observe-only fallback, not a
-        forced unsafe one.  (Caveat, documented: this catches WORLD effects, not
-        in-memory mutation like ``lst.append(x)``, which the static effect
-        classifier and the kernel's identity-based delta both miss.)
+        EFFECT-REPLAY (the key risk, per the brief).  Re-running a cell's
+        source replays its side effects — a dependent that writes a file
+        would write it twice.  The gate is RUNTIME OBSERVATION, not static
+        classification: every cell's first execution runs inside an
+        audit-hook observation scope (:func:`.effects.observe_effects`), and
+        ``observed_effects`` carries what each cell was actually SEEN to do.
+        Two modes (``reactive_mode``, default strict):
+
+        * ``strict`` — a dirtied dependent OBSERVED to perform a world effect
+          on its first run (a write/append/create ``open``, an ``os``
+          mutation, a socket connect/bind, a subprocess spawn) is withheld:
+          ``reexecuted=False`` + the reason + the observed events.  A
+          dependent whose first run was observed effect-free is re-run —
+          including method-call dependents (``name.upper()``) and
+          helper-wrapped computations, which a static source gate cannot
+          grade.
+        * ``permissive`` (opt-in) — ALL dirty dependents re-run, effects and
+          all; for interactive/exploratory use where re-firing an effect is
+          acceptable.  The re-run's own observed events are ledgered.
+
+        NEVER-EXECUTED CELLS — two absences, two meanings.  A cell with no
+        entry in ``observed_effects`` never executed this round, but that
+        absence is AMBIGUOUS and the two causes get opposite treatment:
+
+        * **ceiling-refused** (``gate_violations``): the effect ceiling
+          refused the cell before it ran — a POLICY refusal, static over the
+          cell's source, so it holds identically on re-execution.  The cell
+          is withheld in BOTH modes (permissive waives replay caution, not
+          policy): its bindings stay ``Unavailable`` and the ``dirty`` entry
+          records the withhold with the gate's reason.  Running it here
+          would execute the exact effect the gate refused.
+        * **hole-skipped** (the forgiveness pre-pass reified it because a
+          referenced name was unresolved): re-running when the hole fills is
+          the L1.4 point — it is a safe FIRST execution and it runs.
+
+        The disambiguator is the gate's own verdict (``gate_violations``),
+        not the absence of observation evidence.
+
+        BEST-EFFORT, stated plainly: observation sees effects that flow
+        through Python's audited APIs.  A C extension issuing raw syscalls,
+        a flags-based ``os.open`` write, an effect on a cell-spawned thread,
+        or an effectful branch the first run skipped can all slip past the
+        observer — the sandbox and stdlib-limiting are the outer defense for
+        that gap (see the notes in :mod:`.effects`).  When a strict-mode
+        re-run of a first-run-pure cell does fire an effect, the effect is
+        NOT prevented — but it is observed and recorded on the ``dirty``
+        entry, never silent.
+
+        TRUTHFUL LEDGER.  Every ``dirty`` entry carries the ``mode``.  The
+        entry for a re-executed cell is recorded AFTER the re-run and reports
+        what actually happened: ``outcome="clean"`` for a clean refresh,
+        ``outcome="reified"`` (plus the reified names) when the re-run raised
+        / re-holed and the shared pipeline reified the failure, and
+        ``observed_effects`` when the re-run performed any.  It never claims
+        a clean ``reexecuted=True`` for a re-run that failed.
 
         RENDERING.  Re-execution ANNOTATES, never rewrites (the L2 refusal law):
         the original render stands, and each re-run appends one kernel-channel
@@ -454,41 +548,85 @@ class LiterateInterpreter:
 
         for index, trigger_names in graph.dirty_closure(reasserted):
             triggered_by = sorted(trigger_names)
-            pure = _is_effect_free(cells[index], effects_map)
             detail = {
                 "cell_index": index,
                 "cell_type": cells[index].cell_type,
                 "triggered_by": triggered_by,
-                "reexecuted": pure,
+                "mode": reactive_mode,
             }
-            if not pure:
-                # Withheld to avoid replaying a world effect — surfaced, never
-                # silently re-run.
+            if index in gate_violations:
+                # Ceiling-refused, NOT hole-skipped: the gate's verdict is
+                # static over the cell's source, so it stands on re-exec in
+                # every mode.  Executing here would run the refused effect
+                # (the linear pass never did).  Withheld and ledgered; the
+                # cell's bindings remain the reified Unavailable values.
+                detail["reexecuted"] = False
+                detail["gate_violation"] = gate_violations[index]
                 detail["reason"] = (
-                    "effectful — re-execution would replay the cell's effects"
+                    "over effect ceiling ("
+                    + gate_violations[index]
+                    + ") — refused on the linear pass and not re-executed:"
+                    " the policy refusal stands"
                 )
                 ledger.record(DIRTY, name=None, detail=detail)
                 continue
 
-            ledger.record(DIRTY, name=None, detail=detail)
-            self._run_resolved_cell(
+            first_run = observed_effects.get(index, ())
+            if reactive_mode == "strict" and first_run:
+                # Withheld: the first run was observed performing a world
+                # effect, so a re-run would replay it.  Surfaced with the
+                # observed events — never silently skipped.
+                detail["reexecuted"] = False
+                detail["observed_effects"] = list(first_run)
+                detail["reason"] = (
+                    "observed to perform a world effect on first run ("
+                    + ", ".join(first_run)
+                    + ") — re-execution would replay it"
+                )
+                ledger.record(DIRTY, name=None, detail=detail)
+                continue
+
+            # Re-run first, record after: the dirty entry must report what
+            # the re-execution actually DID, not a precomputed prediction.
+            cell_mark = len(ledger.entries())
+            outcome = self._run_resolved_cell(
                 cells[index], index, kernel, ledger, versions, assigned_names
             )
-            output_parts.append(
-                kernel_note(
-                    f"re-executed cell {index} "
-                    f"(dirty: {', '.join(triggered_by)})"
-                )
-                + "\n"
+            if outcome.executed:
+                # Keep the observation current (and ledger the re-run's own
+                # effects — a permissive replay, or a strict-mode effect the
+                # first run's branch never reached).
+                observed_effects[index] = outcome.observed_effects
+                if outcome.observed_effects:
+                    detail["observed_effects"] = list(outcome.observed_effects)
+            reified = reified_failures(ledger.entries()[cell_mark:])
+            detail["reexecuted"] = True
+            detail["outcome"] = "reified" if reified else "clean"
+            if reified:
+                detail["reified"] = sorted({e.name for e in reified if e.name})
+            ledger.record(DIRTY, name=None, detail=detail)
+            note = (
+                f"re-executed cell {index} (dirty: {', '.join(triggered_by)})"
             )
+            if reified:
+                note += " — failure reified"
+            output_parts.append(kernel_note(note) + "\n")
 
 
 @dataclass(frozen=True)
 class _CellOutcome:
-    """The result of running one cell body (:meth:`_run_resolved_cell`)."""
+    """The result of running one cell body (:meth:`_run_resolved_cell`).
+
+    ``executed`` is False when the forgiveness pre-pass reified/skipped the
+    cell (it never ran, so there is nothing observed); ``observed_effects``
+    is the sorted, deduplicated audit-event tags the execution was seen to
+    perform (empty = no world effect observed).
+    """
 
     rendered: str
     continue_requested: bool
+    executed: bool = False
+    observed_effects: tuple[str, ...] = ()
 
 
 def _static_ref_bind_sets(cell: Cell) -> tuple[set[str], set[str]]:
@@ -508,22 +646,88 @@ def _static_ref_bind_sets(cell: Cell) -> tuple[set[str], set[str]]:
     return referenced, collect_bindings(tree)
 
 
-def _is_effect_free(cell: Cell, effects_map: dict[str, ToolEffect]) -> bool:
-    """Whether ``cell`` is safe to RE-EXECUTE without replaying a world effect.
+#: Valid values for ``context.config["reactive_mode"]`` (see
+#: :meth:`LiterateInterpreter._reexecute_dirty_subgraph`).
+REACTIVE_MODES = ("strict", "permissive")
 
-    True iff the cell's statically-classified world-coupling grade is 0 (pure):
-    no read/write/exec tool call and no unanalyzable escape hatch
-    (``import``/``open``/raw ``exec``, which the classifier forces to grade 3).
-    Graded against the SAME effects map the ceiling gate uses, so an injected
-    write-capable tool can't slip through as pure.  Conservative by design — a
-    read-only cell (grade 1) is also withheld, even though re-reading is
-    idempotent — because the re-exec pass must never replay an effect.
+
+def _reactive_mode(context: ExecutionContext) -> str:
+    """The reactive re-exec mode for this run: ``strict`` | ``permissive``.
+
+    Read from ``context.config["reactive_mode"]`` — the same config surface
+    ``display_threshold`` and ``grade_ceiling`` use, so it threads unchanged
+    through ``LiterateInterpreter.execute`` and every ``LiterateSession``
+    round (the session passes its one context each ``step``).  Defaults to
+    ``strict``.  An unrecognized value raises ``ValueError`` rather than
+    silently meaning strict — a mode typo must not masquerade as a safety
+    choice.  ``_run_document`` catches that raise and returns it as the
+    structured pre-execution refusal parse errors use (``success=False`` +
+    ``error``), so a config typo surfaces on the normal error surface
+    instead of crashing the round.
     """
-    try:
-        src = compile_cell(cell)
-    except ValueError:
+    mode = (context.config or {}).get("reactive_mode", "strict")
+    if mode not in REACTIVE_MODES:
+        raise ValueError(
+            f"reactive_mode must be one of {REACTIVE_MODES}; got {mode!r}"
+        )
+    return mode
+
+
+#: Top-level statement types whose execution is proven complete once the
+#: cell's top-level control has moved past their last line — the simple
+#: (unconditional) binders ``_assignment_completed`` can reason about.
+_SIMPLE_BINDER_STMTS = (
+    ast.Assign,
+    ast.AnnAssign,
+    ast.AugAssign,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Import,
+    ast.ImportFrom,
+)
+
+
+def _assignment_completed(
+    tree: ast.Module | None, name: str, error_lineno: int | None
+) -> bool:
+    """Whether ``name``'s intended (re)bind COMPLETED before the cell raised.
+
+    The kernel's identity-based namespace delta cannot see a rebind to the
+    identical object (``x = x``, or re-binding an interned equal value) — so
+    a failed cell that completed such a rebind before raising would look
+    "never rebound" and get wrongly reified.  This helper supplies the
+    missing runtime signal from the failure's top-level line
+    (:attr:`CellResult.error_lineno`): if the LAST top-level statement
+    binding ``name`` is a plain unconditional statement that ends strictly
+    BEFORE the line that was executing when the cell raised, the bind ran to
+    completion.
+
+    Conservative fallbacks — returns False, so the caller reifies exactly as
+    before: no line info, no parseable tree, the name's last binder is (or
+    is inside) a compound statement (``if``/``for``/``while``/``try``/
+    ``with`` — line order alone cannot tell whether its body ran), or the
+    failing line is within the binder statement itself.  KNOWN CORNER
+    (low, documented): a bind that completed inside a loop/branch before a
+    later same-cell failure is still reified when the identity delta cannot
+    see it.
+    """
+    if tree is None or error_lineno is None:
         return False
-    return classify_effects(src, tool_effects=effects_map).grade.w == 0
+    last: ast.stmt | None = None
+    for stmt in tree.body:
+        binds_name = name in collect_bindings(
+            ast.Module(body=[stmt], type_ignores=[])
+        )
+        if not binds_name:
+            continue
+        # A later binder supersedes an earlier one: the INTENDED final bind
+        # is the last one, and only a simple statement's completion can be
+        # inferred from line order.
+        last = stmt if isinstance(stmt, _SIMPLE_BINDER_STMTS) else None
+    if last is None or last.end_lineno is None:
+        return False
+    return last.end_lineno < error_lineno
 
 
 def _record_assertion(
@@ -581,6 +785,8 @@ def _annotation_text(entry: LedgerEntry) -> str | None:
     if et == DIRTY:
         triggered = ", ".join(entry.detail.get("triggered_by") or [])
         if entry.detail.get("reexecuted"):
+            if entry.detail.get("outcome") == "reified":
+                return f"re-executed (dirty: {triggered}) — failure reified"
             return f"re-executed (dirty: {triggered})"
         reason = entry.detail.get("reason", "withheld")
         return f"dirty (not re-executed: {reason}; triggered by {triggered})"
@@ -729,11 +935,28 @@ def _reify_error_for_cell(
     The failed :class:`CellResult` becomes ledger entries + bound values
     instead of an abort:
 
-    * names the cell declared but did NOT reach bind an :class:`ErrorValue`
-      carrying the exception info — one ``error_reified`` entry per name;
-    * names the cell bound *before* the error keep their real values
+    * names the cell declared but did NOT successfully (re)bind THIS PASS
+      bind an :class:`ErrorValue` carrying the exception info — one
+      ``error_reified`` entry per name.  This includes a failed RE-binding of
+      a DOCUMENT-ASSERTED name (one with version history): keeping the prior
+      value would be a silent stale success, so the failure SUPERSEDES it
+      (value→error / hole→error, one L1.3 ``superseded`` entry via the
+      normal versioning choke point);
+    * names the cell actually bound *before* the error keep their real values
       (completed work is kept; the kernel executes in place and no longer
-      rolls anything back) — recorded in the entry's ``kept`` detail;
+      rolls anything back) — recorded in the entry's ``kept`` detail.  For an
+      already-known name, "actually bound" is observed by identity against
+      the recorded current version (the kernel's own delta rule), backed by
+      the failure-line signal (:func:`_assignment_completed`) for the rebind
+      the identity delta cannot see — ``x = x``, or re-binding an interned
+      equal value, completed before a later statement raised;
+    * INJECTED names — params, tools, environment names with NO
+      document-asserted version history — are NEVER reified on a failed
+      re-bind: the document never bound them, so the failure must not
+      destroy the provided value.  They keep their live value (the provided
+      one, or the cell's rebind if it completed) and are recorded in the
+      entry's ``kept_injected`` detail — nothing silent, but no
+      ``superseded`` trace fabricated for a value the document never owned;
     * a cell that binds nothing (a bare statement, a syntax error, an unknown
       cell type) still gets one ``error_reified`` entry (``name=None``) —
       nothing silent.
@@ -750,33 +973,78 @@ def _reify_error_for_cell(
     }
 
     bindings: set[str] = set()
+    tree: ast.Module | None = None
     if phase == "runtime":
         # Static phases (syntax error, unknown type) have no parseable AST /
         # no meaningful bindings; runtime failures tell us which names the
         # cell was going to bind.
         try:
-            bindings = collect_bindings(ast.parse(compile_cell(cell)))
+            tree = ast.parse(compile_cell(cell))
+            bindings = collect_bindings(tree)
         except (ValueError, SyntaxError):
+            tree = None
             bindings = set()
 
+    # Partition the cell's intended bindings against KNOWN_BEFORE (the
+    # snapshot taken before this cell ran), not the post-failure namespace:
+    # a name that already existed is only "kept" if this cell observably
+    # rebound it before failing.  Partitioning on the post-failure namespace
+    # was the stale-keep defect — an already-known name always looked
+    # "kept" and a failed re-assertion silently retained the prior value.
     known = kernel.known_names()
-    missing = sorted(n for n in bindings if n not in known)
-    kept = sorted(n for n in bindings if n in known)
+    reify: list[str] = []
+    kept: list[str] = []
+    kept_injected: list[str] = []
+    for name in sorted(bindings):
+        if name not in known_before:
+            # Fresh name: kept iff the cell bound it before the failure
+            # (it is in the namespace now but was not before).
+            if name in known:
+                kept.append(name)
+            else:
+                reify.append(name)
+            continue
+        current = versions.current(name)
+        if current is None:
+            # INJECTED name (param / tool / environment): no document-
+            # asserted version exists — the document never owned this
+            # binding, so a failed re-bind must not clobber the provided
+            # value with an ErrorValue.  Keep the live value (the provided
+            # one; or the cell's rebind, if it completed — which, like
+            # every environment-name change, stays unversioned).
+            kept_injected.append(name)
+        elif current.value is not kernel.lookup(name):
+            # Observed rebound (live value differs, by identity, from the
+            # recorded current version) → completed work, kept.
+            kept.append(name)
+        elif _assignment_completed(tree, name, result.error_lineno):
+            # The identity delta cannot see a rebind to the identical
+            # object (`x = x`, an interned equal value) — but the failure
+            # line shows the binding statement completed before the raise.
+            # Rebound → completed work, kept.
+            kept.append(name)
+        else:
+            # The re-bind never completed — reify, superseding the prior
+            # value/hole rather than silently keeping it stale.
+            reify.append(name)
 
     cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
-    if missing:
-        for name in missing:
+    partition_detail: dict[str, Any] = {**base_detail, "kept": kept}
+    if kept_injected:
+        partition_detail["kept_injected"] = kept_injected
+    if reify:
+        for name in reify:
             error_value = ErrorValue(name=name, error=error, error_phase=phase)
             kernel.bind(name, error_value)
             _record_assertion(name, error_value, versions, ledger, cell_detail)
-            ledger.record(
-                ERROR_REIFIED, name=name, detail={**base_detail, "kept": kept}
-            )
-        assigned_names.update(missing)
+            ledger.record(ERROR_REIFIED, name=name, detail=dict(partition_detail))
+        assigned_names.update(reify)
     else:
-        ledger.record(ERROR_REIFIED, name=None, detail={**base_detail, "kept": kept})
-    # Partial bindings the cell completed before failing surface as variables.
+        ledger.record(ERROR_REIFIED, name=None, detail=dict(partition_detail))
+    # Partial bindings the cell completed before failing surface as variables
+    # — as do kept injected names (their provided values remain live).
     assigned_names.update(kept)
+    assigned_names.update(kept_injected)
 
     # L1.3: those partial bindings are real assertions and must be versioned
     # too — a failed CellResult carries no namespace_delta, so observe them
@@ -796,8 +1064,8 @@ def _reify_error_for_cell(
             _record_assertion(name, live, versions, ledger, cell_detail)
 
     note = f"error: {error}"
-    if missing:
-        note += f" — bound as error value: {', '.join(missing)}"
+    if reify:
+        note += f" — bound as error value: {', '.join(reify)}"
     return kernel_note(note) + "\n"
 
 
