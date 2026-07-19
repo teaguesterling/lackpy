@@ -24,6 +24,13 @@ class CellResult:
     error_phase: str | None  # "static" | "runtime"
     namespace_delta: dict[str, Any]
     cell_index: int
+    #: For a RUNTIME failure: the line (in the compiled cell source, the
+    #: ``"<cell>"`` frame) that was executing at top level when the cell
+    #: raised.  Lets the error-reification path tell which top-level
+    #: statements completed before the failure (e.g. an identity rebind like
+    #: ``x = x`` that the identity-based namespace delta cannot see).
+    #: ``None`` on success and for static failures.
+    error_lineno: int | None = None
 
 
 class KernelInterface(IncrementalInterpreter, Protocol):

@@ -253,12 +253,15 @@ class TestSemantic5DirtySubgraph:
 
     Contract: a re-assertion (an L1.3 ``superseded`` entry) marks the
     transitive dependents of the old value stale; each is ledgered with a
-    ``dirty`` entry (nothing silent).  An EFFECT-FREE dependent is
-    re-executed against the updated namespace (``reexecuted=True``, new
-    version); an EFFECTFUL dependent is withheld (``reexecuted=False`` + a
-    reason) so re-execution can never replay a world effect; an INDEPENDENT
-    cell is untouched — never dirtied, never re-run.  ``dirty`` is
-    bookkeeping, not a failure: it does not make the run Left.
+    ``dirty`` entry (nothing silent).  In strict mode (the default) a
+    dependent whose first run was OBSERVED effect-free (audit-hook
+    observation, ``effects.observe_effects``) is re-executed against the
+    updated namespace (``reexecuted=True``, new version); a dependent
+    OBSERVED performing a world effect is withheld (``reexecuted=False`` +
+    the reason + the observed events) so the observed effect is not
+    replayed; an INDEPENDENT cell is untouched — never dirtied, never
+    re-run.  ``dirty`` is bookkeeping, not a failure: it does not make the
+    run Left.
     """
 
     @pytest.mark.asyncio
@@ -448,9 +451,10 @@ class TestReassertionFailureConformance:
     * work the failed cell completed before raising is still kept;
     * the ``dirty`` entry reports the re-exec's ACTUAL outcome (``clean`` /
       ``reified``), never a clean-refresh claim for a failed re-run;
-    * a dirtied cell is re-executed only when PROVABLY effect-free — an
-      attribute-call write (invisible to the bare-name effect classifier) is
-      withheld, so a world effect can never fire twice.
+    * (strict mode) a dirtied cell whose first run was OBSERVED performing a
+      world effect — through any surface, including an attribute-call write
+      invisible to static classification — is withheld, with the observed
+      events on the ledger entry.  Best-effort observation, not proof.
     """
 
     @pytest.mark.asyncio
@@ -566,10 +570,10 @@ class TestReassertionFailureConformance:
     async def test_attribute_call_write_withheld_from_reexec(
         self, context, tmp_path
     ):
-        # World-effect withhold: the effect classifier attributes effects to
-        # BARE-NAME calls only, so `target.write_text(...)` grades "pure".
-        # The conservative gate must withhold it anyway: the file is written
-        # exactly once, with the ORIGINAL upstream value.
+        # World-effect withhold: `target.write_text(...)` is invisible to
+        # static bare-name classification, but the RUNTIME observer sees the
+        # write open on the first run and strict mode withholds the re-exec:
+        # the file is written exactly once, with the ORIGINAL upstream value.
         out = tmp_path / "tick.txt"
         result = await run_batch(
             context,
@@ -585,6 +589,220 @@ class TestReassertionFailureConformance:
             e.detail["cell_index"]: e for e in ledger.query(entry_type=DIRTY)
         }
         assert dirty[2].detail["reexecuted"] is False
-        assert "cannot prove effect-free" in dirty[2].detail["reason"]
+        assert "observed to perform a world effect" in dirty[2].detail["reason"]
+        assert any(
+            e.startswith("open:") for e in dirty[2].detail["observed_effects"]
+        )
         # Written exactly once — a double-fire would have left 'tick0'.
         assert out.read_text() == "tick1"
+
+
+class TestRuntimeEffectObservation:
+    """The re-review corrections (2026-07 re-review): runtime observation.
+
+    The first fix's STATIC re-exec gate was unsound in both directions — a
+    bare-name call to an effectful helper graded "pure" (double-fired a
+    write), while a pure method-call dependent was withheld.  The corrected
+    design observes what each cell's first execution actually DOES via a
+    process-global CPython audit hook scoped to the executing cell
+    (``effects.observe_effects``), and gates dirty re-execution on that
+    evidence:
+
+    * ``strict`` (default): withhold a dirtied dependent iff its first run
+      was OBSERVED performing a world effect;
+    * ``permissive`` (opt-in, ``config={"reactive_mode": "permissive"}``):
+      re-run all dirty dependents — effects may re-fire, documented.
+
+    Best-effort, never claimed as proof: raw-syscall C extensions,
+    flags-based opens, cell-spawned threads, and first-run-skipped branches
+    can evade observation — the sandbox is the outer defense.
+    """
+
+    HELPER_WRITE_DOC = (
+        "def save(v):\n    return write_file('helper_out.txt', v)",  # 0
+        "seed = 'one'",                                              # 1
+        "res = save(seed)",   # 2: helper-wrapped write — statically "pure"
+        "seed = 'two'",       # 3: re-assert → cell 2 dirty
+    )
+
+    @pytest.mark.asyncio
+    async def test_helper_wrapped_write_withheld_in_strict_mode(
+        self, context, tmp_path
+    ):
+        # NEW-1 (the static gate's unsoundness): a bare-name call to a
+        # write-wrapping helper looks pure to any source classifier.  The
+        # runtime observer sees the write itself → strict mode withholds.
+        result = await run_batch(context, lackpy_doc(*self.HELPER_WRITE_DOC))
+        dirty = {
+            e.detail["cell_index"]: e
+            for e in result.metadata["ledger"].query(entry_type=DIRTY)
+        }
+        assert dirty[2].detail["reexecuted"] is False
+        assert dirty[2].detail["mode"] == "strict"
+        assert "observed to perform a world effect" in dirty[2].detail["reason"]
+        assert any(
+            e.startswith("open:") for e in dirty[2].detail["observed_effects"]
+        )
+        # The file was written exactly once, with the ORIGINAL seed.
+        assert (tmp_path / "helper_out.txt").read_text() == "one"
+
+    @pytest.mark.asyncio
+    async def test_helper_wrapped_write_reruns_in_permissive_mode(
+        self, tmp_path
+    ):
+        # The SAME document under permissive mode re-runs the effectful
+        # dependent — the effect re-fires, and the ledger says so.  This test
+        # exists to document the mode difference.
+        context = ExecutionContext(
+            base_dir=tmp_path, config={"reactive_mode": "permissive"}
+        )
+        result = await run_batch(context, lackpy_doc(*self.HELPER_WRITE_DOC))
+        dirty = {
+            e.detail["cell_index"]: e
+            for e in result.metadata["ledger"].query(entry_type=DIRTY)
+        }
+        assert dirty[2].detail["reexecuted"] is True
+        assert dirty[2].detail["mode"] == "permissive"
+        assert dirty[2].detail["outcome"] == "clean"
+        # The re-run's own observed effects are ledgered — the replay is
+        # visible, never silent.
+        assert any(
+            e.startswith("open:") for e in dirty[2].detail["observed_effects"]
+        )
+        # The effect DID re-fire: the file now holds the NEW seed.
+        assert (tmp_path / "helper_out.txt").read_text() == "two"
+
+    @pytest.mark.asyncio
+    async def test_pure_method_call_dependent_is_rerun(self, context):
+        # NEW-3 (the static gate's over-correction): `name.upper()` is an
+        # attribute call, which the static rule withheld wholesale.  Its
+        # first run observes NO world effect → strict mode re-runs it.
+        result = await run_batch(
+            context,
+            lackpy_doc(
+                "name = 'alice'",
+                "label = name.upper()",
+                "name = 'bob'",
+            ),
+        )
+        dirty = {
+            e.detail["cell_index"]: e
+            for e in result.metadata["ledger"].query(entry_type=DIRTY)
+        }
+        assert dirty[1].detail["reexecuted"] is True
+        assert dirty[1].detail["outcome"] == "clean"
+        assert result.metadata["variables"]["label"] == "BOB"
+
+    @pytest.mark.asyncio
+    async def test_invalid_reactive_mode_rejected(self, tmp_path):
+        # A mode typo must fail loudly, not silently mean "strict".
+        context = ExecutionContext(
+            base_dir=tmp_path, config={"reactive_mode": "yolo"}
+        )
+        with pytest.raises(ValueError, match="reactive_mode"):
+            await run_batch(context, lackpy_doc("a = 1"))
+
+
+class TestInjectedAndIdentityRebindConformance:
+    """The re-review regressions (NEW-2 / NEW-4) on failed (re)binds.
+
+    NEW-2: a failed re-bind may only reify names the DOCUMENT asserted (ones
+    with version history).  INJECTED names — params, tools, environment —
+    keep their provided values (``kept_injected`` on the ledger entry), with
+    no fabricated ``superseded`` trace.
+
+    NEW-4: a (re)bind that actually COMPLETED before a later same-cell
+    failure is kept even when the identity delta cannot see it (``x = x``,
+    interned equal values) — the failure's top-level line
+    (``CellResult.error_lineno``) shows the binding statement finished.
+    Known corner (low, documented in ``_assignment_completed``): a bind
+    completing inside a loop/branch before a later failure still reifies
+    when identity cannot see it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_injected_param_failed_rebind_keeps_provided_value(
+        self, tmp_path
+    ):
+        # NEW-2: the param's dict was provided out-of-band; the RHS raised
+        # before assignment, so the provided value must survive untouched.
+        context = ExecutionContext(
+            base_dir=tmp_path, params={"config": {"k": "v"}}
+        )
+        result = await run_batch(context, lackpy_doc("config = 1 // 0"))
+        ledger = result.metadata["ledger"]
+
+        # The provided value stands — not an ErrorValue.
+        assert result.metadata["variables"]["config"] == {"k": "v"}
+        # No superseded trace fabricated for a name the document never owned.
+        assert not ledger.query(entry_type=SUPERSEDED, name="config")
+        assert not ledger.query(entry_type=ERROR_REIFIED, name="config")
+        # But nothing silent: the failure is ledgered (name=None entry) with
+        # the untouched injected name recorded, and the round reports Left.
+        err = [
+            e for e in ledger.query(entry_type=ERROR_REIFIED) if e.name is None
+        ]
+        assert err and err[-1].detail["kept_injected"] == ["config"]
+        assert round_is_left(ledger.entries())
+
+    @pytest.mark.asyncio
+    async def test_injected_tool_failed_rebind_keeps_tool(self, context):
+        # Same gate for an injected TOOL name: a failing re-bind must not
+        # replace the live callable with an ErrorValue.
+        session = LiterateSession(context)
+        await session.step(lackpy_doc("read_file = 1 // 0"))
+        assert callable(session._kernel.lookup("read_file"))
+        assert not session.ledger.query(entry_type=SUPERSEDED, name="read_file")
+
+    @pytest.mark.asyncio
+    async def test_document_asserted_name_still_reifies_on_failed_rebind(
+        self, context
+    ):
+        # CONTRAST guard for the NEW-2 gate: once the DOCUMENT owns the name
+        # (version history exists), a failed re-bind still supersedes — the
+        # Finding-1 contract is unchanged.
+        result = await run_batch(context, lackpy_doc("x = 5", "x = 1 // 0"))
+        assert isinstance(result.metadata["variables"]["x"], ErrorValue)
+        assert result.metadata["ledger"].query(entry_type=SUPERSEDED, name="x")
+
+    @pytest.mark.asyncio
+    async def test_identity_rebind_before_later_failure_is_kept(self, context):
+        # NEW-4: `x = x` completed (line 1) before the failure (line 2).
+        # The identity delta can't see it; the failure line can.
+        session = LiterateSession(context)
+        await session.step(lackpy_doc("x = [1, 2, 3]"))
+        await session.step(lackpy_doc("x = x\nboom = 1 // 0"))
+        ns = session._kernel.get_namespace()
+
+        assert ns["x"] == [1, 2, 3]          # kept, not reified
+        assert isinstance(ns["boom"], ErrorValue)
+        # The completed identity rebind is recorded as kept work, and x's
+        # history is untouched (rebinding the identical object is not a new
+        # version — consistent with the success path's identity delta).
+        err = session.ledger.query(entry_type=ERROR_REIFIED, name="boom")
+        assert err and err[-1].detail["kept"] == ["x"]
+        assert len(session.versions.history("x")) == 1
+
+    @pytest.mark.asyncio
+    async def test_interned_equal_rebind_before_later_failure_is_kept(
+        self, context
+    ):
+        # Same signal for the subtler shape: re-binding an interned equal
+        # value (small int) is identity-invisible too.
+        result = await run_batch(
+            context, lackpy_doc("x = 5", "x = 5\nboom = 1 // 0")
+        )
+        assert result.metadata["variables"]["x"] == 5
+        assert isinstance(result.metadata["variables"]["boom"], ErrorValue)
+
+    @pytest.mark.asyncio
+    async def test_failed_rebind_at_the_binding_statement_still_reifies(
+        self, context
+    ):
+        # CONTRAST guard for the NEW-4 signal: when the failure IS the
+        # binding statement (`x = 1 // 0`), the bind did not complete —
+        # reified, exactly as before.
+        result = await run_batch(
+            context, lackpy_doc("x = [1]", "x = x\nx = 1 // 0")
+        )
+        assert isinstance(result.metadata["variables"]["x"], ErrorValue)

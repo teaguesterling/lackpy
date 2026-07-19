@@ -81,11 +81,13 @@ class ErrorValue:
     """A runtime failure reified as a value, carrying the exception info.
 
     Bound to the names a failed cell declared but did not successfully
-    (re)bind this pass — including a failed RE-binding of an already-known
-    name, whose prior value/hole is superseded (never silently kept stale).
-    Names the cell *did* bind before the error keep their real values
-    (completed work is never thrown away — the failure itself is what gets
-    recorded).
+    (re)bind this pass — including a failed RE-binding of a DOCUMENT-ASSERTED
+    name (one with version history), whose prior value/hole is superseded
+    (never silently kept stale).  Names the cell *did* bind before the error
+    keep their real values (completed work is never thrown away — the failure
+    itself is what gets recorded), and INJECTED names (params / tools /
+    environment, no document-asserted version) always keep their provided
+    values — a failed re-bind never clobbers what the document never owned.
     """
 
     name: str

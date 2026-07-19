@@ -39,10 +39,13 @@ step must sandbox it and must not promise rollback" signal.
 from __future__ import annotations
 
 import ast
+import contextvars
+import sys
 import tomllib
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from importlib.resources import files
-from typing import Mapping
+from typing import Iterator, Mapping
 
 from ...lang.grader import Grade
 
@@ -330,3 +333,145 @@ def _const_str(node: ast.expr) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
+
+
+# ---------------------------------------------------------------------------
+# Runtime effect OBSERVATION (CPython audit hooks)
+# ---------------------------------------------------------------------------
+#
+# The static classifier above answers "what does this source LOOK like it
+# does?".  This section answers a different question: "what did this cell
+# ACTUALLY DO when it ran?" — recorded via one process-global
+# ``sys.addaudithook`` that is inert except inside an :func:`observe_effects`
+# scope.  The reactive re-exec pass uses the answer as its effect-replay
+# gate: a dirtied dependent that was observed performing a world effect on
+# its first run is withheld from re-execution (strict mode).
+#
+# HONEST FRAMING — this is best-effort observation, not proof.  It sees
+# effects that flow through Python's audited APIs.  Known gaps, by design:
+#
+# * a C extension issuing raw syscalls raises no audit event;
+# * flags-based opens (``os.open``) are ignored (see ``_observe_audit_event``
+#   — counting them would false-positive the import machinery's bytecode-
+#   cache writes), so a raw ``os.open`` write is missed;
+# * an effect performed on a thread the cell spawned runs in that thread's
+#   own context, where no observation is active;
+# * observation records what the FIRST run did — a cell whose first run
+#   skipped its effectful branch (``if flag: write(...)``) observes pure.
+#
+# The sandbox + stdlib-limiting are the outer defense for those gaps; this
+# observer reduces effect-replay risk, it does not eliminate it.
+
+#: Audit events counted as WORLD EFFECTS, kept deliberately NARROW so that
+#: imports, read-opens, and compilation never false-positive.  ``open`` is
+#: handled separately (only write/append/create/update modes count).  Note
+#: the aliasing CPython applies: ``os.replace`` raises ``os.rename``;
+#: ``os.unlink`` raises ``os.remove``.
+_WORLD_EFFECT_EVENTS: frozenset[str] = frozenset({
+    "os.rename",
+    "os.remove",
+    "os.mkdir",
+    "os.rmdir",
+    "os.chmod",
+    "socket.connect",
+    "socket.bind",
+    "subprocess.Popen",
+    "os.system",
+})
+
+#: ``open`` mode characters that make an open a WRITE (w/a/x/+); a plain
+#: read (``'r'``, ``'rb'``) is not a world effect.
+_OPEN_WRITE_MODE_CHARS = frozenset("wax+")
+
+
+@dataclass
+class EffectObservation:
+    """What one observed scope (one cell execution) was SEEN to do.
+
+    ``events`` holds the deduplicated observed world-effect event tags
+    (``"open:w"``, ``"os.remove"``, ``"subprocess.Popen"``, ...); empty means
+    no world effect was observed — which, per the module notes above, is
+    best-effort evidence of purity, not proof.
+    """
+
+    events: set[str] = field(default_factory=set)
+
+    @property
+    def effectful(self) -> bool:
+        return bool(self.events)
+
+
+#: The currently-active observation, or ``None`` (hook inert).  A contextvar
+#: so concurrent sessions in different tasks/threads cannot cross-attribute
+#: each other's effects; cell execution itself is synchronous, so the scope
+#: set around ``execute_cell`` covers exactly that cell's work.
+_active_observation: contextvars.ContextVar[EffectObservation | None] = (
+    contextvars.ContextVar("lackpy_literate_effect_observation", default=None)
+)
+
+#: Audit hooks cannot be removed once added (CPython contract) — install
+#: exactly one, lazily, on first use, and guard against double-install.
+_audit_hook_installed = False
+
+
+def _observe_audit_event(event: str, args: tuple) -> None:
+    """The one process-global audit hook.  Inert unless a scope is active.
+
+    Must NEVER raise: an audit hook that raises aborts the audited operation
+    for the whole process, so any internal surprise fails open (the event is
+    simply not recorded — consistent with the best-effort contract).
+    """
+    obs = _active_observation.get()
+    if obs is None:
+        return
+    try:
+        if event == "open":
+            # open(path, mode, flags).  Count string modes containing any of
+            # w/a/x/+ only.  A non-string mode means a flags-based open
+            # (os.open and friends, including the import machinery's
+            # bytecode-cache writes) — ignored, per the module notes.
+            mode = args[1] if len(args) > 1 else None
+            if not isinstance(mode, str):
+                return
+            if _OPEN_WRITE_MODE_CHARS.isdisjoint(mode):
+                return
+            obs.events.add(f"open:{mode}")
+        elif event in _WORLD_EFFECT_EVENTS:
+            # Import machinery maintains __pycache__ via os.replace/os.rename
+            # of *.pyc files; a cell whose `import` compiles a module must
+            # not be tagged effectful for it.
+            if any(str(a).endswith(".pyc") for a in args):
+                return
+            obs.events.add(event)
+    except Exception:
+        return
+
+
+def _ensure_audit_hook() -> None:
+    global _audit_hook_installed
+    if _audit_hook_installed:
+        return
+    sys.addaudithook(_observe_audit_event)
+    _audit_hook_installed = True
+
+
+@contextmanager
+def observe_effects() -> Iterator[EffectObservation]:
+    """Observe world effects performed while the ``with`` body runs.
+
+    Lazily installs the process-global audit hook (once), activates a fresh
+    :class:`EffectObservation` for the current context, and deactivates it on
+    exit.  If scopes nest (they should not on the cell-execution path), the
+    inner scope's events propagate to the outer one on exit so no observed
+    effect is lost.
+    """
+    _ensure_audit_hook()
+    obs = EffectObservation()
+    token = _active_observation.set(obs)
+    try:
+        yield obs
+    finally:
+        _active_observation.reset(token)
+        outer = _active_observation.get()
+        if outer is not None:
+            outer.events |= obs.events

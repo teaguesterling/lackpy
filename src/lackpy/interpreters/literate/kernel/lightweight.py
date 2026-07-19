@@ -134,6 +134,17 @@ class LightweightKernel:
             err_out = stderr_capture.getvalue()
             if err_out:
                 captured = (captured + "\n" + err_out).strip()
+            # The SHALLOWEST "<cell>" frame in the traceback is the cell's
+            # top level — its line tells which top-level statement was
+            # executing when the failure raised (error reification uses this
+            # to keep completed rebinds the identity delta cannot see).
+            error_lineno: int | None = None
+            tb = e.__traceback__
+            while tb is not None:
+                if tb.tb_frame.f_code.co_filename == "<cell>":
+                    error_lineno = tb.tb_lineno
+                    break
+                tb = tb.tb_next
             return CellResult(
                 success=False,
                 output=captured or None,
@@ -141,6 +152,7 @@ class LightweightKernel:
                 error_phase="runtime",
                 namespace_delta={},
                 cell_index=cell_index,
+                error_lineno=error_lineno,
             )
         finally:
             if is_continue and "__literate_continue__" in self._namespace:

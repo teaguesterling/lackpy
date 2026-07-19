@@ -10,9 +10,11 @@ DIRTY (a ``dirty`` ledger entry each) and re-run in dependency order against the
 updated namespace, re-versioning (L1.3) and re-forgiving (L1.1/1.2/1.5) as
 needed.
 
-Effect-replay safety: only EFFECT-FREE (pure) dependents are re-run; a dependent
-with a world effect is marked dirty but withheld (``reexecuted=False``), so
-re-execution can never write a file twice.
+Effect-replay safety (strict mode, the default): every cell's first execution
+is OBSERVED through the audit-hook scope (``effects.observe_effects``); a
+dependent observed performing a world effect is marked dirty but withheld
+(``reexecuted=False`` + the observed events), so an observed effect is not
+replayed.  Best-effort, not proof — see the honest framing in ``effects.py``.
 
 These tests cover the batch/session path (``LiterateInterpreter._run_document``);
 the streaming driver is untouched.
@@ -240,8 +242,8 @@ class TestDirtySubgraphReexecution:
     async def test_effectful_dependent_is_dirtied_but_not_reexecuted(
         self, tmp_path
     ):
-        # Effect-replay guard: a dependent that WRITES a file is marked dirty
-        # but NOT re-run (its effect must not fire twice).
+        # Effect-replay guard (strict mode): a dependent OBSERVED writing a
+        # file on its first run is marked dirty but NOT re-run.
         context = ExecutionContext(base_dir=tmp_path)
         result = await _run(
             context,
@@ -254,7 +256,12 @@ class TestDirtySubgraphReexecution:
         assert len(dirty) == 1
         assert dirty[0].detail["cell_index"] == 1
         assert dirty[0].detail["reexecuted"] is False
-        assert "effectful" in dirty[0].detail["reason"]
+        assert dirty[0].detail["mode"] == "strict"
+        assert "observed to perform a world effect" in dirty[0].detail["reason"]
+        # The observed evidence is on the entry — the write open, at least.
+        assert any(
+            e.startswith("open:") for e in dirty[0].detail["observed_effects"]
+        )
         # The write happened exactly once (only a.txt exists — never b.txt).
         assert (tmp_path / "a.txt").exists()
         assert not (tmp_path / "b.txt").exists()
