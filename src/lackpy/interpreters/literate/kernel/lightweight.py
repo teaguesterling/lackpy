@@ -47,8 +47,33 @@ class LightweightKernel:
         if "__builtins__" not in self._namespace:
             import builtins
             self._namespace["__builtins__"] = builtins
+        # L7 fail-closed backstop: a failed startup self-test disables the
+        # kernel (see ..selftest.run_selftest).  While disabled, every
+        # execute_cell/inspect call returns a structured refusal instead of
+        # running — on EVERY path that holds this kernel, even one that
+        # ignores the self-test report.
+        self._disabled: str | None = None
+
+    def disable(self, reason: str) -> None:
+        """Disable execution permanently (fail-closed).  ``reason`` is the
+        legible explanation every refused call carries."""
+        self._disabled = reason
+
+    @property
+    def disabled(self) -> str | None:
+        """The disable reason, or ``None`` while the kernel accepts work."""
+        return self._disabled
 
     def execute_cell(self, cell: Cell, cell_index: int) -> CellResult:
+        if self._disabled is not None:
+            return CellResult(
+                success=False,
+                output=None,
+                error=f"kernel disabled: {self._disabled}",
+                error_phase="disabled",
+                namespace_delta={},
+                cell_index=cell_index,
+            )
         compiler = _COMPILERS.get(cell.cell_type)
         if compiler is None:
             return CellResult(
@@ -165,6 +190,8 @@ class LightweightKernel:
         self._namespace[name] = value
 
     def inspect(self, expr: str) -> str:
+        if self._disabled is not None:
+            return f"kernel disabled: {self._disabled}"
         try:
             result = eval(expr, self._namespace)  # noqa: S307
             return repr(result)
@@ -182,6 +209,9 @@ class LightweightKernel:
         return scope
 
     def restart(self) -> None:
+        # Deliberately does NOT clear a self-test disable: broken evaluation
+        # is not a namespace problem, so a restart cannot fix it (sticky
+        # fail-closed).
         tools = {k: v for k, v in self._namespace.items() if k in self._initial_keys}
         self._namespace.clear()
         self._namespace.update(tools)

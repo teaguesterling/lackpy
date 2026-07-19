@@ -95,10 +95,31 @@ class LiterateInterpreter:
 
         Uses LightweightKernel directly (not StreamingDriver) because the
         batch path doesn't need streaming, recovery, or plugin orchestration.
+
+        L7: before the fresh kernel accepts this document, it must PASS the
+        startup self-test (:func:`.selftest.run_selftest`) — prove it can
+        evaluate a known value and reify each forgiveness class, and that a
+        render reparses.  A failed self-test disables the kernel and returns
+        the legible structured refusal instead of running anything (fail
+        closed: refusal, not garbage).
         """
         namespace = _build_namespace(context)
         kernel = LightweightKernel(namespace=namespace)
-        return await self._run_document(program, context, kernel)
+        from .selftest import run_selftest
+
+        start = time.perf_counter()
+        report = run_selftest(kernel, self)
+        if not report.ok:
+            return InterpreterExecutionResult(
+                success=False,
+                error=report.describe(),
+                output_format="none",
+                duration_ms=(time.perf_counter() - start) * 1000,
+                metadata={"completed": False, "selftest": report.summary()},
+            )
+        result = await self._run_document(program, context, kernel)
+        result.metadata["selftest"] = report.summary()
+        return result
 
     async def _run_document(
         self,
