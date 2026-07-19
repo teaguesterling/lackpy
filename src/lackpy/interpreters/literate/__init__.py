@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ..base import (
@@ -47,6 +48,7 @@ from .kernel.forgiveness import (
     reified_failures,
 )
 from .kernel.ledger import Ledger
+from .kernel.reactive import DIRTY, DependencyGraph
 from .kernel.static_analysis import BUILTIN_NAMES, collect_bindings, collect_names
 from .kernel.versions import SUPERSEDED, BindingVersions, value_kind
 from .parser import Cell, parse
@@ -199,7 +201,19 @@ class LiterateInterpreter:
         continue_requested = False
         assigned_names: set[str] = set()
 
+        # L1.4: the derived dependency graph for this document (reactive
+        # dirty-subgraph re-execution).  Built from the SAME static def/ref
+        # sets the forgiveness pre-pass uses (collect_names/collect_bindings) —
+        # no IR, a side-structure over the source-string cells.  Populated for
+        # every cell below (executed or reified) so the post-loop closure is
+        # complete; consumed by the re-exec pass after the linear walk.
+        graph = DependencyGraph()
+        effects_map = _gate_effects_map(context)
+
         for index, cell in enumerate(parsed.cells):
+            refs, binds = _static_ref_bind_sets(cell)
+            graph.add_cell(index, refs, binds)
+
             # Unavailable-source reification (L1.5, binding layer): a cell the
             # ceiling gate refuses binds Unavailable values for the names it
             # would have bound, is ledgered (`source_unavailable`), and is
@@ -215,69 +229,24 @@ class LiterateInterpreter:
                 )
                 continue
 
-            # Forgiveness pre-pass (L1.1, binding layer): a cell whose names
-            # cannot resolve — unknown names, or references to already-bound
-            # holes/error values — binds typed holes, is ledgered, and is
-            # SKIPPED (never executed, so a hole can't flow into arithmetic).
-            reified = _reify_holes_for_cell(
+            outcome = self._run_resolved_cell(
                 cell, index, kernel, ledger, versions, assigned_names
             )
-            if reified is not None:
-                output_parts.append(reified)
-                continue
-
-            known_before = kernel.known_names()
-            result = kernel.execute_cell(cell, index)
-
-            if not result.success:
-                # L1.2 (binding layer): the failure is reified — an error
-                # value bound to the names the cell declared but did not
-                # reach, one `error_reified` ledger entry per bound name
-                # (nothing silent) — and the run CONTINUES. No abort, no
-                # rollback: partial output and partial bindings are completed
-                # work and stand.
-                if result.output:
-                    output_parts.append(result.output)
-                output_parts.append(
-                    _reify_error_for_cell(
-                        cell, index, result, kernel, ledger, versions,
-                        assigned_names, known_before,
-                    )
-                )
-                continue
-
-            if result.output:
-                output_parts.append(result.output)
-
-            assigned_names.update(result.namespace_delta.keys())
-
-            # L1.3 (binding layer): every name this cell bound is a new
-            # immutable version; a name with a prior version is a
-            # RE-ASSERTION — the prior version is marked superseded and one
-            # ``superseded`` ledger entry records the transition (nothing
-            # silent).  The kernel's namespace_delta is the runtime record of
-            # what the cell actually bound (identity-based, like all kernel
-            # delta tracking) — an assertion that rebinds the identical
-            # object is unobservable and not versioned.
-            cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
-            for name in sorted(result.namespace_delta):
-                if name.startswith("_"):
-                    continue  # __continue_requested__ / internals, not bindings
-                _record_assertion(
-                    name, result.namespace_delta[name], versions, ledger, cell_detail
-                )
-
-            if result.namespace_delta.get("__continue_requested__"):
+            output_parts.append(outcome.rendered)
+            if outcome.continue_requested:
                 continue_requested = True
-                ledger.record(
-                    "continue_requested",
-                    detail={"cell_index": index, "cell_type": cell.cell_type},
-                )
-            else:
-                ledger.record(
-                    "executed",
-                    detail={"cell_index": index, "cell_type": cell.cell_type},
-                )
+
+        # L1.4 re-execution pass (batch/session path only — streaming untouched).
+        # A name re-asserted during the linear walk (an L1.3 `superseded`
+        # entry) makes its transitive dependents stale; re-run ONLY those, in
+        # dependency order, against the now-updated namespace.  Composition is
+        # free: a re-exec that now hits an unknown name / error / over-ceiling
+        # source re-reifies a Hole / ErrorValue / Unavailable and re-versions
+        # through the very same per-cell pipeline the linear walk used.
+        self._reexecute_dirty_subgraph(
+            parsed.cells, graph, kernel, ledger, versions, assigned_names,
+            effects_map, run_mark, output_parts,
+        )
 
         elapsed = (time.perf_counter() - start) * 1000
 
@@ -319,6 +288,206 @@ class LiterateInterpreter:
                 },
             },
         )
+
+    def _run_resolved_cell(
+        self,
+        cell: Cell,
+        index: int,
+        kernel: LightweightKernel,
+        ledger: Ledger,
+        versions: BindingVersions,
+        assigned_names: set[str],
+    ) -> _CellOutcome:
+        """Run one NON-GATED cell through the full forgiveness pipeline (L1.1–1.3).
+
+        The single per-cell body shared by the linear walk AND the L1.4 re-exec
+        pass: forgiveness pre-pass (L1.1 typed holes) → execute → error
+        reification (L1.2) → version every binding (L1.3).  Sharing it is what
+        makes dirty re-execution COMPOSE with forgiveness for free — a re-run
+        that now hits an unknown name or raises reifies + versions exactly as a
+        first run does, no special-casing.  (The ceiling gate / L1.5
+        unavailable path stays in the caller: a gated cell is effectful, so the
+        re-exec pass never re-runs it.)
+
+        Returns the rendered fragment for this cell and whether it requested a
+        ``@continue`` pause.  Mutates ``kernel`` / ``ledger`` / ``versions`` /
+        ``assigned_names`` in place, like the original inline body.
+        """
+        # Forgiveness pre-pass (L1.1): a cell whose names cannot resolve binds
+        # typed holes, is ledgered, and is SKIPPED (never executed, so a hole
+        # can't flow into arithmetic).
+        reified = _reify_holes_for_cell(
+            cell, index, kernel, ledger, versions, assigned_names
+        )
+        if reified is not None:
+            return _CellOutcome(rendered=reified, continue_requested=False)
+
+        known_before = kernel.known_names()
+        result = kernel.execute_cell(cell, index)
+
+        if not result.success:
+            # L1.2: the failure is reified — an error value bound to the names
+            # the cell declared but did not reach — and the run CONTINUES. No
+            # abort, no rollback: partial output and bindings stand.
+            parts: list[str] = []
+            if result.output:
+                parts.append(result.output)
+            parts.append(
+                _reify_error_for_cell(
+                    cell, index, result, kernel, ledger, versions,
+                    assigned_names, known_before,
+                )
+            )
+            return _CellOutcome(rendered="".join(parts), continue_requested=False)
+
+        parts = []
+        if result.output:
+            parts.append(result.output)
+
+        assigned_names.update(result.namespace_delta.keys())
+
+        # L1.3: every name this cell bound is a new immutable version; a name
+        # with a prior version is a RE-ASSERTION — the prior version is marked
+        # superseded and one ``superseded`` ledger entry records the transition
+        # (nothing silent).  namespace_delta is identity-based, so rebinding the
+        # identical object is unobservable and not versioned.
+        cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
+        for name in sorted(result.namespace_delta):
+            if name.startswith("_"):
+                continue  # __continue_requested__ / internals, not bindings
+            _record_assertion(
+                name, result.namespace_delta[name], versions, ledger, cell_detail
+            )
+
+        cont = bool(result.namespace_delta.get("__continue_requested__"))
+        ledger.record(
+            "continue_requested" if cont else "executed", detail=cell_detail
+        )
+        return _CellOutcome(rendered="".join(parts), continue_requested=cont)
+
+    def _reexecute_dirty_subgraph(
+        self,
+        cells: list[Cell],
+        graph: DependencyGraph,
+        kernel: LightweightKernel,
+        ledger: Ledger,
+        versions: BindingVersions,
+        assigned_names: set[str],
+        effects_map: dict[str, ToolEffect],
+        run_mark: int,
+        output_parts: list[str],
+    ) -> None:
+        """Re-execute the stale dependents of this run's re-assertions (L1.4).
+
+        A name re-asserted during the linear walk shows up as an L1.3
+        ``superseded`` ledger entry in this run's slice.  Those re-asserted
+        names seed :meth:`DependencyGraph.dirty_closure`, which returns the
+        transitive dependent cells in dependency order.  Each dirtied cell is
+        LEDGERED (a ``dirty`` entry — nothing silent) and, when it is safe to
+        re-run, executed again through the shared per-cell pipeline so its
+        bindings refresh against the updated namespace (and re-version / re-
+        forgive as needed).
+
+        EFFECT-REPLAY (the key risk, per the brief).  Re-running a cell's source
+        replays its side effects — a dependent that writes a file would write it
+        twice.  Mitigation: a dirtied cell is re-run ONLY if it is statically
+        EFFECT-FREE (world-coupling grade ``w == 0`` under the same effects map
+        the ceiling gate uses).  Any cell with a read/write/exec effect, or an
+        unanalyzable escape hatch (``import``/``open``/raw ``exec``), is marked
+        dirty but NOT re-run — its ``dirty`` entry records
+        ``reexecuted=False`` + the reason.  Pure cells are idempotent under
+        re-execution (recomputing ``b = a + 1`` cannot leak an effect), so this
+        is a SAFE partial reactive engine — not the observe-only fallback, not a
+        forced unsafe one.  (Caveat, documented: this catches WORLD effects, not
+        in-memory mutation like ``lst.append(x)``, which the static effect
+        classifier and the kernel's identity-based delta both miss.)
+
+        RENDERING.  Re-execution ANNOTATES, never rewrites (the L2 refusal law):
+        the original render stands, and each re-run appends one kernel-channel
+        note rather than re-emitting the cell's recomputed stdout (so a
+        re-executed ``print`` cannot double its output).  The authoritative
+        record of what the re-exec did — refreshed bindings, new versions, any
+        re-reified hole/error — is the ledger + version history.
+        """
+        run_slice = ledger.entries()[run_mark:]
+        reasserted = {
+            e.name for e in run_slice if e.entry_type == SUPERSEDED and e.name
+        }
+        if not reasserted:
+            return
+
+        for index, trigger_names in graph.dirty_closure(reasserted):
+            triggered_by = sorted(trigger_names)
+            pure = _is_effect_free(cells[index], effects_map)
+            detail = {
+                "cell_index": index,
+                "cell_type": cells[index].cell_type,
+                "triggered_by": triggered_by,
+                "reexecuted": pure,
+            }
+            if not pure:
+                # Withheld to avoid replaying a world effect — surfaced, never
+                # silently re-run.
+                detail["reason"] = (
+                    "effectful — re-execution would replay the cell's effects"
+                )
+                ledger.record(DIRTY, name=None, detail=detail)
+                continue
+
+            ledger.record(DIRTY, name=None, detail=detail)
+            self._run_resolved_cell(
+                cells[index], index, kernel, ledger, versions, assigned_names
+            )
+            output_parts.append(
+                kernel_note(
+                    f"re-executed cell {index} "
+                    f"(dirty: {', '.join(triggered_by)})"
+                )
+                + "\n"
+            )
+
+
+@dataclass(frozen=True)
+class _CellOutcome:
+    """The result of running one cell body (:meth:`_run_resolved_cell`)."""
+
+    rendered: str
+    continue_requested: bool
+
+
+def _static_ref_bind_sets(cell: Cell) -> tuple[set[str], set[str]]:
+    """This cell's ``(referenced_names, bound_names)`` for the L1.4 graph.
+
+    Reuses the SAME static extraction the forgiveness pre-pass uses
+    (``collect_names`` for references, ``collect_bindings`` for module-level
+    bindings) over the cell's compiled source.  A cell that doesn't compile or
+    parse (unknown type / syntax error) contributes empty sets — it cannot
+    participate in name-flow dependencies, and its error is reported elsewhere.
+    """
+    try:
+        tree = ast.parse(compile_cell(cell))
+    except (ValueError, SyntaxError):
+        return set(), set()
+    _defined, referenced = collect_names(tree)
+    return referenced, collect_bindings(tree)
+
+
+def _is_effect_free(cell: Cell, effects_map: dict[str, ToolEffect]) -> bool:
+    """Whether ``cell`` is safe to RE-EXECUTE without replaying a world effect.
+
+    True iff the cell's statically-classified world-coupling grade is 0 (pure):
+    no read/write/exec tool call and no unanalyzable escape hatch
+    (``import``/``open``/raw ``exec``, which the classifier forces to grade 3).
+    Graded against the SAME effects map the ceiling gate uses, so an injected
+    write-capable tool can't slip through as pure.  Conservative by design — a
+    read-only cell (grade 1) is also withheld, even though re-reading is
+    idempotent — because the re-exec pass must never replay an effect.
+    """
+    try:
+        src = compile_cell(cell)
+    except ValueError:
+        return False
+    return classify_effects(src, tool_effects=effects_map).grade.w == 0
 
 
 def _record_assertion(
