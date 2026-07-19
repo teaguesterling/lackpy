@@ -92,6 +92,46 @@ class TestExp1FeedbackLoopClosed:
         # 1's real ledger note), the round-3 imitation added no second copy.
         assert final.count("hole: 'numerator' unbound") == 1
 
+    @pytest.mark.asyncio
+    async def test_concatenated_multiround_render_reparses_cleanly(self, context):
+        # The claim tested at the boundary we actually ship: the CONCATENATED
+        # multi-round `session.rendered` (not a single-round proxy) re-parses to
+        # the same cell structure — every authored code fence survives, no
+        # [kernel] channel text becomes a cell, and no note re-prints as prose.
+        session = LiterateSession(context)
+        await session.step("Round one prose.\n\n```lackpy\na = missing + 1\n```")
+        await session.step("Round two prose.\n\n```lackpy\nmissing = 5\n```")
+        doc = session.rendered
+
+        cells = parse(doc).cells
+        code = [c for c in cells if c.cell_type != "prose"]
+        # Both authored fences survive as code cells (no gluing / no fence loss).
+        assert [c.content for c in code] == ["a = missing + 1", "missing = 5"]
+        # Round boundary did not glue the two authored prose lines into one cell.
+        prose = [c.content for c in cells if c.cell_type == "prose"]
+        assert any("Round one prose." in p and "Round two prose." not in p
+                   for p in prose)
+        # No channel text and no note text leaked into any cell (never re-prints).
+        assert all("[kernel]" not in c.content for c in cells)
+        assert all("hole:" not in c.content and "superseded:" not in c.content
+                   for c in cells)
+
+        # Re-running the whole rendered doc in a FRESH session: no [kernel] note
+        # STACKS (each distinct note appears at most once) and the holed cell's
+        # SOURCE re-parses as code — it re-holes / gets reactively filled, it
+        # never re-prints the prior note as prose. (The count may LEGITIMATELY
+        # rise: collapsing rounds lets L1.4 dirty re-exec fill `a` — that is the
+        # reactive engine resolving more, not poisoning.)
+        fresh = LiterateSession(context)
+        await fresh.step(doc)
+        rerun = fresh.rendered
+        for note in ("hole: 'missing' unbound",
+                     "hole: 'a' blocked by missing"):
+            assert rerun.count(note) <= 1  # no duplicate stacking of any note
+        # The holed cell's source survived as code (not re-printed as prose).
+        assert any(c.cell_type != "prose" and "a = missing + 1" in c.content
+                   for c in parse(rerun).cells)
+
 
 class TestFlatStdoutWouldStack:
     """Red→green: the pre-wiring flat-stdout feedback bakes printed output in

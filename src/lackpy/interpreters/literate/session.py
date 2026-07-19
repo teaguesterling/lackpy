@@ -440,8 +440,14 @@ class LiterateSession:
         stripped by the parser (never re-printed) and the overlap guard cuts an
         echoed tail, so notes do not stack across rounds (the L2 round-trip
         law). Live values reach the writer through :attr:`scope`, not by
-        interpolating them into this document."""
-        return "".join(self._rendered_parts)
+        interpolating them into this document.
+
+        Rounds are joined by a BLANK LINE (each fragment already ends in one
+        ``\\n``; the join adds the second) so a round boundary is a real
+        markdown block break — two authored prose rounds never glue into one
+        cell, and the concatenated document re-parses to the same cell
+        structure."""
+        return "\n".join(self._rendered_parts)
 
     @property
     def scope(self) -> dict[str, str]:
