@@ -50,9 +50,9 @@ _BIND_THROUGH_HOLES = (
     "unbound⟩` — and keeps going; a cell that reads a hole becomes a "
     "chained hole (`⟨name: blocked by …⟩`) instead of crashing. "
     "So you may reference results before you define them. When you later "
-    "assert the name, the kernel supersedes the hole with the real value and "
-    "re-runs only the cells that depended on it — the gap is filled, not "
-    "re-typed by you."
+    "assert the name, the kernel supersedes the hole with the real value (a "
+    "new version) and re-runs the dependent cells it can safely replay — you "
+    "close the gap by asserting the name, not by re-typing earlier cells."
 )
 
 _KERNEL_AUTHORITY = (
@@ -67,10 +67,10 @@ _KERNEL_AUTHORITY = (
 
 _PAUSE_PROTOCOL = (
     "- **Pause with `@continue`.** A ```lackpy @continue`` block ends the "
-    "current emission segment: the kernel evaluates what you have gathered, "
-    "splices its results back into your document, and you resume writing with "
-    "them in view. Pair it with silent `@gather` blocks when you need to see "
-    "data before you narrate it."
+    "current emission segment: the kernel evaluates what you have gathered "
+    "and returns the results to you, and you resume the document with them in "
+    "view. Pair it with silent `@gather` blocks when you need to see data "
+    "before you narrate it."
 )
 
 _VISIBLE_BUDGET = (
@@ -78,7 +78,7 @@ _VISIBLE_BUDGET = (
     "the `[kernel]` channel — segment index, pause budget remaining, "
     "observations delivered (ledger entries), and a note that the kernel "
     "retains full history. Read it: it is your live view of how many pauses "
-    "remain, so you never have to track that yourself."
+    "remain."
 )
 
 #: The four L5 affordances, assembled in fixed order. Swap any clause constant
