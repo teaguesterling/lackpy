@@ -51,9 +51,12 @@ from collections import defaultdict
 #: Ledger entry type for a dirtied cell (L1.4): a cell marked stale by an
 #: upstream re-assertion.  ``detail`` carries ``cell_index``, ``triggered_by``
 #: (the re-asserted upstream names), and ``reexecuted`` (whether the cell was
-#: actually re-run — False when it was withheld because re-execution would
-#: replay a world effect).  Nothing silent: every dirtied cell is ledgered even
-#: when it is not re-run.
+#: actually re-run — False, with a ``reason``, when it was withheld because it
+#: could not be proven effect-free).  A re-run cell's entry is recorded AFTER
+#: the re-run and carries ``outcome`` — ``"clean"`` for a clean refresh,
+#: ``"reified"`` (plus the ``reified`` names) when the re-run failed and was
+#: reified through the forgiveness pipeline.  Nothing silent: every dirtied
+#: cell is ledgered even when it is not re-run.
 DIRTY = "dirty"
 
 

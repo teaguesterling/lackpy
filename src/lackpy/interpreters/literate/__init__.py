@@ -426,17 +426,26 @@ class LiterateInterpreter:
 
         EFFECT-REPLAY (the key risk, per the brief).  Re-running a cell's source
         replays its side effects — a dependent that writes a file would write it
-        twice.  Mitigation: a dirtied cell is re-run ONLY if it is statically
-        EFFECT-FREE (world-coupling grade ``w == 0`` under the same effects map
-        the ceiling gate uses).  Any cell with a read/write/exec effect, or an
-        unanalyzable escape hatch (``import``/``open``/raw ``exec``), is marked
-        dirty but NOT re-run — its ``dirty`` entry records
-        ``reexecuted=False`` + the reason.  Pure cells are idempotent under
-        re-execution (recomputing ``b = a + 1`` cannot leak an effect), so this
-        is a SAFE partial reactive engine — not the observe-only fallback, not a
-        forced unsafe one.  (Caveat, documented: this catches WORLD effects, not
-        in-memory mutation like ``lst.append(x)``, which the static effect
-        classifier and the kernel's identity-based delta both miss.)
+        twice.  Mitigation: a dirtied cell is re-run ONLY if it can be PROVEN
+        effect-free (:func:`_reexec_withhold_reason` — world-coupling grade
+        ``w == 0`` under the same effects map the ceiling gate uses, AND
+        nothing the classifier cannot analyze: no attribute/subscript call, no
+        context manager, no decorator application, no ``await``).  Anything
+        else is marked dirty but NOT re-run — its ``dirty`` entry records
+        ``reexecuted=False`` + the reason.  Provably-pure cells are idempotent
+        under re-execution (recomputing ``b = a + 1`` cannot leak an effect),
+        so this is a SAFE partial reactive engine — not the observe-only
+        fallback, not a forced unsafe one.  (Caveat, documented: this catches
+        WORLD effects, not in-memory mutation like ``lst.append(x)`` — though
+        the bare-name-calls-only rule now withholds that too — which the
+        kernel's identity-based delta misses.)
+
+        TRUTHFUL LEDGER.  The ``dirty`` entry for a re-executed cell is
+        recorded AFTER the re-run and reports what actually happened:
+        ``outcome="clean"`` for a clean refresh, ``outcome="reified"`` (plus
+        the reified names) when the re-run raised / re-holed and the shared
+        pipeline reified the failure.  It never claims a clean
+        ``reexecuted=True`` for a re-run that failed.
 
         RENDERING.  Re-execution ANNOTATES, never rewrites (the L2 refusal law):
         the original render stands, and each re-run appends one kernel-channel
@@ -454,33 +463,38 @@ class LiterateInterpreter:
 
         for index, trigger_names in graph.dirty_closure(reasserted):
             triggered_by = sorted(trigger_names)
-            pure = _is_effect_free(cells[index], effects_map)
             detail = {
                 "cell_index": index,
                 "cell_type": cells[index].cell_type,
                 "triggered_by": triggered_by,
-                "reexecuted": pure,
             }
-            if not pure:
-                # Withheld to avoid replaying a world effect — surfaced, never
-                # silently re-run.
-                detail["reason"] = (
-                    "effectful — re-execution would replay the cell's effects"
-                )
+            withhold = _reexec_withhold_reason(cells[index], effects_map)
+            if withhold is not None:
+                # Withheld to avoid replaying a (possible) world effect —
+                # surfaced, never silently re-run.
+                detail["reexecuted"] = False
+                detail["reason"] = withhold
                 ledger.record(DIRTY, name=None, detail=detail)
                 continue
 
-            ledger.record(DIRTY, name=None, detail=detail)
+            # Re-run first, record after: the dirty entry must report what
+            # the re-execution actually DID, not a precomputed prediction.
+            cell_mark = len(ledger.entries())
             self._run_resolved_cell(
                 cells[index], index, kernel, ledger, versions, assigned_names
             )
-            output_parts.append(
-                kernel_note(
-                    f"re-executed cell {index} "
-                    f"(dirty: {', '.join(triggered_by)})"
-                )
-                + "\n"
+            reified = reified_failures(ledger.entries()[cell_mark:])
+            detail["reexecuted"] = True
+            detail["outcome"] = "reified" if reified else "clean"
+            if reified:
+                detail["reified"] = sorted({e.name for e in reified if e.name})
+            ledger.record(DIRTY, name=None, detail=detail)
+            note = (
+                f"re-executed cell {index} (dirty: {', '.join(triggered_by)})"
             )
+            if reified:
+                note += " — failure reified"
+            output_parts.append(kernel_note(note) + "\n")
 
 
 @dataclass(frozen=True)
@@ -508,22 +522,62 @@ def _static_ref_bind_sets(cell: Cell) -> tuple[set[str], set[str]]:
     return referenced, collect_bindings(tree)
 
 
-def _is_effect_free(cell: Cell, effects_map: dict[str, ToolEffect]) -> bool:
-    """Whether ``cell`` is safe to RE-EXECUTE without replaying a world effect.
+def _reexec_withhold_reason(
+    cell: Cell, effects_map: dict[str, ToolEffect]
+) -> str | None:
+    """Why ``cell`` must be WITHHELD from dirty re-execution, or ``None``.
 
-    True iff the cell's statically-classified world-coupling grade is 0 (pure):
-    no read/write/exec tool call and no unanalyzable escape hatch
-    (``import``/``open``/raw ``exec``, which the classifier forces to grade 3).
-    Graded against the SAME effects map the ceiling gate uses, so an injected
-    write-capable tool can't slip through as pure.  Conservative by design — a
-    read-only cell (grade 1) is also withheld, even though re-reading is
-    idempotent — because the re-exec pass must never replay an effect.
+    Fail-safe effect-replay gate: a dirtied cell is re-executed ONLY when it
+    can be PROVEN effect-free.  Two layers, both required:
+
+    * the static effect classifier must grade it pure (world-coupling
+      ``w == 0`` against the SAME effects map the ceiling gate uses, so an
+      injected write-capable tool can't slip through — and a read-only cell
+      is withheld too, because the re-exec pass must never replay an effect);
+    * the cell must contain nothing the classifier cannot analyze.  The
+      classifier attributes effects to BARE-NAME calls only, so an
+      attribute/subscript call (``pathlib.Path(p).write_text(...)``), a
+      context manager, a decorator application, or an ``await`` could hide a
+      world effect behind a "pure" grade.  Any such construct withholds the
+      cell.
+
+    Withholding too much is safe — the ``dirty`` entry records the reason,
+    nothing silent.  Re-running a hidden effect is not.
     """
     try:
         src = compile_cell(cell)
     except ValueError:
-        return False
-    return classify_effects(src, tool_effects=effects_map).grade.w == 0
+        return "cell does not compile — cannot prove effect-free"
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return "cell does not parse — cannot prove effect-free"
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and not isinstance(node.func, ast.Name):
+            return (
+                "call target is not a bare name — potentially effectful, "
+                "cannot prove effect-free"
+            )
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            return (
+                "context manager entry/exit is potentially effectful — "
+                "cannot prove effect-free"
+            )
+        if (
+            isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            )
+            and node.decorator_list
+        ):
+            return (
+                "decorator application is potentially effectful — "
+                "cannot prove effect-free"
+            )
+        if isinstance(node, ast.Await):
+            return "await is potentially effectful — cannot prove effect-free"
+    if classify_effects(src, tool_effects=effects_map).grade.w != 0:
+        return "effectful — re-execution would replay the cell's effects"
+    return None
 
 
 def _record_assertion(
@@ -581,6 +635,8 @@ def _annotation_text(entry: LedgerEntry) -> str | None:
     if et == DIRTY:
         triggered = ", ".join(entry.detail.get("triggered_by") or [])
         if entry.detail.get("reexecuted"):
+            if entry.detail.get("outcome") == "reified":
+                return f"re-executed (dirty: {triggered}) — failure reified"
             return f"re-executed (dirty: {triggered})"
         reason = entry.detail.get("reason", "withheld")
         return f"dirty (not re-executed: {reason}; triggered by {triggered})"
@@ -729,11 +785,20 @@ def _reify_error_for_cell(
     The failed :class:`CellResult` becomes ledger entries + bound values
     instead of an abort:
 
-    * names the cell declared but did NOT reach bind an :class:`ErrorValue`
-      carrying the exception info — one ``error_reified`` entry per name;
-    * names the cell bound *before* the error keep their real values
+    * names the cell declared but did NOT successfully (re)bind THIS PASS
+      bind an :class:`ErrorValue` carrying the exception info — one
+      ``error_reified`` entry per name.  This includes a failed RE-binding of
+      an already-known name: keeping the prior value would be a silent stale
+      success, so the failure SUPERSEDES it (value→error / hole→error, one
+      L1.3 ``superseded`` entry via the normal versioning choke point);
+    * names the cell actually bound *before* the error keep their real values
       (completed work is kept; the kernel executes in place and no longer
-      rolls anything back) — recorded in the entry's ``kept`` detail;
+      rolls anything back) — recorded in the entry's ``kept`` detail.  For an
+      already-known name, "actually bound" is observed the same way the
+      kernel's delta tracking observes everything: by identity against the
+      recorded current version (rebinding the identical object is
+      unobservable and counts as not rebound — consistent with
+      ``namespace_delta`` on the success path);
     * a cell that binds nothing (a bare statement, a syntax error, an unknown
       cell type) still gets one ``error_reified`` entry (``name=None``) —
       nothing silent.
@@ -759,20 +824,46 @@ def _reify_error_for_cell(
         except (ValueError, SyntaxError):
             bindings = set()
 
+    # Partition the cell's intended bindings against KNOWN_BEFORE (the
+    # snapshot taken before this cell ran), not the post-failure namespace:
+    # a name that already existed is only "kept" if this cell observably
+    # rebound it before failing.  Partitioning on the post-failure namespace
+    # was the stale-keep defect — an already-known name always looked
+    # "kept" and a failed re-assertion silently retained the prior value.
     known = kernel.known_names()
-    missing = sorted(n for n in bindings if n not in known)
-    kept = sorted(n for n in bindings if n in known)
+    reify: list[str] = []
+    kept: list[str] = []
+    for name in sorted(bindings):
+        if name not in known_before:
+            # Fresh name: kept iff the cell bound it before the failure
+            # (it is in the namespace now but was not before).
+            if name in known:
+                kept.append(name)
+            else:
+                reify.append(name)
+        else:
+            # Re-binding an already-known name.  Observed-rebound (live value
+            # differs, by identity, from the recorded current version) →
+            # completed work, kept.  Otherwise the re-bind never completed —
+            # reify, superseding the prior value/hole.  An environment name
+            # with no version history cannot be observed either way; err
+            # toward reifying the failure rather than silent staleness.
+            current = versions.current(name)
+            if current is not None and current.value is not kernel.lookup(name):
+                kept.append(name)
+            else:
+                reify.append(name)
 
     cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
-    if missing:
-        for name in missing:
+    if reify:
+        for name in reify:
             error_value = ErrorValue(name=name, error=error, error_phase=phase)
             kernel.bind(name, error_value)
             _record_assertion(name, error_value, versions, ledger, cell_detail)
             ledger.record(
                 ERROR_REIFIED, name=name, detail={**base_detail, "kept": kept}
             )
-        assigned_names.update(missing)
+        assigned_names.update(reify)
     else:
         ledger.record(ERROR_REIFIED, name=None, detail={**base_detail, "kept": kept})
     # Partial bindings the cell completed before failing surface as variables.
@@ -796,8 +887,8 @@ def _reify_error_for_cell(
             _record_assertion(name, live, versions, ledger, cell_detail)
 
     note = f"error: {error}"
-    if missing:
-        note += f" — bound as error value: {', '.join(missing)}"
+    if reify:
+        note += f" — bound as error value: {', '.join(reify)}"
     return kernel_note(note) + "\n"
 
 

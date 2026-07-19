@@ -432,3 +432,159 @@ class TestTwoLayerComposition:
         }
         for benign in (SUPERSEDED, DIRTY, "executed", "continue_requested"):
             assert benign not in FORGIVENESS_ENTRY_TYPES
+
+
+class TestReassertionFailureConformance:
+    """Failure on RE-assertion + failing/withheld re-exec (review findings 1–3).
+
+    Adversarial-review coverage (2026-07 review): the green suite never
+    exercised a cell that FAILS while re-binding an already-known name, nor a
+    dirty re-exec that fails.  The contract under the two-layer design:
+
+    * a failed (re)bind reifies as an :class:`ErrorValue` that SUPERSEDES the
+      prior value/hole (L1.3 — value→error / hole→error is a versioned
+      transition, never a silent stale keep), with a NAMED ``error_reified``
+      entry, and downstream cells chain off it (L1.1);
+    * work the failed cell completed before raising is still kept;
+    * the ``dirty`` entry reports the re-exec's ACTUAL outcome (``clean`` /
+      ``reified``), never a clean-refresh claim for a failed re-run;
+    * a dirtied cell is re-executed only when PROVABLY effect-free — an
+      attribute-call write (invisible to the bare-name effect classifier) is
+      withheld, so a world effect can never fire twice.
+    """
+
+    @pytest.mark.asyncio
+    async def test_error_on_reasserted_known_name_reifies_and_chains(
+        self, context
+    ):
+        # Linear path: x = 5, then a failing re-assert, then a dependent.
+        result = await run_batch(
+            context, lackpy_doc("x = 5", "x = 1 // 0", "z = x + 1")
+        )
+        ledger = result.metadata["ledger"]
+        versions = result.metadata["versions"]
+        variables = result.metadata["variables"]
+
+        # x reifies as an ErrorValue — the stale 5 must not survive.
+        assert isinstance(variables["x"], ErrorValue)
+        assert "ZeroDivisionError" in variables["x"].error
+
+        # L1.3 composition: value→error is a versioned supersession.
+        hist = versions.history("x")
+        assert [type(v.value).__name__ for v in hist] == ["int", "ErrorValue"]
+        assert hist[0].superseded_by == hist[1].version
+        sup = ledger.query(entry_type=SUPERSEDED, name="x")
+        assert sup and sup[-1].detail["prior"] == "value"
+
+        # The error_reified entry NAMES x — never name=None for a real bind.
+        err = ledger.query(entry_type=ERROR_REIFIED, name="x")
+        assert err and err[-1].detail["kept"] == []
+
+        # L1.1 composition: downstream chains off the reified error.
+        assert isinstance(variables["z"], Hole)
+        assert "x" in variables["z"].blocked_by
+        assert round_is_left(ledger.entries())
+
+    @pytest.mark.asyncio
+    async def test_hole_then_failing_reassert_supersedes_hole_with_error(
+        self, context
+    ):
+        # hole→error: x holed in round 1, failing re-bind in round 2.
+        session = LiterateSession(context)
+        await session.step(lackpy_doc("y = x + 1"))    # x: origin hole
+        await session.step(lackpy_doc("x = 1 // 0"))   # x: failing re-bind
+        ns = session._kernel.get_namespace()
+        assert isinstance(ns["x"], ErrorValue)
+        hist = session.versions.history("x")
+        assert [type(v.value).__name__ for v in hist] == ["Hole", "ErrorValue"]
+        sup = session.ledger.query(entry_type=SUPERSEDED, name="x")
+        assert sup and sup[-1].detail["prior"] == "hole"
+
+    @pytest.mark.asyncio
+    async def test_partial_bindings_before_failure_still_kept(self, context):
+        # The OTHER side of the partition: work the failed cell completed
+        # before raising is kept (and versioned); only the unfinished
+        # (re)bind reifies.
+        result = await run_batch(
+            context, lackpy_doc("x = 5", "x = 6\nboom = 1 // 0")
+        )
+        variables = result.metadata["variables"]
+        ledger = result.metadata["ledger"]
+        assert variables["x"] == 6                # rebound pre-failure: kept
+        assert isinstance(variables["boom"], ErrorValue)
+        err = ledger.query(entry_type=ERROR_REIFIED, name="boom")
+        assert err and err[-1].detail["kept"] == ["x"]
+        assert [
+            v.value for v in result.metadata["versions"].history("x")
+        ] == [5, 6]
+
+    @pytest.mark.asyncio
+    async def test_failing_dirty_reexec_reifies_and_ledger_tells_truth(
+        self, context
+    ):
+        # Reactive path: re-assert a → re-exec of b = 10 // a raises.
+        result = await run_batch(
+            context, lackpy_doc("a = 1", "b = 10 // a", "c = b + 1", "a = 0")
+        )
+        ledger = result.metadata["ledger"]
+        versions = result.metadata["versions"]
+        variables = result.metadata["variables"]
+        dirty = {
+            e.detail["cell_index"]: e for e in ledger.query(entry_type=DIRTY)
+        }
+
+        # b reifies (no stale 10) and the transition is versioned.
+        assert isinstance(variables["b"], ErrorValue)
+        b_hist = versions.history("b")
+        assert [type(v.value).__name__ for v in b_hist] == ["int", "ErrorValue"]
+
+        # The dirty entry reports the ACTUAL outcome — no clean-refresh claim.
+        assert dirty[1].detail["reexecuted"] is True
+        assert dirty[1].detail["outcome"] == "reified"
+        assert dirty[1].detail["reified"] == ["b"]
+
+        # Downstream c re-execs into a chained hole off the reified b —
+        # truthfully recorded too.
+        assert isinstance(variables["c"], Hole)
+        assert "b" in variables["c"].blocked_by
+        assert dirty[2].detail["reexecuted"] is True
+        assert dirty[2].detail["outcome"] == "reified"
+        assert dirty[2].detail["reified"] == ["c"]
+        assert round_is_left(ledger.entries())
+
+    @pytest.mark.asyncio
+    async def test_clean_dirty_reexec_outcome_recorded(self, context):
+        result = await run_batch(
+            context, lackpy_doc("a = 1", "b = a + 1", "a = 2")
+        )
+        dirty = result.metadata["ledger"].query(entry_type=DIRTY)
+        assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "clean"
+        assert result.metadata["variables"]["b"] == 3
+
+    @pytest.mark.asyncio
+    async def test_attribute_call_write_withheld_from_reexec(
+        self, context, tmp_path
+    ):
+        # World-effect withhold: the effect classifier attributes effects to
+        # BARE-NAME calls only, so `target.write_text(...)` grades "pure".
+        # The conservative gate must withhold it anyway: the file is written
+        # exactly once, with the ORIGINAL upstream value.
+        out = tmp_path / "tick.txt"
+        result = await run_batch(
+            context,
+            lackpy_doc(
+                "import pathlib\ntarget = pathlib.Path(%r)" % str(out),
+                "a = 1",
+                "n = target.write_text(f'tick{a}')",
+                "a = 0",
+            ),
+        )
+        ledger = result.metadata["ledger"]
+        dirty = {
+            e.detail["cell_index"]: e for e in ledger.query(entry_type=DIRTY)
+        }
+        assert dirty[2].detail["reexecuted"] is False
+        assert "cannot prove effect-free" in dirty[2].detail["reason"]
+        # Written exactly once — a double-fire would have left 'tick0'.
+        assert out.read_text() == "tick1"

@@ -80,9 +80,12 @@ class Hole:
 class ErrorValue:
     """A runtime failure reified as a value, carrying the exception info.
 
-    Bound to the names a failed cell declared but did not reach; names the
-    cell *did* bind before the error keep their real values (completed work
-    is never thrown away — the failure itself is what gets recorded).
+    Bound to the names a failed cell declared but did not successfully
+    (re)bind this pass — including a failed RE-binding of an already-known
+    name, whose prior value/hole is superseded (never silently kept stale).
+    Names the cell *did* bind before the error keep their real values
+    (completed work is never thrown away — the failure itself is what gets
+    recorded).
     """
 
     name: str

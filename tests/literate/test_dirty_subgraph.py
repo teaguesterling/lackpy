@@ -199,12 +199,13 @@ class TestDirtySubgraphReexecution:
     @pytest.mark.asyncio
     async def test_reexec_into_runtime_error_is_ledgered_not_crash(self, context):
         # A dependent whose re-exec now RAISES is LEDGERED as a failure rather
-        # than crashing the run (composition with L1.2) — but note the honest
-        # limit: because the dependent was ALREADY bound on the first pass, the
-        # raise leaves that (now-stale) value in place, so L1.2's kept/missing
-        # logic records a `name=None` error_reified (q in `kept`) instead of
-        # rebinding q as an ErrorValue or re-versioning it.  The run still
-        # completes and reports Left — no crash, nothing silent.
+        # than crashing the run (composition with L1.2).  The dependent was
+        # already bound on the first pass, and the failed re-bind must NOT
+        # silently keep that stale value: q reifies as an ErrorValue,
+        # superseding the first-pass value (value→error, a new version), with
+        # a NAMED error_reified entry and a truthful dirty entry.  (This test
+        # previously pinned the pre-fix stale-keep behavior as an "honest
+        # limit"; that was the Finding-1 defect — updated to the contract.)
         result = await _run(
             context,
             "```lackpy\na = 1\n```\n\n"
@@ -217,14 +218,23 @@ class TestDirtySubgraphReexecution:
         assert result.metadata["completed"] is True
         dirty = _dirty(ledger)
         assert [e.detail["cell_index"] for e in dirty] == [1]
-        # The re-exec's ZeroDivisionError is ledgered (error_reified), Left.
+        # The dirty entry tells the truth: re-executed, but the re-run failed
+        # and was reified — it does not claim a clean refresh.
+        assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "reified"
+        assert dirty[0].detail["reified"] == ["q"]
+        # The re-exec's ZeroDivisionError is ledgered (error_reified) WITH the
+        # name — q was the intended re-bind and did not complete — and Left.
         err = ledger.query(entry_type="error_reified")
-        assert err and err[-1].name is None and err[-1].detail["kept"] == ["q"]
+        assert err and err[-1].name == "q" and err[-1].detail["kept"] == []
         assert round_is_left(ledger.entries())
-        # Honest limit: q keeps its stale first-pass value; it is NOT rebound
-        # as an ErrorValue and NOT re-versioned (single version).
-        assert result.metadata["variables"]["q"] == 1.0
-        assert len(versions.history("q")) == 1
+        # q is an ErrorValue, not the stale first-pass value, and the
+        # transition is versioned: v1 (1.0, superseded) → v2 (error).
+        assert isinstance(result.metadata["variables"]["q"], ErrorValue)
+        q_hist = versions.history("q")
+        assert [type(v.value).__name__ for v in q_hist] == ["float", "ErrorValue"]
+        assert q_hist[0].superseded_by == q_hist[1].version
+        assert ledger.query(entry_type="superseded", name="q")
 
     @pytest.mark.asyncio
     async def test_effectful_dependent_is_dirtied_but_not_reexecuted(
