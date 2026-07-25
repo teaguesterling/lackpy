@@ -42,8 +42,9 @@ failure and does not make a round Left (see ``forgiveness.round_is_left``).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Callable
 
 #: Ledger entry type for a re-assertion (L1.3): a prior binding version was
 #: superseded by a new one.  ``detail`` carries ``from_version``/``to_version``
@@ -55,16 +56,77 @@ SUPERSEDED = "superseded"
 class BindingVersion:
     """One immutable version of a binding.  Mirrors ``_aidr_bindings``:
     1-based ``version``; ``superseded_by`` names the replacing version, or is
-    ``None`` while this version is current."""
+    ``None`` while this version is current.
+
+    ``created_at`` is the assert-time wall clock (float epoch, same source as
+    the ledger's ``created_at`` — :func:`time.time`), stamped by
+    :meth:`BindingVersions.assert_binding`.  A directly-constructed version
+    defaults to ``0.0`` (no assertion time known)."""
 
     name: str
     version: int
     value: Any
     superseded_by: int | None = None
+    created_at: float = 0.0
 
     @property
     def superseded(self) -> bool:
         return self.superseded_by is not None
+
+    @property
+    def kind(self) -> str:
+        """The binding-layer kind of this version's value —
+        ``"value"`` / ``"hole"`` / ``"error"`` / ``"unavailable"`` (via
+        :func:`value_kind`).  NOTE 'superseded' is a *lifecycle* state
+        (``superseded_by`` is set), not a value kind."""
+        return value_kind(self.value)
+
+    def to_dict(
+        self,
+        *,
+        session_id: str | None = None,
+        document_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Serialized form carrying what AIDR's ``_aidr_bindings`` columns
+        need: ``name`` / ``version`` / ``kind`` / ``value_json`` /
+        ``superseded_by`` / ``created_at`` plus the identity
+        (``session_id`` / ``document_id``, stamped by the caller — a bare
+        ``BindingVersion`` has no identity; :meth:`BindingVersions.serialize`
+        stamps its container's).
+
+        ``value_json`` is the DECISION-1 best-effort serialization (see
+        :func:`.persistence.serialize_value`): forgiveness values via their
+        ``to_dict``; JSON-able values as-is; anything else as an inspectable
+        ``__nonserializable__`` marker.  NEVER raises."""
+        from .persistence import serialize_value
+
+        return {
+            "name": self.name,
+            "version": self.version,
+            "kind": self.kind,
+            "value_json": serialize_value(self.value),
+            "superseded_by": self.superseded_by,
+            "created_at": self.created_at,
+            "session_id": session_id,
+            "document_id": document_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BindingVersion":
+        """Reconstruct from :meth:`to_dict` output.  Forgiveness values and
+        JSON-able values round-trip exactly; a non-serializable value comes
+        back as its ``__nonserializable__`` marker dict (inspectable, not the
+        real object — expected and honest).  The identity fields are the
+        container's, not the version's, and are dropped here."""
+        from .persistence import deserialize_value
+
+        return cls(
+            name=data["name"],
+            version=data["version"],
+            value=deserialize_value(data["value_json"]),
+            superseded_by=data.get("superseded_by"),
+            created_at=data.get("created_at", 0.0),
+        )
 
 
 def value_kind(value: Any) -> str:
@@ -93,10 +155,36 @@ class BindingVersions:
     version existed, marks it superseded and returns it so the caller can
     write the ``superseded`` ledger entry (the ledger write stays with the
     runner, which knows the cell context).
+
+    Args:
+        session_id: Optional identity carried by this history, stamped onto
+            serialized versions by :meth:`serialize` (mirrors the ledger's
+            identity; ``None`` — the default, today's behavior — serializes
+            as null identity).
+        document_id: Optional document identity, same treatment.
+        clock: Injectable time source for each version's ``created_at``
+            (defaults to :func:`time.time`, the SAME source the ledger uses).
+            Inject a counter in tests for determinism.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        session_id: str | None = None,
+        document_id: str | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self._history: dict[str, list[BindingVersion]] = {}
+        self._session_id = session_id
+        self._document_id = document_id
+        self._clock = clock or time.time
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    @property
+    def document_id(self) -> str | None:
+        return self._document_id
 
     def assert_binding(
         self, name: str, value: Any
@@ -105,16 +193,30 @@ class BindingVersions:
 
         Returns ``(new_version, superseded_prior)`` — ``superseded_prior`` is
         the just-superseded prior version (already marked with
-        ``superseded_by``), or ``None`` for a first assertion.
+        ``superseded_by``), or ``None`` for a first assertion.  The new
+        version is stamped with assert-time ``created_at``; supersession does
+        NOT alter the prior's ``created_at``.
         """
         versions = self._history.setdefault(name, [])
-        new = BindingVersion(name=name, version=len(versions) + 1, value=value)
+        new = BindingVersion(
+            name=name,
+            version=len(versions) + 1,
+            value=value,
+            created_at=self._clock(),
+        )
         prior: BindingVersion | None = None
         if versions:
             prior = replace(versions[-1], superseded_by=new.version)
             versions[-1] = prior
         versions.append(new)
         return new, prior
+
+    def serialize(self, version: BindingVersion) -> dict[str, Any]:
+        """``version.to_dict()`` stamped with THIS history's identity —
+        the serialized-form entry point persistence backends receive."""
+        return version.to_dict(
+            session_id=self._session_id, document_id=self._document_id
+        )
 
     # -- query surface ----------------------------------------------------
 

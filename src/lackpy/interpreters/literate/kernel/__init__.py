@@ -35,6 +35,14 @@ from .forgiveness import (
 from .interface import CellResult, KernelInterface
 from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
 from .lightweight import LightweightKernel
+from .persistence import (
+    PersistenceBackend,
+    PersistentBindingVersions,
+    PersistentLedger,
+    deserialize_value,
+    ledger_entry_to_dict,
+    serialize_value,
+)
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
 from .reactive import DIRTY, DependencyGraph
 from .versions import SUPERSEDED, BindingVersion, BindingVersions
@@ -68,6 +76,9 @@ __all__ = [
     "LedgerEntry",
     "LightweightKernel",
     "NoRecoveryHandler",
+    "PersistenceBackend",
+    "PersistentBindingVersions",
+    "PersistentLedger",
     "PluginAdvice",
     "RecoveryAction",
     "RecoveryContext",
@@ -77,8 +88,11 @@ __all__ = [
     "StreamingDriver",
     "Unavailable",
     "describe_failure",
+    "deserialize_value",
     "is_forgiving",
+    "ledger_entry_to_dict",
     "merge_advice",
     "reified_failures",
     "round_is_left",
+    "serialize_value",
 ]

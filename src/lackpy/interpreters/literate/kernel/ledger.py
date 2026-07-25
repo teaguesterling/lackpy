@@ -109,6 +109,10 @@ class Ledger:
     def session_id(self) -> str:
         return self._session_id
 
+    @property
+    def document_id(self) -> str | None:
+        return self._document_id
+
     def record(
         self,
         entry_type: str,
