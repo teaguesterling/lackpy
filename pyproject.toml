@@ -7,7 +7,7 @@ name = "lackpy"
 version = "0.14.0"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "Teague Sterling" }]
 requires-python = ">=3.11"
 # lackpy is the runtime dist; lackpy-lang is the pure-language leaf. They share the
