@@ -7,7 +7,7 @@ name = "lackpy-lang"
 version = "0.12.0"
 description = "The lackpy language: grammar, validator, grader, and spec — the pure-language leaf, with no runtime dependencies."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "Teague Sterling" }]
 # Wider floor than the lackpy runtime (>=3.11): the leaf is stdlib-only and uses no
 # 3.11-only features, so consumers on 3.10 (e.g. kibitzer) can depend on it. NB: the
