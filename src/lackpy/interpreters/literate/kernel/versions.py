@@ -51,6 +51,28 @@ from typing import Any, Callable
 #: (and the prior value's kind); it is a legitimate transition, not a failure.
 SUPERSEDED = "superseded"
 
+#: The ``_aidr_bindings``-shaped key contract that
+#: :meth:`BindingVersion.to_dict` produces (in this order) — the binding-side
+#: analogue of :data:`~.ledger.AIDR_LEDGER_COLUMNS`, pinned so the wire shape
+#: persistence backends receive cannot drift silently.
+#:
+#: NOTE (assumed schema): lackpy does NOT import aidr, so this pin is
+#: readiness against lackpy's ASSUMPTION of AIDR's ``_aidr_bindings`` schema,
+#: not a verified match.  Field-name reconciliation between these keys and
+#: AIDR's actual columns (as with the ledger's ``detail`` vs AIDR's
+#: ``detail_json``) is the PLUGIN's job at Stage 3; lackpy's contract is only
+#: "these keys, this shape".
+AIDR_BINDING_COLUMNS: tuple[str, ...] = (
+    "name",
+    "version",
+    "kind",
+    "value_json",
+    "superseded_by",
+    "created_at",
+    "session_id",
+    "document_id",
+)
+
 
 @dataclass(frozen=True)
 class BindingVersion:
@@ -88,19 +110,21 @@ class BindingVersion:
         document_id: str | None = None,
     ) -> dict[str, Any]:
         """Serialized form carrying what AIDR's ``_aidr_bindings`` columns
-        need: ``name`` / ``version`` / ``kind`` / ``value_json`` /
-        ``superseded_by`` / ``created_at`` plus the identity
-        (``session_id`` / ``document_id``, stamped by the caller — a bare
-        ``BindingVersion`` has no identity; :meth:`BindingVersions.serialize`
-        stamps its container's).
+        need — exactly the :data:`AIDR_BINDING_COLUMNS` keys: ``name`` /
+        ``version`` / ``kind`` / ``value_json`` / ``superseded_by`` /
+        ``created_at`` plus the identity (``session_id`` / ``document_id``,
+        stamped by the caller — a bare ``BindingVersion`` has no identity;
+        :meth:`BindingVersions.serialize` stamps its container's).
 
-        ``value_json`` is the DECISION-1 best-effort serialization (see
-        :func:`.persistence.serialize_value`): forgiveness values via their
-        ``to_dict``; JSON-able values as-is; anything else as an inspectable
-        ``__nonserializable__`` marker.  NEVER raises."""
+        ``value_json`` is the DECISION-1 best-effort serialization in its
+        self-describing envelope form (see :func:`.persistence.serialize_value`
+        — ``{"v": "fjson"|"json"|"marker", "data": ...}``): forgiveness
+        values via their ``to_dict``; JSON-able values verbatim; anything
+        else as an inspectable ``__nonserializable__`` marker.  NEVER
+        raises."""
         from .persistence import serialize_value
 
-        return {
+        data = {
             "name": self.name,
             "version": self.version,
             "kind": self.kind,
@@ -110,6 +134,8 @@ class BindingVersion:
             "session_id": session_id,
             "document_id": document_id,
         }
+        assert tuple(data) == AIDR_BINDING_COLUMNS
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BindingVersion":

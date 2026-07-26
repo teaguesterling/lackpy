@@ -45,7 +45,12 @@ from .persistence import (
 )
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
 from .reactive import DIRTY, DependencyGraph
-from .versions import SUPERSEDED, BindingVersion, BindingVersions
+from .versions import (
+    AIDR_BINDING_COLUMNS,
+    SUPERSEDED,
+    BindingVersion,
+    BindingVersions,
+)
 from .recovery import (
     InferenceRecoveryHandler,
     NoRecoveryHandler,
@@ -56,6 +61,7 @@ from .recovery import (
 from .streaming_parser import StreamingCellParser
 
 __all__ = [
+    "AIDR_BINDING_COLUMNS",
     "AIDR_LEDGER_COLUMNS",
     "BindingVersion",
     "BindingVersions",

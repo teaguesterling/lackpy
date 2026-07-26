@@ -4,9 +4,12 @@ Three pinned contracts (design: pages/private/design-optionB-kernel-aidr.md):
 
 1. SERIALIZATION: Hole / ErrorValue / Unavailable round-trip EXACTLY through
    to_dict/from_dict (all-string fields + a ``__kind__`` discriminator).
-   BindingVersion serializes with the DECISION-1 best-effort value strategy:
-   forgiveness values exactly, JSON-able values exactly, anything else as an
-   inspectable ``__nonserializable__`` repr marker — never raising.
+   BindingVersion serializes with the DECISION-1 best-effort value strategy,
+   wrapped in the self-describing ``{"v": tag, "data": ...}`` envelope:
+   forgiveness values exactly (``"fjson"``), JSON-able values verbatim
+   (``"json"`` — a user dict containing ``__kind__`` is NEVER sniffed as a
+   forgiveness value), anything else as an inspectable
+   ``__nonserializable__`` repr marker (``"marker"``) — never raising.
 2. IDENTITY: session_id/document_id thread from LiterateSession into the
    ledger AND the binding history; every asserted BindingVersion is stamped
    with a ``created_at`` (same float-epoch time source as the ledger).
@@ -28,6 +31,7 @@ import pytest
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateSession
 from lackpy.interpreters.literate.kernel import (
+    AIDR_BINDING_COLUMNS,
     BindingVersion,
     BindingVersions,
     ErrorValue,
@@ -42,6 +46,7 @@ from lackpy.interpreters.literate.kernel import (
     serialize_value,
 )
 from lackpy.interpreters.literate.kernel.forgiveness import forgiveness_from_dict
+from lackpy.interpreters.literate.kernel.persistence import MAX_MARKER_REPR
 
 
 @pytest.fixture
@@ -121,7 +126,7 @@ class TestSerializeValue:
     def test_forgiveness_round_trips_exactly(self):
         hole = Hole("x", blocked_by=("up",))
         stored = serialize_value(hole)
-        assert stored["__kind__"] == "hole"
+        assert stored == {"v": "fjson", "data": hole.to_dict()}
         assert deserialize_value(stored) == hole
 
     @pytest.mark.parametrize(
@@ -131,18 +136,21 @@ class TestSerializeValue:
     )
     def test_nonserializable_becomes_marker_never_raises(self, value):
         stored = serialize_value(value)  # must not raise
-        assert stored["__nonserializable__"] is True
-        assert stored["__repr__"] == repr(value)
-        assert stored["type"] == type(value).__name__
+        assert stored["v"] == "marker"
+        marker = stored["data"]
+        assert marker["__nonserializable__"] is True
+        assert marker["__repr__"] == repr(value)
+        assert marker["type"] == type(value).__name__
         json.dumps(stored)
         # Deserialization keeps the marker — inspectable, NOT reconstructed.
-        assert deserialize_value(stored) == stored
+        assert deserialize_value(stored) == marker
 
     def test_open_file_becomes_marker(self, tmp_path):
         with open(tmp_path / "f.txt", "w") as handle:
             stored = serialize_value(handle)
-        assert stored["__nonserializable__"] is True
-        assert stored["type"] == "TextIOWrapper"
+        assert stored["v"] == "marker"
+        assert stored["data"]["__nonserializable__"] is True
+        assert stored["data"]["type"] == "TextIOWrapper"
 
     def test_hostile_repr_still_never_raises(self):
         class Hostile:
@@ -150,12 +158,103 @@ class TestSerializeValue:
                 raise RuntimeError("no repr for you")
 
         stored = serialize_value(Hostile())
-        assert stored["__nonserializable__"] is True
-        assert stored["type"] == "Hostile"
+        assert stored["v"] == "marker"
+        assert stored["data"]["__nonserializable__"] is True
+        assert stored["data"]["type"] == "Hostile"
+
+    def test_huge_repr_is_bounded(self):
+        class Huge:
+            def __repr__(self):
+                return "x" * 1_000_000
+
+        stored = serialize_value(Huge())
+        rendered = stored["data"]["__repr__"]
+        # Bounded: the repr plus a short truncation indicator, not a megabyte.
+        assert len(rendered) < MAX_MARKER_REPR + 50
+        assert rendered.startswith("x" * MAX_MARKER_REPR)
+        assert "truncated" in rendered
+        json.dumps(stored)
+
+    def test_short_repr_is_untouched(self):
+        stored = serialize_value(object())
+        assert "truncated" not in stored["data"]["__repr__"]
 
     def test_tuple_normalizes_to_json_form(self):
         # Documented normalization: what is stored is what survives JSON.
-        assert serialize_value((1, 2)) == [1, 2]
+        assert serialize_value((1, 2)) == {"v": "json", "data": [1, 2]}
+
+    def test_non_envelope_input_raises_cleanly(self):
+        with pytest.raises(ValueError):
+            deserialize_value({"__kind__": "hole", "name": "x"})  # bare, no envelope
+        with pytest.raises(ValueError):
+            deserialize_value(42)
+
+
+class TestEnvelopeCollisionProof:
+    """F1 regression: a USER dict carrying a ``__kind__`` key must round-trip
+    verbatim — never crash, never silently become a forgiveness value.  These
+    fail on the pre-envelope format (KeyError crash / silent Hole corruption)
+    and pass with the envelope."""
+
+    def test_user_dict_with_error_kind_round_trips_verbatim(self):
+        # Pre-envelope: KeyError('name') crash inside ErrorValue.from_dict.
+        value = {"__kind__": "error", "code": 42}
+        restored = deserialize_value(serialize_value(value))
+        assert restored == value
+        assert type(restored) is dict
+
+    def test_user_dict_with_hole_kind_round_trips_verbatim(self):
+        # Pre-envelope: silently deserialized into a Hole (corruption).
+        value = {"__kind__": "hole", "name": "realname", "blocked_by": ["a"]}
+        restored = deserialize_value(serialize_value(value))
+        assert restored == value
+        assert type(restored) is dict
+        assert not isinstance(restored, Hole)
+
+    def test_user_dict_with_unavailable_kind_round_trips_verbatim(self):
+        value = {"__kind__": "unavailable", "name": "n", "reason": "r"}
+        restored = deserialize_value(serialize_value(value))
+        assert restored == value
+        assert type(restored) is dict
+
+    def test_normal_nested_dict_round_trips_verbatim(self):
+        value = {"a": {"b": [1, {"c": None, "__kind__": "error"}]}, "v": "x"}
+        assert deserialize_value(serialize_value(value)) == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            Hole("x"),
+            Hole("y", blocked_by=("a", "b")),
+            ErrorValue("z", "ZeroDivisionError: division by zero"),
+            Unavailable("q", "effect ceiling exceeded: net"),
+        ],
+        ids=["hole", "chained-hole", "error", "unavailable"],
+    )
+    def test_forgiveness_kinds_still_round_trip_through_envelope(self, value):
+        restored = deserialize_value(serialize_value(value))
+        assert restored == value
+        assert type(restored) is type(value)
+
+    def test_binding_with_kind_dict_value_round_trips(self):
+        """The end-to-end form of the bug: a BindingVersion whose VALUE is a
+        ``__kind__``-bearing dict must reconstruct to the exact dict."""
+        versions = BindingVersions(session_id="S", clock=lambda: 1.0)
+        value = {"__kind__": "error", "code": 42}
+        new, _ = versions.assert_binding("cfg", value)
+        assert new.kind == "value"  # a plain dict, NOT a forgiveness value
+        data = versions.serialize(new)
+        json.dumps(data)
+        restored = BindingVersion.from_dict(data)
+        assert restored == new
+        assert restored.value == value
+
+    def test_malformed_forgiveness_dict_raises_valueerror_not_keyerror(self):
+        # Defense-in-depth for direct callers: clean ValueError, no KeyError.
+        with pytest.raises(ValueError, match="malformed"):
+            forgiveness_from_dict({"__kind__": "error", "code": 42})
+        with pytest.raises(ValueError, match="malformed"):
+            forgiveness_from_dict({"__kind__": "unavailable", "name": "n"})
 
 
 class TestBindingVersionSerialization:
@@ -171,12 +270,14 @@ class TestBindingVersionSerialization:
             "name": "x",
             "version": 1,
             "kind": "value",
-            "value_json": 41,
+            "value_json": {"v": "json", "data": 41},
             "superseded_by": None,
             "created_at": 7.0,
             "session_id": "S1",
             "document_id": "D1",
         }
+        # The F2 pin: to_dict produces exactly the pinned key set, in order.
+        assert tuple(data) == AIDR_BINDING_COLUMNS
         json.dumps(data)
 
     @pytest.mark.parametrize(
@@ -208,10 +309,11 @@ class TestBindingVersionSerialization:
         versions = BindingVersions(clock=lambda: 1.0)
         new, _ = versions.assert_binding("f", lambda: 1)
         data = versions.serialize(new)
-        assert data["value_json"]["__nonserializable__"] is True
+        assert data["value_json"]["v"] == "marker"
+        assert data["value_json"]["data"]["__nonserializable__"] is True
         restored = BindingVersion.from_dict(data)
         # The marker (not the lambda) comes back — expected and honest.
-        assert restored.value == data["value_json"]
+        assert restored.value == data["value_json"]["data"]
         assert (restored.name, restored.version, restored.created_at) == (
             "f", 1, 1.0,
         )

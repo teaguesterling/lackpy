@@ -179,15 +179,25 @@ FORGIVENESS_KINDS: dict[str, type] = {
 def forgiveness_from_dict(data: dict[str, Any]) -> "Hole | ErrorValue | Unavailable":
     """Reconstruct a forgiveness value from its :meth:`to_dict` form.
 
-    Dispatches on the ``__kind__`` discriminator.  Raises ``ValueError`` for
-    an unknown/missing kind — the caller (``persistence.deserialize_value``)
-    only routes dicts whose ``__kind__`` is a known forgiveness kind here, so
-    arbitrary user dicts never reach this."""
+    Dispatches on the ``__kind__`` discriminator.  Raises ``ValueError`` (a
+    clean one — never a bare ``KeyError``) for an unknown/missing kind or a
+    forgiveness dict missing required fields.  The caller
+    (``persistence.deserialize_value``) only routes the ``data`` of a
+    ``{"v": "fjson", ...}`` envelope here — an arbitrary user dict, even one
+    carrying a ``__kind__`` key, travels under ``"v": "json"`` and never
+    reaches this function; the malformed-dict handling is defense-in-depth
+    for direct callers."""
     kind = data.get("__kind__")
     cls = FORGIVENESS_KINDS.get(kind)  # type: ignore[arg-type]
     if cls is None:
         raise ValueError(f"not a serialized forgiveness value: __kind__={kind!r}")
-    return cls.from_dict(data)
+    try:
+        return cls.from_dict(data)
+    except KeyError as exc:
+        raise ValueError(
+            f"malformed serialized {kind!r} forgiveness value: "
+            f"missing field {exc.args[0]!r}"
+        ) from exc
 
 
 def is_forgiving(value: Any) -> bool:
