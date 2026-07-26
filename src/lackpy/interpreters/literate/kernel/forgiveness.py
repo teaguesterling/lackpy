@@ -75,6 +75,20 @@ class Hole:
             return f"⟨{self.name}: blocked by {', '.join(self.blocked_by)}⟩"
         return f"⟨{self.name}: unbound⟩"
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe serialized form.  All fields are strings, so this
+        round-trips EXACTLY through :meth:`from_dict` (``blocked_by`` is
+        stored as a list — JSON has no tuples — and restored as a tuple)."""
+        return {
+            "__kind__": "hole",
+            "name": self.name,
+            "blocked_by": list(self.blocked_by),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Hole":
+        return cls(name=data["name"], blocked_by=tuple(data.get("blocked_by", ())))
+
 
 @dataclass(frozen=True)
 class ErrorValue:
@@ -96,6 +110,23 @@ class ErrorValue:
 
     def __repr__(self) -> str:
         return f"⟨{self.name}: error {self.error}⟩"
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe serialized form; all-string fields round-trip EXACTLY."""
+        return {
+            "__kind__": "error",
+            "name": self.name,
+            "error": self.error,
+            "error_phase": self.error_phase,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ErrorValue":
+        return cls(
+            name=data["name"],
+            error=data["error"],
+            error_phase=data.get("error_phase", "runtime"),
+        )
 
 
 @dataclass(frozen=True)
@@ -121,6 +152,52 @@ class Unavailable:
 
     def __repr__(self) -> str:
         return f"⟨{self.name}: unavailable — {self.reason}⟩"
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe serialized form; all-string fields round-trip EXACTLY."""
+        return {
+            "__kind__": "unavailable",
+            "name": self.name,
+            "reason": self.reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Unavailable":
+        return cls(name=data["name"], reason=data["reason"])
+
+
+#: ``__kind__`` discriminator → forgiveness class, for
+#: :func:`forgiveness_from_dict`.  These are the *serialization* kind tags;
+#: they match ``versions.value_kind`` for the three forgiveness classes.
+FORGIVENESS_KINDS: dict[str, type] = {
+    "hole": Hole,
+    "error": ErrorValue,
+    "unavailable": Unavailable,
+}
+
+
+def forgiveness_from_dict(data: dict[str, Any]) -> "Hole | ErrorValue | Unavailable":
+    """Reconstruct a forgiveness value from its :meth:`to_dict` form.
+
+    Dispatches on the ``__kind__`` discriminator.  Raises ``ValueError`` (a
+    clean one — never a bare ``KeyError``) for an unknown/missing kind or a
+    forgiveness dict missing required fields.  The caller
+    (``persistence.deserialize_value``) only routes the ``data`` of a
+    ``{"v": "fjson", ...}`` envelope here — an arbitrary user dict, even one
+    carrying a ``__kind__`` key, travels under ``"v": "json"`` and never
+    reaches this function; the malformed-dict handling is defense-in-depth
+    for direct callers."""
+    kind = data.get("__kind__")
+    cls = FORGIVENESS_KINDS.get(kind)  # type: ignore[arg-type]
+    if cls is None:
+        raise ValueError(f"not a serialized forgiveness value: __kind__={kind!r}")
+    try:
+        return cls.from_dict(data)
+    except KeyError as exc:
+        raise ValueError(
+            f"malformed serialized {kind!r} forgiveness value: "
+            f"missing field {exc.args[0]!r}"
+        ) from exc
 
 
 def is_forgiving(value: Any) -> bool:

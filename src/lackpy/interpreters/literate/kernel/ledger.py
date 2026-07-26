@@ -51,6 +51,14 @@ from typing import Any, Callable, Iterator
 #: The ``_aidr_ledger`` column contract that :class:`LedgerEntry` mirrors.
 #: Future AIDR persistence serializes these fields mechanically; renaming or
 #: reshaping any of them is a cross-project contract change.
+#:
+#: NOTE (assumed schema): lackpy does NOT import aidr, so this pin is
+#: readiness against lackpy's ASSUMPTION of AIDR's schema, not a verified
+#: match — e.g. AIDR's actual ledger column for ``detail`` is
+#: ``detail_json``.  Field-name reconciliation (``detail`` → ``detail_json``,
+#: plus any other renames) is the PLUGIN's job at Stage 3; lackpy's contract
+#: is only "these keys, this shape".  See ``versions.AIDR_BINDING_COLUMNS``
+#: for the binding-side pin.
 AIDR_LEDGER_COLUMNS: tuple[str, ...] = (
     "entry_id",
     "session_id",
@@ -108,6 +116,10 @@ class Ledger:
     @property
     def session_id(self) -> str:
         return self._session_id
+
+    @property
+    def document_id(self) -> str | None:
+        return self._document_id
 
     def record(
         self,

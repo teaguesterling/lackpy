@@ -290,11 +290,33 @@ class LiterateSession:
         interpreter: Any = None,
         *,
         max_rounds: int | None = None,
+        session_id: str | None = None,
+        document_id: str | None = None,
+        persistence: Any = None,
     ) -> None:
+        """``session_id`` / ``document_id`` (optional) are the identity
+        stamped on every ledger row AND every serialized binding version this
+        session produces; when not given, the ledger auto-generates a session
+        id (today's behavior) and the binding history shares it.
+
+        ``persistence`` (optional) is a
+        :class:`~.kernel.persistence.PersistenceBackend`: when given, the
+        session's ledger/versions are the persistence-backed subclasses, so
+        every recorded row and asserted binding version is ALSO handed
+        (serialized) to the backend.  When ``None`` — the default — the plain
+        in-memory classes are used and kernel behavior is byte-identical to a
+        session without persistence wiring at all (the no-op-when-unplugged
+        guarantee)."""
         # Lazy imports avoid a circular import with the package __init__ (which
         # re-exports this module).
         from . import LiterateInterpreter, _build_namespace
-        from .kernel import BindingVersions, Ledger, LightweightKernel
+        from .kernel import (
+            BindingVersions,
+            Ledger,
+            LightweightKernel,
+            PersistentBindingVersions,
+            PersistentLedger,
+        )
 
         self._context = context
         # L4: the client loop's REAL round cap (max_iterations), surfaced to the
@@ -312,12 +334,27 @@ class LiterateSession:
         # ONE ledger threaded across every round (L1.0/L1.1): the queryable
         # record of the session's execution + reified failures. Each step's
         # aggregate Either is derived from this ledger, per-round slice.
-        self._ledger = Ledger()
         # ONE binding version history threaded across every round (L1.3):
         # bindings are immutable versions; re-asserting a name in a later
         # round supersedes the prior version and is ledgered. The kernel's
         # namespace dict stays the mutable latest-wins surface.
-        self._versions = BindingVersions()
+        # Identity: the versions history SHARES the ledger's session id (which
+        # is the caller's when given, else the ledger's generated one), so
+        # serialized ledger rows and binding versions carry the same identity.
+        if persistence is not None:
+            self._ledger = PersistentLedger(
+                persistence, session_id=session_id, document_id=document_id
+            )
+            self._versions = PersistentBindingVersions(
+                persistence,
+                session_id=self._ledger.session_id,
+                document_id=document_id,
+            )
+        else:
+            self._ledger = Ledger(session_id=session_id, document_id=document_id)
+            self._versions = BindingVersions(
+                session_id=self._ledger.session_id, document_id=document_id
+            )
         # Flat stdout per round (printed values, `@scratch` summaries): the
         # `clean_doc` view used by the Left-correction path.
         self._clean_parts: list[str] = []
