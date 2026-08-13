@@ -58,6 +58,7 @@ from typing import Any
 
 from ..base import ExecutionContext
 from .annotations import session_manifest
+from .parser import to_compute_tags
 
 # <think>...</think> reasoning blocks (a thinking model's scratch space) must not
 # reach the parser -- as prose they would print verbatim into the clean doc and
@@ -496,9 +497,15 @@ class LiterateSession:
             observations=len(self._ledger),
             cap=self._max_rounds,
         )
-        self._rendered_parts.append(
-            manifest + "\n\n" + result.metadata.get("rendered_markdown", "")
-        )
+        # Spell the round-trip artifact the way the writer spelled it. Parsing
+        # normalises <compute> to fences, so without this a tag-authored
+        # document comes back as fences on the next pause and the writer
+        # switches syntax mid-conversation -- back to the form that truncates a
+        # payload containing a fence, which is the whole reason for the tag.
+        rendered_markdown = result.metadata.get("rendered_markdown", "")
+        if "<compute" in raw:
+            rendered_markdown = to_compute_tags(rendered_markdown)
+        self._rendered_parts.append(manifest + "\n\n" + rendered_markdown)
         continue_requested = (
             bool(result.metadata.get("continue_requested")) or marker_pause
         )

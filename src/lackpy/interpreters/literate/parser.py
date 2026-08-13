@@ -293,3 +293,51 @@ def parse(document: str) -> ParseResult:
             ))
 
     return ParseResult(frontmatter=frontmatter, cells=cells, errors=errors)
+
+
+_FENCE_OPEN_RE = re.compile(r"^(`{3,})lackpy(.*)$")
+
+
+def _info_to_attrs(info: str) -> str:
+    """``@hidden`` -> ``hidden``; ``@write(p)`` -> ``write="p"``."""
+    info = info.strip()
+    if not info:
+        return ""
+    m = re.match(r"@(\w+)(?:\(([^)]*)\))?\s*$", info)
+    if not m:
+        return ""
+    name, arg = m.group(1), m.group(2)
+    if name in _PATH_ANNOTATIONS and arg:
+        return f' {name}="{arg}"'
+    return f" {name}"
+
+
+def to_compute_tags(document: str) -> str:
+    """Render lackpy fences back as `<compute>` tags — the inverse of normalisation.
+
+    Round-trip artifacts must be spelled the way the writer spelled them. A
+    document authored in tags that returns as fences teaches the writer, mid
+    conversation, that fences are the syntax — and it resumes in the form that
+    truncates any payload containing a fence.
+    """
+    lines = document.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE_OPEN_RE.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        ticks, info = m.group(1), m.group(2)
+        close_re = re.compile(r"^`{%d,}\s*$" % len(ticks))
+        body: list[str] = []
+        j = i + 1
+        while j < len(lines) and not close_re.match(lines[j]):
+            body.append(lines[j])
+            j += 1
+        out.append(f"<compute{_info_to_attrs(info)}>")
+        out.extend(body)
+        out.append(_COMPUTE_CLOSE)
+        i = j + 1 if j < len(lines) else j
+    return "\n".join(out)

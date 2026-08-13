@@ -5,7 +5,11 @@ import os
 import pytest
 
 from lackpy.interpreters.base import ExecutionContext
-from lackpy.interpreters.literate import LiterateSession, strip_think
+from lackpy.interpreters.literate import (
+    LiterateInterpreter,
+    LiterateSession,
+    strip_think,
+)
 from lackpy.lang.grader import Grade
 
 
@@ -223,3 +227,39 @@ class TestBaseDirResolution:
         assert (await session.step("```lackpy @hidden\nimport os\nx = os.getcwd()\n```")).ok
 
         assert os.getcwd() == before
+
+
+class TestRoundTripPreservesAuthoredSyntax:
+    """What is fed back must be spelled the way the writer spelled it.
+
+    session.rendered is the round-trip artifact: on a pause it goes back to the
+    model as "the document so far". If a <compute>-authored document returns as
+    fences, the writer is taught mid-conversation that fences are the syntax --
+    and resumes in the form that truncates any payload containing a fence.
+    """
+
+    @pytest.mark.asyncio
+    async def test_compute_document_round_trips_as_compute(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        result = await session.step(
+            "<compute hidden>\nx = 41\n</compute>\n\nThe answer is {x + 1}."
+        )
+        assert result.ok, result.errors
+        assert "<compute hidden>" in session.rendered
+        assert "```lackpy" not in session.rendered
+        # rendered is source-preserving: interpolation stays unexpanded by design.
+        assert "The answer is {x + 1}." in session.rendered
+
+    @pytest.mark.asyncio
+    async def test_fence_document_still_round_trips_as_fences(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        result = await session.step(
+            "```lackpy @hidden\nx = 41\n```\n\nThe answer is {x + 1}."
+        )
+        assert result.ok, result.errors
+        assert "```lackpy @hidden" in session.rendered
+        assert "<compute" not in session.rendered
