@@ -330,7 +330,9 @@ class LiterateSession:
         # pause rounds too — so those consume here as well).
         self._segments = 0
         self._interpreter = interpreter or LiterateInterpreter()
-        self._kernel = LightweightKernel(namespace=_build_namespace(context))
+        self._kernel = LightweightKernel(
+            namespace=_build_namespace(context), base_dir=context.base_dir
+        )
         # ONE ledger threaded across every round (L1.0/L1.1): the queryable
         # record of the session's execution + reified failures. Each step's
         # aggregate Either is derived from this ledger, per-round slice.

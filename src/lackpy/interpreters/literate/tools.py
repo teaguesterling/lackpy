@@ -166,24 +166,14 @@ def run_tests(path: str = ".", *, _base: Path | None = None) -> str:
         return "(tests timed out after 120s)"
 
 
-def open_file(path, *args, _base: Path | None = None, **kwargs):
-    """``open()`` for the execution namespace, rebased on the document root.
-
-    Models write ordinary Python as often as they call the kit tools, and a
-    bare ``open("x")`` would otherwise resolve against the *host process* cwd
-    -- silently reading the wrong tree, since the literate kernel deliberately
-    does not ``os.chdir`` (unlike PythonInterpreter). Absolute paths are
-    untouched.
-    """
-    return open(_resolve(path, _base) if isinstance(path, (str, Path)) else path,
-                *args, **kwargs)
-
-
 def make_tool_namespace(base_dir: str | Path | None = None) -> dict:
     """Create a namespace dict with all literate tools.
 
     When base_dir is provided, tool functions resolve relative paths
-    against it instead of relying on os.chdir().
+    against it explicitly, so a tool call is correct regardless of cwd. The
+    kernel additionally runs each cell with base_dir as cwd (see
+    kernel.lightweight._cwd), which is what makes a document's *ordinary*
+    Python -- open, os.path.exists, glob -- agree with these tools.
     """
     from functools import partial
     base = Path(base_dir) if base_dir else None
@@ -194,5 +184,4 @@ def make_tool_namespace(base_dir: str | Path | None = None) -> dict:
         "search_content": partial(search_content, _base=base),
         "run_command": partial(run_command, _base=base),
         "run_tests": partial(run_tests, _base=base),
-        "open": partial(open_file, _base=base),
     }

@@ -1,5 +1,7 @@
 """Tests for the multi-round literate fold (LiterateSession)."""
 
+import os
+
 import pytest
 
 from lackpy.interpreters.base import ExecutionContext
@@ -180,3 +182,44 @@ class TestBaseDirResolution:
 
         assert result.ok, result.errors
         assert "Got: Hello World" in result.clean_doc
+
+    @pytest.mark.asyncio
+    async def test_os_level_paths_resolve_against_base_dir(self, tmp_path, monkeypatch):
+        # The tool-shim approach cannot cover this: models routinely guard with
+        # os.path.exists() before opening, and reach for os.listdir/glob. Shimming
+        # names one at a time is unbounded, so the kernel must make base_dir the
+        # cwd for the duration of a cell.
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "hello.txt").write_text("Hello World\n")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        result = await session.step(
+            "```lackpy @hidden\n"
+            "import os\n"
+            "found = os.path.exists('hello.txt')\n"
+            "listing = sorted(os.listdir('.'))\n"
+            "```\n\n"
+            "found={found} listing={listing}"
+        )
+
+        assert result.ok, result.errors
+        assert "found=True" in result.clean_doc
+        assert "hello.txt" in result.clean_doc
+
+    @pytest.mark.asyncio
+    async def test_cwd_is_restored_after_execution(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        before = os.getcwd()
+
+        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        assert (await session.step("```lackpy @hidden\nimport os\nx = os.getcwd()\n```")).ok
+
+        assert os.getcwd() == before
