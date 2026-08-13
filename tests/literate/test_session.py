@@ -147,3 +147,36 @@ class TestGateStillApplies:
         assert not result.ok
         assert "effect ceiling exceeded" in result.errors[0]
         assert not (tmp_path / "o.txt").exists()
+
+
+class TestBaseDirResolution:
+    """A cell's plain file I/O must resolve against the context's base_dir.
+
+    The kit tools (read_file &c) rebase relative paths, but a model writing
+    ordinary Python -- `open(path)` -- was resolving against the *host
+    process* cwd, so a literate run silently read the wrong tree (or, under
+    the model's own try/except, reported nothing at all).
+    """
+
+    @pytest.mark.asyncio
+    async def test_plain_open_reads_from_base_dir_not_process_cwd(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "hello.txt").write_text("Hello World\n")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        result = await session.step(
+            "```lackpy @hidden\n"
+            "with open('hello.txt') as f:\n"
+            "    body = f.read()\n"
+            "```\n\n"
+            "Got: {body.strip()}"
+        )
+
+        assert result.ok, result.errors
+        assert "Got: Hello World" in result.clean_doc

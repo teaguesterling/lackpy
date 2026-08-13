@@ -134,7 +134,7 @@ class TestSearchContent:
 class TestMakeToolNamespace:
     def test_has_all_tools(self):
         ns = make_tool_namespace()
-        expected = {"read_file", "write_file", "apply_diff", "search_content", "run_command", "run_tests"}
+        expected = {"read_file", "write_file", "apply_diff", "search_content", "run_command", "run_tests", "open"}
         assert expected == set(ns.keys())
 
     def test_tools_are_callable(self):
