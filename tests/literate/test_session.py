@@ -263,3 +263,66 @@ class TestRoundTripPreservesAuthoredSyntax:
         assert result.ok, result.errors
         assert "```lackpy @hidden" in session.rendered
         assert "<compute" not in session.rendered
+
+
+class TestSessionArtifacts:
+    """Three consumers, three artifacts — see LiterateSession's docstring.
+
+    `display` is what a reader reads, `rendered`/`continued` is what the writer
+    is fed back, `markdown` is the portable source view. They are deliberately
+    different documents, and picking the wrong one is a silent, not a loud,
+    mistake.
+    """
+
+    @pytest.mark.asyncio
+    async def test_display_accumulates_executed_output_across_rounds(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=3
+        )
+        assert (await session.step("<compute hidden>\nn = 41\n</compute>\n\nRound one: {n}.")).ok
+        assert (await session.step("Round two: {n + 1}.")).ok
+
+        assert "Round one: 41." in session.display
+        assert "Round two: 42." in session.display
+        # A reader wants neither the source nor the kernel channel.
+        assert "<compute" not in session.display
+        assert "[kernel]" not in session.display
+
+    @pytest.mark.asyncio
+    async def test_continued_is_the_round_trip_artifact(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        assert (await session.step("<compute hidden>\nn = 1\n</compute>\n\nHi.")).ok
+        assert session.continued == session.rendered
+        assert "<compute hidden>" in session.continued
+
+    @pytest.mark.asyncio
+    async def test_markdown_is_portable_source_with_fences(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        assert (await session.step("<compute hidden>\nn = 41\n</compute>\n\nValue: {n}.")).ok
+
+        md = session.markdown
+        assert "```lackpy @hidden" in md
+        assert "<compute" not in md
+        # Portable: the kernel's private channel is not part of the document.
+        assert "[kernel]" not in md
+        # Source-preserving like `rendered`, not executed like `display`.
+        assert "Value: {n}." in md
+
+    @pytest.mark.asyncio
+    async def test_markdown_keeps_a_fenced_payload_intact(self, tmp_path):
+        # The nested-fence case: a longer outer fence is what keeps this valid.
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        doc = (
+            '<compute write="notes.md">\n# Notes\n\n```python\ndef add(a, b):\n'
+            "    return a + b\n```\n</compute>\n\nWritten."
+        )
+        assert (await session.step(doc)).ok
+        md = session.markdown
+        assert "````lackpy @write(notes.md)" in md
+        assert "```python" in md

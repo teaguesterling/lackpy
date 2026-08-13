@@ -57,8 +57,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..base import ExecutionContext
-from .annotations import session_manifest
-from .parser import to_compute_tags
+from .annotations import session_manifest, strip_kernel_blocks
+from .parser import normalize_compute_tags, to_compute_tags
 
 # <think>...</think> reasoning blocks (a thinking model's scratch space) must not
 # reach the parser -- as prose they would print verbatim into the clean doc and
@@ -294,6 +294,24 @@ class LiterateSession:
     ``base_dir`` -> journal). Call :meth:`step` per model response; feed the next
     round while ``result.continue_requested`` is true, and on a Left feed
     ``result.errors`` + ``result.raw`` back for correction.
+
+    WHICH ARTIFACT DO YOU WANT? A session emits four documents, and choosing the
+    wrong one fails silently rather than loudly — the caller gets *a* document,
+    just not the one meant for that reader:
+
+    ==========================  ============================================
+    for the WRITER, next round  :attr:`continued` (= :attr:`rendered`)
+    for a READER               :attr:`display`
+    for publishing elsewhere   :attr:`markdown`
+    for a notebook             ``to_notebook()`` in ``kernel.formats``
+    ==========================  ============================================
+
+    :attr:`continued` preserves authored source (in the syntax the writer used)
+    plus the ``[kernel]`` channel, and re-parses cleanly when fed back.
+    :attr:`display` is the executed output — expanded prose and printed values,
+    no source. Feeding :attr:`display` back poisons the loop: flat stdout
+    re-prints and stacks on re-emission. ``result.clean_doc`` is one round of
+    :attr:`display`; for a multi-round document it is the wrong scope.
     """
 
     def __init__(
@@ -596,6 +614,45 @@ class LiterateSession:
         cell, and the concatenated document re-parses to the same cell
         structure."""
         return "\n".join(self._rendered_parts)
+
+    @property
+    def continued(self) -> str:
+        """Alias for :attr:`rendered`, named for what it is used for.
+
+        ``rendered`` is the document handed BACK to the writer to continue from,
+        which is not what the name suggests to a caller looking for output. The
+        alias makes the round-trip role explicit without changing what
+        ``rendered`` means for existing callers.
+        """
+        return self.rendered
+
+    @property
+    def display(self) -> str:
+        """The finished document a READER reads: executed output, all rounds.
+
+        Prose with its interpolations expanded and whatever the cells printed —
+        no code source, no ``[kernel]`` channel. This is ``clean_doc``
+        accumulated across the session; ``clean_doc`` alone is one round's worth,
+        which is the wrong artifact to show for a multi-round document.
+
+        Never feed this back to the writer: the flat stdout re-prints and stacks
+        when re-emitted (the exp1 poisoning). Use :attr:`continued` for that.
+        """
+        return "\n".join(p for p in self._clean_parts if p)
+
+    @property
+    def markdown(self) -> str:
+        """The document as PORTABLE markdown: code in fences, no kernel channel.
+
+        For publishing or viewing outside lackpy — a README, a docs page, a
+        markdown viewer — where ```lackpy fences render and highlight but a
+        ``<compute>`` tag is raw HTML. Source-preserving like :attr:`rendered`,
+        not executed like :attr:`display`.
+
+        A block whose body contains a fence keeps a longer outer fence, so the
+        payload survives as valid CommonMark.
+        """
+        return strip_kernel_blocks(normalize_compute_tags(self.rendered)).strip()
 
     @property
     def scope(self) -> dict[str, str]:
