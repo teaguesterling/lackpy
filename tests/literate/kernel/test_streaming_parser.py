@@ -145,3 +145,55 @@ class TestReset:
         parser.reset()
         cells = parser.flush()
         assert cells == []
+
+
+class TestComputeTagsStreaming:
+    """<compute> is one syntax across both parsers.
+
+    Delimiter knowledge lives in parser.normalize_compute_tags; this parser
+    calls it rather than re-implementing tag scanning. What is specific here is
+    *partiality*: an unterminated tag must NOT be converted, because the outer
+    fence length depends on the whole body (a ``` arriving later needs a longer
+    fence), so an early conversion would be frozen wrong.
+    """
+
+    def test_complete_compute_block_yields_a_cell(self, parser):
+        cells = parser.feed("<compute hidden>\nx = 1\n</compute>\n")
+        code = [c for c in cells if c.cell_type != "prose"]
+        assert len(code) == 1
+        assert code[0].cell_type == "hidden"
+        assert code[0].content.strip() == "x = 1"
+
+    def test_tag_split_across_chunks(self, parser):
+        assert parser.feed("<comp") == []
+        assert parser.feed("ute hidden>\nx = ") == []
+        cells = parser.feed("1\n</compute>\n")
+        code = [c for c in cells if c.cell_type != "prose"]
+        assert len(code) == 1 and code[0].cell_type == "hidden"
+
+    def test_unterminated_tag_is_held_not_emitted(self, parser):
+        # Nothing may execute until the block is complete.
+        assert parser.feed("Prose.\n\n<compute hidden>\nx = 1\n") == []
+
+    def test_flush_treats_an_unterminated_tag_as_complete(self, parser):
+        parser.feed("<compute hidden>\nx = 1\n")
+        cells = parser.flush()
+        code = [c for c in cells if c.cell_type != "prose"]
+        assert len(code) == 1 and code[0].cell_type == "hidden"
+
+    def test_fenced_payload_inside_a_write_block_survives_streaming(self, parser):
+        doc = (
+            '<compute write="notes.md">\n# Notes\n\n```python\n'
+            "def add(a, b):\n    return a + b\n```\n</compute>\n"
+        )
+        cells = [c for c in parser.feed(doc) if c.cell_type != "prose"]
+        assert len(cells) == 1
+        assert cells[0].cell_type == "write"
+        assert cells[0].annotation_args["path"] == "notes.md"
+        assert "def add(a, b):" in cells[0].content
+        assert cells[0].content.count("```") == 2
+
+    def test_fences_still_stream(self, parser):
+        cells = parser.feed("```lackpy @hidden\nx = 1\n```\n")
+        code = [c for c in cells if c.cell_type != "prose"]
+        assert len(code) == 1 and code[0].cell_type == "hidden"

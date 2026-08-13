@@ -57,8 +57,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..base import ExecutionContext
-from .annotations import session_manifest, strip_kernel_blocks
-from .parser import normalize_compute_tags, to_compute_tags
+from .annotations import session_manifest
+from .parser import to_compute_tags, to_markdown
 
 # <think>...</think> reasoning blocks (a thinking model's scratch space) must not
 # reach the parser -- as prose they would print verbatim into the clean doc and
@@ -652,7 +652,7 @@ class LiterateSession:
         A block whose body contains a fence keeps a longer outer fence, so the
         payload survives as valid CommonMark.
         """
-        return strip_kernel_blocks(normalize_compute_tags(self.rendered)).strip()
+        return to_markdown(self.rendered)
 
     @property
     def scope(self) -> dict[str, str]:

@@ -77,15 +77,26 @@ def _pick_fence(body: str) -> str:
     return "`" * max(3, longest + 1)
 
 
-def normalize_compute_tags(document: str) -> str:
+def normalize_compute_tags(document: str, *, close_unterminated: bool = True) -> str:
     """Rewrite `<compute …>` blocks into equivalent fenced blocks.
+
+    The single place that knows the tag syntax. Both parsers call it -- the
+    batch parser on the whole document, the streaming parser on its buffer --
+    so the delimiter is implemented once and neither can drift from the other.
 
     A body containing fences is wrapped in a *longer* fence, which is how
     CommonMark nests fenced content -- that is what preserves the payload the
     plain three-backtick form would truncate.
 
-    An unterminated final tag is honoured rather than rejected: it is the normal
-    shape when generation is cut at a pause marker mid-stream.
+    ``close_unterminated`` decides what an unclosed trailing tag means:
+
+    - ``True`` (batch): honour it as a complete block. A document cut at a pause
+      marker mid-stream ends exactly this way.
+    - ``False`` (streaming): leave it verbatim, untranslated. The outer fence
+      length depends on the WHOLE body -- a ``` arriving in a later chunk needs a
+      longer fence -- so converting early would freeze a wrong delimiter. Left
+      raw, it matches no fence opener, and the incremental scanner holds it until
+      the closing tag arrives, which is the behaviour an incomplete block needs.
     """
     if "<compute" not in document:
         return document
@@ -95,9 +106,11 @@ def normalize_compute_tags(document: str) -> str:
     for m in _COMPUTE_OPEN_RE.finditer(document):
         if m.start() < pos:  # inside a body already consumed
             continue
-        out.append(document[pos:m.start()])
         body_start = m.end() + 1 if document[m.end():m.end() + 1] == "\n" else m.end()
         close = document.find(_COMPUTE_CLOSE, body_start)
+        if close == -1 and not close_unterminated:
+            break  # incomplete: leave this tag and everything after it raw
+        out.append(document[pos:m.start()])
         body = document[body_start:] if close == -1 else document[body_start:close]
         body = body.strip("\n")
         fence = _pick_fence(body)
@@ -341,3 +354,17 @@ def to_compute_tags(document: str) -> str:
         out.append(_COMPUTE_CLOSE)
         i = j + 1 if j < len(lines) else j
     return "\n".join(out)
+
+
+def to_markdown(document: str) -> str:
+    """A literate document as PORTABLE markdown: fences, no kernel channel.
+
+    For anything that renders markdown but not lackpy -- a README, a docs site,
+    a viewer -- where ```lackpy fences highlight and a <compute> tag is raw
+    HTML. Pure text: nothing is executed, so rendering a document is safe even
+    though running one writes files and shells out.
+
+    A block whose body contains a fence keeps its longer outer fence, so the
+    payload survives as valid CommonMark.
+    """
+    return strip_kernel_blocks(normalize_compute_tags(document)).strip()

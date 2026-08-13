@@ -1,6 +1,6 @@
 """Tests for the literate document parser."""
 
-from lackpy.interpreters.literate.parser import Cell, Frontmatter, parse
+from lackpy.interpreters.literate.parser import Cell, Frontmatter, parse, to_markdown
 
 
 class TestFrontmatter:
@@ -297,3 +297,25 @@ class TestComputeTags:
         result = parse("```lackpy @hidden\nx = 1\n```")
         cells = [c for c in result.cells if c.cell_type != "prose"]
         assert cells[0].cell_type == "hidden"
+
+
+class TestToMarkdown:
+    def test_compute_tags_become_fences(self):
+        md = to_markdown("<compute hidden>\nx = 1\n</compute>\n\nValue: {x}.")
+        assert "```lackpy @hidden" in md
+        assert "<compute" not in md
+        assert "Value: {x}." in md
+
+    def test_kernel_channel_is_stripped(self):
+        md = to_markdown("[kernel]\nnote\n[/kernel]\n\n<compute>\nx = 1\n</compute>")
+        assert "[kernel]" not in md
+        assert "```lackpy" in md
+
+    def test_fenced_payload_keeps_a_longer_outer_fence(self):
+        md = to_markdown('<compute write="n.md">\n```python\nx = 1\n```\n</compute>')
+        assert "````lackpy @write(n.md)" in md
+        assert "```python" in md
+
+    def test_a_fenced_document_is_already_markdown(self):
+        doc = "```lackpy @hidden\nx = 1\n```\n\nValue: {x}."
+        assert to_markdown(doc) == doc.strip()
