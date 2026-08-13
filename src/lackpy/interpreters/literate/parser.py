@@ -47,6 +47,65 @@ _PATH_ANNOTATIONS: set[str] = {"read", "write", "diff"}
 
 _md = MarkdownIt("commonmark")
 
+# --- <compute> tags ----------------------------------------------------------
+# The tag form is the documented authoring syntax; fences remain accepted. Both
+# normalise to one internal representation here, so every downstream stage --
+# annotations, static analysis, effects, rendering -- has a single code path.
+#
+# The tag exists because a fence cannot carry a payload that itself contains a
+# fence: the inner ``` closes the outer block. Measured on-device, a write block
+# whose body held a ```python sample was truncated 5/5 times in fence form and
+# 0/5 in tag form (TIINY-LITINF-EVAL.md).
+_COMPUTE_OPEN_RE = re.compile(r"^[ \t]*<compute([^>]*)>[ \t]*$", re.MULTILINE)
+_COMPUTE_CLOSE = "</compute>"
+
+
+def _attrs_to_info(attrs: str) -> str:
+    """``hidden`` -> ``lackpy @hidden``; ``write="p"`` -> ``lackpy @write(p)``."""
+    attrs = attrs.strip()
+    if not attrs:
+        return "lackpy"
+    m = re.match(r'(\w+)\s*=\s*["\']?([^"\']*)["\']?\s*$', attrs)
+    if m:
+        return f"lackpy @{m.group(1)}({m.group(2)})"
+    return f"lackpy @{attrs.split()[0]}"
+
+
+def _pick_fence(body: str) -> str:
+    """A fence longer than any backtick run in the body, so it cannot be closed early."""
+    longest = max((len(run) for run in re.findall(r"`+", body)), default=0)
+    return "`" * max(3, longest + 1)
+
+
+def normalize_compute_tags(document: str) -> str:
+    """Rewrite `<compute …>` blocks into equivalent fenced blocks.
+
+    A body containing fences is wrapped in a *longer* fence, which is how
+    CommonMark nests fenced content -- that is what preserves the payload the
+    plain three-backtick form would truncate.
+
+    An unterminated final tag is honoured rather than rejected: it is the normal
+    shape when generation is cut at a pause marker mid-stream.
+    """
+    if "<compute" not in document:
+        return document
+
+    out: list[str] = []
+    pos = 0
+    for m in _COMPUTE_OPEN_RE.finditer(document):
+        if m.start() < pos:  # inside a body already consumed
+            continue
+        out.append(document[pos:m.start()])
+        body_start = m.end() + 1 if document[m.end():m.end() + 1] == "\n" else m.end()
+        close = document.find(_COMPUTE_CLOSE, body_start)
+        body = document[body_start:] if close == -1 else document[body_start:close]
+        body = body.strip("\n")
+        fence = _pick_fence(body)
+        out.append(f"{fence}{_attrs_to_info(m.group(1))}\n{body}\n{fence}")
+        pos = len(document) if close == -1 else close + len(_COMPUTE_CLOSE)
+    out.append(document[pos:])
+    return "".join(out)
+
 
 @dataclass
 class Cell:
@@ -151,6 +210,7 @@ def _extract_path_from_body(content: str) -> tuple[str, str]:
 def parse(document: str) -> ParseResult:
     """Parse a literate markdown document into a cell sequence."""
     frontmatter, body, fm_lines = _strip_frontmatter(document)
+    body = normalize_compute_tags(body)
     source_lines = body.split("\n")
 
     tokens = _md.parse(body)

@@ -237,3 +237,63 @@ Based on the gathered information..."""
         assert not result.errors
         types = [c.cell_type for c in result.cells]
         assert types == ["gather", "gather", "continue", "prose"]
+
+
+class TestComputeTags:
+    """`<compute>` is a first-class input syntax alongside ```lackpy fences.
+
+    Measured on the Tiiny device (TIINY-LITINF-EVAL.md): asked to write a file
+    containing a fenced code sample, the fence form truncated the payload 5/5
+    times -- the inner ``` closes the outer block -- while the tag form survived
+    5/5. The model does the right thing either way; only the delimiter differs.
+    """
+
+    def test_bare_compute_block_is_a_code_cell(self):
+        result = parse("<compute>\nx = 1\n</compute>")
+        cells = [c for c in result.cells if c.cell_type != "prose"]
+        assert len(cells) == 1
+        assert cells[0].cell_type == "code"
+        assert cells[0].content.strip() == "x = 1"
+
+    def test_attribute_becomes_annotation(self):
+        result = parse("<compute hidden>\nx = 1\n</compute>")
+        cells = [c for c in result.cells if c.cell_type != "prose"]
+        assert cells[0].cell_type == "hidden"
+
+    def test_path_attribute_carries_path(self):
+        result = parse('<compute write="notes.md">\nhello\n</compute>')
+        cells = [c for c in result.cells if c.cell_type != "prose"]
+        assert cells[0].cell_type == "write"
+        assert cells[0].annotation_args["path"] == "notes.md"
+
+    def test_fenced_code_inside_a_write_body_survives(self):
+        # The collision the tag exists to solve.
+        doc = (
+            '<compute write="notes.md">\n'
+            "# Notes\n\n"
+            "```python\n"
+            "def add(a, b):\n"
+            "    return a + b\n"
+            "```\n"
+            "</compute>"
+        )
+        result = parse(doc)
+        cells = [c for c in result.cells if c.cell_type != "prose"]
+        assert cells[0].cell_type == "write"
+        assert "def add(a, b):" in cells[0].content
+        assert cells[0].content.count("```") == 2
+
+    def test_prose_around_compute_blocks_is_preserved(self):
+        result = parse("Before.\n\n<compute>\nx = 1\n</compute>\n\nAfter {x}.")
+        prose = [c.content for c in result.cells if c.cell_type == "prose"]
+        assert any("Before." in p for p in prose)
+        assert any("After {x}." in p for p in prose)
+        # Without this the test passes trivially: untranslated tags make the
+        # whole document one prose cell, prose assertions and all.
+        assert [c.cell_type for c in result.cells if c.cell_type != "prose"] == ["code"]
+        assert not any("<compute" in p for p in prose)
+
+    def test_fences_still_parse(self):
+        result = parse("```lackpy @hidden\nx = 1\n```")
+        cells = [c for c in result.cells if c.cell_type != "prose"]
+        assert cells[0].cell_type == "hidden"
