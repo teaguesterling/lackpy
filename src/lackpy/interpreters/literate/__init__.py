@@ -1197,6 +1197,7 @@ def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
 # Re-export the multi-round fold API. Imported at the end (after LiterateInterpreter
 # and _build_namespace are defined) so session.py's lazy imports resolve cleanly.
 from .session import (  # noqa: E402,F401
+    COMPUTE_CONTINUE_MARKER,
     CONTINUE_MARKER,
     LiterateSession,
     StepResult,

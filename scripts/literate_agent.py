@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import (
+    COMPUTE_CONTINUE_MARKER,
     CONTINUE_MARKER,
     LiterateInterpreter,
     LiterateSession,
@@ -160,7 +161,9 @@ async def run_literate_agent(
         response = await call_ollama(
             full_prompt, model=model, system=system_prompt,
             num_predict=num_predict, verbose=verbose,
-            stop=[CONTINUE_MARKER],
+            # Both syntaxes are accepted input, so scan for either marker: the
+            # prompt documents <compute>, but a model may still emit a fence.
+            stop=[COMPUTE_CONTINUE_MARKER, CONTINUE_MARKER],
         )
 
         if verbose:

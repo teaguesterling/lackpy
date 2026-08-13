@@ -126,6 +126,11 @@ def strip_overlap(shown: str, emission: str, *, min_overlap: int = _MIN_OVERLAP)
 #: (```lackpy @continue ... ```) pauses via the compiler sentinel; the textual
 #: fallback below catches the marker BEFORE a complete fence exists.
 CONTINUE_MARKER = "@continue"
+# The same pause in <compute> form. Both are live: the tag is the documented
+# syntax, fences remain accepted input, and a client streaming either one needs
+# a stop sequence that matches what its prompt asked for.
+COMPUTE_CONTINUE_MARKER = "<compute continue>"
+_COMPUTE_CLOSE = "</compute>"
 
 _FENCE_LINE_RE = re.compile(r"^```(\S.*)?\s*$")
 _FENCE_CLOSE_RE = re.compile(r"^```\s*$")
@@ -168,6 +173,12 @@ def split_at_continue(doc: str) -> tuple[str, bool]:
             continue
         if line.strip() == CONTINUE_MARKER:
             return "\n".join(lines[:i]).rstrip("\n"), True
+        if line.strip() == COMPUTE_CONTINUE_MARKER:
+            # A CLOSED tag is a complete cell: the parser normalises it and the
+            # compiler sentinel owns the pause, exactly as for a closed fence.
+            # Only a dangling open tag -- the stop-scanner cut shape -- is ours.
+            if _COMPUTE_CLOSE not in "\n".join(lines[i + 1:]):
+                return "\n".join(lines[:i]).rstrip("\n"), True
         m = _FENCE_LINE_RE.match(line)
         if m:
             in_fence = True
