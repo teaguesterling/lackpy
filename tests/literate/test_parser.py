@@ -242,10 +242,10 @@ Based on the gathered information..."""
 class TestComputeTags:
     """`<compute>` is a first-class input syntax alongside ```lackpy fences.
 
-    Measured on the Tiiny device (TIINY-LITINF-EVAL.md): asked to write a file
-    containing a fenced code sample, the fence form truncated the payload 5/5
-    times -- the inner ``` closes the outer block -- while the tag form survived
-    5/5. The model does the right thing either way; only the delimiter differs.
+    Measured against a local 30B code model: asked to write a file containing a
+    fenced code sample, the fence form truncated the payload 5/5 times -- the
+    inner ``` closes the outer block -- while the tag form survived 5/5. The
+    model does the right thing either way; only the delimiter differs.
     """
 
     def test_bare_compute_block_is_a_code_cell(self):

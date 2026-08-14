@@ -53,9 +53,9 @@ _md = MarkdownIt("commonmark")
 # annotations, static analysis, effects, rendering -- has a single code path.
 #
 # The tag exists because a fence cannot carry a payload that itself contains a
-# fence: the inner ``` closes the outer block. Measured on-device, a write block
-# whose body held a ```python sample was truncated 5/5 times in fence form and
-# 0/5 in tag form (TIINY-LITINF-EVAL.md).
+# fence: the inner ``` closes the outer block. Measured against a local 30B code
+# model: a write block whose body held a ```python sample was truncated 5/5
+# times in fence form and 0/5 in tag form.
 _COMPUTE_OPEN_RE = re.compile(r"^[ \t]*<compute([^>]*)>[ \t]*$", re.MULTILINE)
 _COMPUTE_CLOSE = "</compute>"
 
