@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lackpy"
-version = "0.15.0"
+version = "0.15.1"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
