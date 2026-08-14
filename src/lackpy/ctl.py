@@ -8,6 +8,54 @@ import sys
 from pathlib import Path
 
 
+def _render(args) -> int:
+    """Render a literate document to markdown.
+
+    Without --execute this is a pure text transform: <compute> tags become
+    ```lackpy fences and the [kernel] channel is stripped, so the result renders
+    anywhere markdown does. Nothing runs -- which matters, because running a
+    literate document writes files and shells out, and that must never be a
+    side effect of asking to see it.
+    """
+    from .interpreters.literate.parser import to_markdown
+
+    if args.path == "-":
+        document = sys.stdin.read()
+        source_dir = Path.cwd()
+    else:
+        source = Path(args.path)
+        if not source.is_file():
+            print(f"No such document: {source}", file=sys.stderr)
+            return 1
+        document = source.read_text()
+        source_dir = source.parent
+
+    if args.execute:
+        import asyncio
+
+        from .interpreters.base import ExecutionContext
+        from .interpreters.literate import LiterateInterpreter, LiterateSession
+
+        base_dir = Path(args.base_dir) if args.base_dir else source_dir
+        session = LiterateSession(
+            ExecutionContext(base_dir=base_dir),
+            interpreter=LiterateInterpreter(),
+            max_rounds=1,
+        )
+        result = asyncio.run(session.step(document))
+        for error in result.errors:
+            print(f"lackpy: {error}", file=sys.stderr)
+        out = session.display
+    else:
+        out = to_markdown(document)
+
+    if args.output:
+        Path(args.output).write_text(out + "\n")
+    else:
+        print(out)
+    return 0
+
+
 def _parse_profile(profile_str: str) -> str | list[str]:
     """Parse a profile argument: comma-separated → tool list; bare → profile name."""
     parts = [k.strip() for k in profile_str.split(",")]
@@ -68,6 +116,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     # spec
     subparsers.add_parser("spec", help="Print language spec")
+
+    # render
+    render_p = subparsers.add_parser(
+        "render", help="Render a literate document to markdown"
+    )
+    render_p.add_argument("path", help="Document to render, or - for stdin")
+    render_p.add_argument(
+        "-o", "--output", default=None, help="Write to a file instead of stdout"
+    )
+    render_p.add_argument(
+        "--execute",
+        action="store_true",
+        help="Run the document and render its OUTPUT (writes files, runs commands)",
+    )
+    render_p.add_argument(
+        "--base-dir",
+        default=None,
+        help="Directory the document resolves paths against (default: its own)",
+    )
 
     # profile
     profile_p = subparsers.add_parser("profile", help="Manage profiles")
@@ -145,6 +212,9 @@ def main(argv: list[str] | None = None) -> int:
         from .lang.spec import get_spec
         print(json.dumps(get_spec(), indent=2))
         return 0
+
+    if args.command == "render":
+        return _render(args)
 
     if args.command == "mcp":
         from .mcp.cli import mcp_init, mcp_serve

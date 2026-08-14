@@ -58,6 +58,7 @@ from typing import Any
 
 from ..base import ExecutionContext
 from .annotations import session_manifest
+from .parser import to_compute_tags, to_markdown
 
 # <think>...</think> reasoning blocks (a thinking model's scratch space) must not
 # reach the parser -- as prose they would print verbatim into the clean doc and
@@ -126,6 +127,11 @@ def strip_overlap(shown: str, emission: str, *, min_overlap: int = _MIN_OVERLAP)
 #: (```lackpy @continue ... ```) pauses via the compiler sentinel; the textual
 #: fallback below catches the marker BEFORE a complete fence exists.
 CONTINUE_MARKER = "@continue"
+# The same pause in <compute> form. Both are live: the tag is the documented
+# syntax, fences remain accepted input, and a client streaming either one needs
+# a stop sequence that matches what its prompt asked for.
+COMPUTE_CONTINUE_MARKER = "<compute continue>"
+_COMPUTE_CLOSE = "</compute>"
 
 _FENCE_LINE_RE = re.compile(r"^```(\S.*)?\s*$")
 _FENCE_CLOSE_RE = re.compile(r"^```\s*$")
@@ -168,6 +174,12 @@ def split_at_continue(doc: str) -> tuple[str, bool]:
             continue
         if line.strip() == CONTINUE_MARKER:
             return "\n".join(lines[:i]).rstrip("\n"), True
+        if line.strip() == COMPUTE_CONTINUE_MARKER:
+            # A CLOSED tag is a complete cell: the parser normalises it and the
+            # compiler sentinel owns the pause, exactly as for a closed fence.
+            # Only a dangling open tag -- the stop-scanner cut shape -- is ours.
+            if _COMPUTE_CLOSE not in "\n".join(lines[i + 1:]):
+                return "\n".join(lines[:i]).rstrip("\n"), True
         m = _FENCE_LINE_RE.match(line)
         if m:
             in_fence = True
@@ -282,6 +294,24 @@ class LiterateSession:
     ``base_dir`` -> journal). Call :meth:`step` per model response; feed the next
     round while ``result.continue_requested`` is true, and on a Left feed
     ``result.errors`` + ``result.raw`` back for correction.
+
+    WHICH ARTIFACT DO YOU WANT? A session emits four documents, and choosing the
+    wrong one fails silently rather than loudly — the caller gets *a* document,
+    just not the one meant for that reader:
+
+    ==========================  ============================================
+    for the WRITER, next round  :attr:`continued` (= :attr:`rendered`)
+    for a READER               :attr:`display`
+    for publishing elsewhere   :attr:`markdown`
+    for a notebook             ``to_notebook()`` in ``kernel.formats``
+    ==========================  ============================================
+
+    :attr:`continued` preserves authored source (in the syntax the writer used)
+    plus the ``[kernel]`` channel, and re-parses cleanly when fed back.
+    :attr:`display` is the executed output — expanded prose and printed values,
+    no source. Feeding :attr:`display` back poisons the loop: flat stdout
+    re-prints and stacks on re-emission. ``result.clean_doc`` is one round of
+    :attr:`display`; for a multi-round document it is the wrong scope.
     """
 
     def __init__(
@@ -330,7 +360,9 @@ class LiterateSession:
         # pause rounds too — so those consume here as well).
         self._segments = 0
         self._interpreter = interpreter or LiterateInterpreter()
-        self._kernel = LightweightKernel(namespace=_build_namespace(context))
+        self._kernel = LightweightKernel(
+            namespace=_build_namespace(context), base_dir=context.base_dir
+        )
         # ONE ledger threaded across every round (L1.0/L1.1): the queryable
         # record of the session's execution + reified failures. Each step's
         # aggregate Either is derived from this ledger, per-round slice.
@@ -483,9 +515,15 @@ class LiterateSession:
             observations=len(self._ledger),
             cap=self._max_rounds,
         )
-        self._rendered_parts.append(
-            manifest + "\n\n" + result.metadata.get("rendered_markdown", "")
-        )
+        # Spell the round-trip artifact the way the writer spelled it. Parsing
+        # normalises <compute> to fences, so without this a tag-authored
+        # document comes back as fences on the next pause and the writer
+        # switches syntax mid-conversation -- back to the form that truncates a
+        # payload containing a fence, which is the whole reason for the tag.
+        rendered_markdown = result.metadata.get("rendered_markdown", "")
+        if "<compute" in raw:
+            rendered_markdown = to_compute_tags(rendered_markdown)
+        self._rendered_parts.append(manifest + "\n\n" + rendered_markdown)
         continue_requested = (
             bool(result.metadata.get("continue_requested")) or marker_pause
         )
@@ -576,6 +614,45 @@ class LiterateSession:
         cell, and the concatenated document re-parses to the same cell
         structure."""
         return "\n".join(self._rendered_parts)
+
+    @property
+    def continued(self) -> str:
+        """Alias for :attr:`rendered`, named for what it is used for.
+
+        ``rendered`` is the document handed BACK to the writer to continue from,
+        which is not what the name suggests to a caller looking for output. The
+        alias makes the round-trip role explicit without changing what
+        ``rendered`` means for existing callers.
+        """
+        return self.rendered
+
+    @property
+    def display(self) -> str:
+        """The finished document a READER reads: executed output, all rounds.
+
+        Prose with its interpolations expanded and whatever the cells printed —
+        no code source, no ``[kernel]`` channel. This is ``clean_doc``
+        accumulated across the session; ``clean_doc`` alone is one round's worth,
+        which is the wrong artifact to show for a multi-round document.
+
+        Never feed this back to the writer: the flat stdout re-prints and stacks
+        when re-emitted (the exp1 poisoning). Use :attr:`continued` for that.
+        """
+        return "\n".join(p for p in self._clean_parts if p)
+
+    @property
+    def markdown(self) -> str:
+        """The document as PORTABLE markdown: code in fences, no kernel channel.
+
+        For publishing or viewing outside lackpy — a README, a docs page, a
+        markdown viewer — where ```lackpy fences render and highlight but a
+        ``<compute>`` tag is raw HTML. Source-preserving like :attr:`rendered`,
+        not executed like :attr:`display`.
+
+        A block whose body contains a fence keeps a longer outer fence, so the
+        payload survives as valid CommonMark.
+        """
+        return to_markdown(self.rendered)
 
     @property
     def scope(self) -> dict[str, str]:

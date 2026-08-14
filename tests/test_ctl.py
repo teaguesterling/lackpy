@@ -60,3 +60,20 @@ def test_parser_mcp_init_name():
     parser = build_parser()
     args = parser.parse_args(["mcp", "init", "--name", "my-lackpy"])
     assert args.name == "my-lackpy"
+
+
+def test_parser_render():
+    parser = build_parser()
+    args = parser.parse_args(["render", "doc.md"])
+    assert args.command == "render"
+    assert args.path == "doc.md"
+    # Rendering must not run the document by default: a literate document
+    # writes files and shells out, so execution is opt-in.
+    assert args.execute is False
+
+
+def test_parser_render_execute_and_output():
+    parser = build_parser()
+    args = parser.parse_args(["render", "doc.md", "--execute", "-o", "out.md"])
+    assert args.execute is True
+    assert args.output == "out.md"

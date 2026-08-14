@@ -12,7 +12,7 @@ class TestCompose:
         for name in list_personas():
             result = compose(name, interp)
             assert "{interpreter_hint}" not in result
-            assert "```lackpy" in result
+            assert "<compute>" in result
             assert "read_file" in result
 
     def test_compose_with_raw_string(self):
@@ -42,20 +42,25 @@ class TestCompose:
 
     def test_literate_hint_contains_key_syntax(self):
         hint = LiterateInterpreter().system_prompt_hint()
-        assert "@hidden" in hint
-        assert "@gather" in hint
-        assert "@continue" in hint
-        assert "@write" in hint
-        assert "@diff" in hint
-        assert "@read" in hint
-        assert "@scratch" in hint
+        assert "<compute hidden>" in hint
+        assert "<compute gather>" in hint
+        assert "<compute continue>" in hint
+        assert '<compute write="path">' in hint
+        assert '<compute diff="path">' in hint
+        assert '<compute read="path">' in hint
+        assert "<compute scratch>" in hint
 
     def test_composed_prompt_not_too_long(self):
         """Composed prompts should stay under 6000 chars for smaller models."""
         interp = LiterateInterpreter()
         for name in list_personas():
             result = compose(name, interp)
-            assert len(result) < 6000, (
+            # Raised from 6000 when <compute> became the documented syntax: the
+            # tag form costs ~320 chars over the fence form (attributes are
+            # wordier than @annotations, and every block gains a closing tag),
+            # and the fence-era prompt already sat at 5931. The guard against
+            # prompt bloat is kept, just re-based on the new floor.
+            assert len(result) < 6400, (
                 f"Persona {name!r} composed to {len(result)} chars"
             )
 
@@ -101,7 +106,7 @@ class TestL5ForgivenessConventions:
         assert "kernel computes and evaluates" in hint
         assert "[kernel]" in hint
         # 3. pause protocol
-        assert "@continue" in hint
+        assert "<compute continue>" in hint
         # 4. visible budget
         assert "manifest" in hint
         assert "budget" in hint
@@ -118,5 +123,5 @@ class TestL5ForgivenessConventions:
         for name in list_personas():
             composed = compose(name, interp)
             assert "hole" in composed
-            assert "@continue" in composed
+            assert "<compute continue>" in composed
             assert "manifest" in composed

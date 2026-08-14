@@ -1,9 +1,15 @@
 """Tests for the multi-round literate fold (LiterateSession)."""
 
+import os
+
 import pytest
 
 from lackpy.interpreters.base import ExecutionContext
-from lackpy.interpreters.literate import LiterateSession, strip_think
+from lackpy.interpreters.literate import (
+    LiterateInterpreter,
+    LiterateSession,
+    strip_think,
+)
 from lackpy.lang.grader import Grade
 
 
@@ -147,3 +153,176 @@ class TestGateStillApplies:
         assert not result.ok
         assert "effect ceiling exceeded" in result.errors[0]
         assert not (tmp_path / "o.txt").exists()
+
+
+class TestBaseDirResolution:
+    """A cell's plain file I/O must resolve against the context's base_dir.
+
+    The kit tools (read_file &c) rebase relative paths, but a model writing
+    ordinary Python -- `open(path)` -- was resolving against the *host
+    process* cwd, so a literate run silently read the wrong tree (or, under
+    the model's own try/except, reported nothing at all).
+    """
+
+    @pytest.mark.asyncio
+    async def test_plain_open_reads_from_base_dir_not_process_cwd(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "hello.txt").write_text("Hello World\n")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        result = await session.step(
+            "```lackpy @hidden\n"
+            "with open('hello.txt') as f:\n"
+            "    body = f.read()\n"
+            "```\n\n"
+            "Got: {body.strip()}"
+        )
+
+        assert result.ok, result.errors
+        assert "Got: Hello World" in result.clean_doc
+
+    @pytest.mark.asyncio
+    async def test_os_level_paths_resolve_against_base_dir(self, tmp_path, monkeypatch):
+        # The tool-shim approach cannot cover this: models routinely guard with
+        # os.path.exists() before opening, and reach for os.listdir/glob. Shimming
+        # names one at a time is unbounded, so the kernel must make base_dir the
+        # cwd for the duration of a cell.
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "hello.txt").write_text("Hello World\n")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        result = await session.step(
+            "```lackpy @hidden\n"
+            "import os\n"
+            "found = os.path.exists('hello.txt')\n"
+            "listing = sorted(os.listdir('.'))\n"
+            "```\n\n"
+            "found={found} listing={listing}"
+        )
+
+        assert result.ok, result.errors
+        assert "found=True" in result.clean_doc
+        assert "hello.txt" in result.clean_doc
+
+    @pytest.mark.asyncio
+    async def test_cwd_is_restored_after_execution(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        before = os.getcwd()
+
+        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        assert (await session.step("```lackpy @hidden\nimport os\nx = os.getcwd()\n```")).ok
+
+        assert os.getcwd() == before
+
+
+class TestRoundTripPreservesAuthoredSyntax:
+    """What is fed back must be spelled the way the writer spelled it.
+
+    session.rendered is the round-trip artifact: on a pause it goes back to the
+    model as "the document so far". If a <compute>-authored document returns as
+    fences, the writer is taught mid-conversation that fences are the syntax --
+    and resumes in the form that truncates any payload containing a fence.
+    """
+
+    @pytest.mark.asyncio
+    async def test_compute_document_round_trips_as_compute(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        result = await session.step(
+            "<compute hidden>\nx = 41\n</compute>\n\nThe answer is {x + 1}."
+        )
+        assert result.ok, result.errors
+        assert "<compute hidden>" in session.rendered
+        assert "```lackpy" not in session.rendered
+        # rendered is source-preserving: interpolation stays unexpanded by design.
+        assert "The answer is {x + 1}." in session.rendered
+
+    @pytest.mark.asyncio
+    async def test_fence_document_still_round_trips_as_fences(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        result = await session.step(
+            "```lackpy @hidden\nx = 41\n```\n\nThe answer is {x + 1}."
+        )
+        assert result.ok, result.errors
+        assert "```lackpy @hidden" in session.rendered
+        assert "<compute" not in session.rendered
+
+
+class TestSessionArtifacts:
+    """Three consumers, three artifacts — see LiterateSession's docstring.
+
+    `display` is what a reader reads, `rendered`/`continued` is what the writer
+    is fed back, `markdown` is the portable source view. They are deliberately
+    different documents, and picking the wrong one is a silent, not a loud,
+    mistake.
+    """
+
+    @pytest.mark.asyncio
+    async def test_display_accumulates_executed_output_across_rounds(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=3
+        )
+        assert (await session.step("<compute hidden>\nn = 41\n</compute>\n\nRound one: {n}.")).ok
+        assert (await session.step("Round two: {n + 1}.")).ok
+
+        assert "Round one: 41." in session.display
+        assert "Round two: 42." in session.display
+        # A reader wants neither the source nor the kernel channel.
+        assert "<compute" not in session.display
+        assert "[kernel]" not in session.display
+
+    @pytest.mark.asyncio
+    async def test_continued_is_the_round_trip_artifact(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        assert (await session.step("<compute hidden>\nn = 1\n</compute>\n\nHi.")).ok
+        assert session.continued == session.rendered
+        assert "<compute hidden>" in session.continued
+
+    @pytest.mark.asyncio
+    async def test_markdown_is_portable_source_with_fences(self, tmp_path):
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        assert (await session.step("<compute hidden>\nn = 41\n</compute>\n\nValue: {n}.")).ok
+
+        md = session.markdown
+        assert "```lackpy @hidden" in md
+        assert "<compute" not in md
+        # Portable: the kernel's private channel is not part of the document.
+        assert "[kernel]" not in md
+        # Source-preserving like `rendered`, not executed like `display`.
+        assert "Value: {n}." in md
+
+    @pytest.mark.asyncio
+    async def test_markdown_keeps_a_fenced_payload_intact(self, tmp_path):
+        # The nested-fence case: a longer outer fence is what keeps this valid.
+        session = LiterateSession(
+            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+        )
+        doc = (
+            '<compute write="notes.md">\n# Notes\n\n```python\ndef add(a, b):\n'
+            "    return a + b\n```\n</compute>\n\nWritten."
+        )
+        assert (await session.step(doc)).ok
+        md = session.markdown
+        assert "````lackpy @write(notes.md)" in md
+        assert "```python" in md

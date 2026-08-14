@@ -16,7 +16,8 @@ Called by: StreamingDriver, LiterateInterpreter.execute()
 from __future__ import annotations
 
 import io
-from contextlib import redirect_stderr, redirect_stdout
+import os
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from typing import Any
 
 from ..compiler import _COMPILERS
@@ -33,9 +34,40 @@ def _continue_sentinel() -> None:
     pass
 
 
+@contextmanager
+def _cwd(path):
+    """Run the body with ``path`` as the process cwd, always restoring it.
+
+    Scoped to the *synchronous* exec below and nothing else. That matters: the
+    cwd is process-global, so a window spanning an await would let another task
+    in the same loop observe the wrong directory. execute_cell is sync, so this
+    window cannot interleave. Concurrent execution across threads or processes
+    is still the caller's problem -- LackpyService already serialises exec under
+    ``_exec_lock`` for exactly this reason.
+    """
+    if path is None:
+        yield
+        return
+    prev = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(prev)
+
+
 class LightweightKernel:
-    def __init__(self, namespace: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        namespace: dict[str, Any] | None = None,
+        base_dir: Any | None = None,
+    ) -> None:
         self._namespace: dict[str, Any] = namespace or {}
+        # Cells run with base_dir as cwd. The tool shims rebase their own
+        # arguments, but a document is ordinary Python: models guard with
+        # os.path.exists, list with os.listdir, glob, and construct Paths --
+        # none of which any shim can reach.
+        self._base_dir = base_dir
         # Compiled prose interpolations call the display helper (see
         # display.py). Inject a default-threshold helper unless the caller
         # provided a configured one (_build_namespace does, from
@@ -125,7 +157,9 @@ class LightweightKernel:
         stderr_capture = io.StringIO()
         try:
             code_obj = compile(compiled_source, "<cell>", "exec")
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            with _cwd(self._base_dir), redirect_stdout(stdout_capture), redirect_stderr(
+                stderr_capture
+            ):
                 _do_exec(code_obj, self._namespace)
         except BaseException as e:
             if isinstance(e, KeyboardInterrupt):

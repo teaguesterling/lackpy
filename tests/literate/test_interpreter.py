@@ -240,8 +240,8 @@ class TestRegistration:
     def test_system_prompt_hint(self, interpreter):
         hint = interpreter.system_prompt_hint()
         assert "literate" in hint.lower()
-        assert "```lackpy" in hint
-        assert "@gather" in hint
+        assert "<compute>" in hint
+        assert "<compute gather>" in hint
 
 
 class TestFullDocument:

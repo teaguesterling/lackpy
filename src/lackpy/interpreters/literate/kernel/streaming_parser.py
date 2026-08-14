@@ -17,6 +17,7 @@ from ..annotations import strip_kernel_blocks
 from ..parser import (
     Cell, Frontmatter, _parse_info_string, _PATH_ANNOTATIONS,
     _extract_path_from_body, _BODY_ANNOTATION_RE, _ANNOTATION_TYPES,
+    normalize_compute_tags,
 )
 
 
@@ -31,8 +32,15 @@ def _prose_cell(text: str) -> Cell | None:
         return None
     return Cell(cell_type="prose", content=stripped)
 
-_FENCE_OPEN = re.compile(r"^```(\S.*)?$", re.MULTILINE)
-_FENCE_CLOSE = re.compile(r"^```\s*$", re.MULTILINE)
+# CommonMark fences are 3 OR MORE backticks, and a fence is closed only by a run
+# at least as long as the one that opened it. That is what lets a block carry a
+# payload containing fences -- which normalize_compute_tags relies on, and which
+# markdown-it already gives the batch parser.
+_FENCE_OPEN = re.compile(r"^(`{3,})(\S.*)?$", re.MULTILINE)
+
+
+def _fence_close_re(ticks: int) -> re.Pattern[str]:
+    return re.compile(r"^`{%d,}\s*$" % ticks, re.MULTILINE)
 
 
 class StreamingCellParser:
@@ -54,6 +62,10 @@ class StreamingCellParser:
 
     def feed(self, chunk: str) -> list[Cell]:
         self._buffer += chunk.replace("\r", "")
+        # One delimiter implementation for both parsers. Only COMPLETE blocks
+        # convert, so a conversion is never frozen before its body is known;
+        # an unterminated tag stays raw and is held until it closes.
+        self._buffer = normalize_compute_tags(self._buffer, close_unterminated=False)
         if not self._frontmatter_parsed:
             self._try_parse_frontmatter()
         return self._extract_cells()
@@ -61,12 +73,14 @@ class StreamingCellParser:
     def flush(self) -> list[Cell]:
         """Drain whatever remains in the buffer, treating unclosed fences as complete."""
         cells: list[Cell] = []
+        # Draining: an unterminated tag now IS the last block, so convert it.
+        self._buffer = normalize_compute_tags(self._buffer, close_unterminated=True)
         buf = self._buffer
 
         # Check if we're mid-fence: scan for open without matching close.
         open_match = _FENCE_OPEN.search(buf)
         if open_match is not None:
-            info = open_match.group(1) or ""
+            info = open_match.group(2) or ""
             if info.startswith("lackpy"):
                 # Prose before the fence.
                 prose_before = buf[:open_match.start()].rstrip("\n")
@@ -159,11 +173,13 @@ class StreamingCellParser:
                 # Partial fence line — wait for more data.
                 break
 
-            info = open_match.group(1) or ""
+            ticks = len(open_match.group(1))
+            info = open_match.group(2) or ""
+            fence_close = _fence_close_re(ticks)
 
             if not info.startswith("lackpy"):
                 # Non-lackpy fence: find its close.
-                close_match = _FENCE_CLOSE.search(self._buffer, open_end + 1)
+                close_match = fence_close.search(self._buffer, open_end + 1)
                 if close_match is None:
                     # Incomplete non-lackpy fence — stop processing.
                     break
@@ -186,7 +202,7 @@ class StreamingCellParser:
             if content_start < len(self._buffer) and self._buffer[content_start] == "\n":
                 content_start += 1
 
-            close_match = _FENCE_CLOSE.search(self._buffer, content_start)
+            close_match = fence_close.search(self._buffer, content_start)
             if close_match is None:
                 # Fence not yet closed — stop; don't emit prose before it.
                 break

@@ -20,7 +20,11 @@ import pytest
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateSession
-from lackpy.interpreters.literate.session import StopScanner, split_at_continue
+from lackpy.interpreters.literate.session import (
+    COMPUTE_CONTINUE_MARKER,
+    StopScanner,
+    split_at_continue,
+)
 
 
 @pytest.fixture
@@ -216,3 +220,53 @@ class TestSegmentLoop:
         assert "The total is {sum(data)}." in rendered
         assert "Done: {max(data)} was the largest." in rendered
         assert "@continue" not in rendered
+
+
+class TestComputeTagPause:
+    """The same two interruption paths, in `<compute continue>` form.
+
+    A *complete* `<compute continue>` block reaches the sentinel path via the
+    parser's normalisation. These cover the shapes that exist BEFORE a complete
+    block does -- which is the common case, since generation is cut at the
+    marker.
+    """
+
+    def test_unclosed_continue_tag_pauses(self):
+        # Stop-scanner cut shape: generation aborted right after the open tag.
+        doc = "Before.\n\n<compute continue>"
+        kept, cont = split_at_continue(doc)
+        assert cont
+        assert kept.rstrip() == "Before."
+
+    def test_complete_continue_tag_is_left_for_the_sentinel_path(self):
+        doc = "Before.\n\n<compute continue>\n</compute>\n\nAfter."
+        assert split_at_continue(doc) == (doc, False)
+
+    def test_marker_inside_a_closed_compute_body_is_not_a_pause(self):
+        # The literal text inside a normal block is code, not a pause.
+        doc = '<compute>\nx = "<compute continue>"\n</compute>\n\nAfter.'
+        assert split_at_continue(doc) == (doc, False)
+
+    def test_only_marker_cuts_to_empty(self):
+        kept, cont = split_at_continue("<compute continue>")
+        assert cont and not kept.strip()
+
+    def test_stop_scanner_cuts_at_the_tag_marker(self):
+        scanner = StopScanner([COMPUTE_CONTINUE_MARKER])
+        assert not scanner.feed("Prose. ")
+        assert scanner.feed("<compute continue>")
+        assert scanner.text.endswith(COMPUTE_CONTINUE_MARKER)
+
+
+class TestSessionComputeTagPause:
+    @pytest.mark.asyncio
+    async def test_unclosed_tag_pauses_and_discards_remainder(self, context):
+        session = LiterateSession(context, max_rounds=2)
+        result = await session.step(
+            "<compute hidden>\nx = 41\n</compute>\n\nWorking.\n\n<compute continue>"
+        )
+        assert result.ok, result.errors
+        assert result.continue_requested
+        # The cells before the pause really ran; the dangling tag was discarded.
+        assert result.variables.get("x") == 41
+        assert "continue" not in session.rendered

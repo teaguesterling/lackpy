@@ -47,6 +47,78 @@ _PATH_ANNOTATIONS: set[str] = {"read", "write", "diff"}
 
 _md = MarkdownIt("commonmark")
 
+# --- <compute> tags ----------------------------------------------------------
+# The tag form is the documented authoring syntax; fences remain accepted. Both
+# normalise to one internal representation here, so every downstream stage --
+# annotations, static analysis, effects, rendering -- has a single code path.
+#
+# The tag exists because a fence cannot carry a payload that itself contains a
+# fence: the inner ``` closes the outer block. Measured on-device, a write block
+# whose body held a ```python sample was truncated 5/5 times in fence form and
+# 0/5 in tag form (TIINY-LITINF-EVAL.md).
+_COMPUTE_OPEN_RE = re.compile(r"^[ \t]*<compute([^>]*)>[ \t]*$", re.MULTILINE)
+_COMPUTE_CLOSE = "</compute>"
+
+
+def _attrs_to_info(attrs: str) -> str:
+    """``hidden`` -> ``lackpy @hidden``; ``write="p"`` -> ``lackpy @write(p)``."""
+    attrs = attrs.strip()
+    if not attrs:
+        return "lackpy"
+    m = re.match(r'(\w+)\s*=\s*["\']?([^"\']*)["\']?\s*$', attrs)
+    if m:
+        return f"lackpy @{m.group(1)}({m.group(2)})"
+    return f"lackpy @{attrs.split()[0]}"
+
+
+def _pick_fence(body: str) -> str:
+    """A fence longer than any backtick run in the body, so it cannot be closed early."""
+    longest = max((len(run) for run in re.findall(r"`+", body)), default=0)
+    return "`" * max(3, longest + 1)
+
+
+def normalize_compute_tags(document: str, *, close_unterminated: bool = True) -> str:
+    """Rewrite `<compute …>` blocks into equivalent fenced blocks.
+
+    The single place that knows the tag syntax. Both parsers call it -- the
+    batch parser on the whole document, the streaming parser on its buffer --
+    so the delimiter is implemented once and neither can drift from the other.
+
+    A body containing fences is wrapped in a *longer* fence, which is how
+    CommonMark nests fenced content -- that is what preserves the payload the
+    plain three-backtick form would truncate.
+
+    ``close_unterminated`` decides what an unclosed trailing tag means:
+
+    - ``True`` (batch): honour it as a complete block. A document cut at a pause
+      marker mid-stream ends exactly this way.
+    - ``False`` (streaming): leave it verbatim, untranslated. The outer fence
+      length depends on the WHOLE body -- a ``` arriving in a later chunk needs a
+      longer fence -- so converting early would freeze a wrong delimiter. Left
+      raw, it matches no fence opener, and the incremental scanner holds it until
+      the closing tag arrives, which is the behaviour an incomplete block needs.
+    """
+    if "<compute" not in document:
+        return document
+
+    out: list[str] = []
+    pos = 0
+    for m in _COMPUTE_OPEN_RE.finditer(document):
+        if m.start() < pos:  # inside a body already consumed
+            continue
+        body_start = m.end() + 1 if document[m.end():m.end() + 1] == "\n" else m.end()
+        close = document.find(_COMPUTE_CLOSE, body_start)
+        if close == -1 and not close_unterminated:
+            break  # incomplete: leave this tag and everything after it raw
+        out.append(document[pos:m.start()])
+        body = document[body_start:] if close == -1 else document[body_start:close]
+        body = body.strip("\n")
+        fence = _pick_fence(body)
+        out.append(f"{fence}{_attrs_to_info(m.group(1))}\n{body}\n{fence}")
+        pos = len(document) if close == -1 else close + len(_COMPUTE_CLOSE)
+    out.append(document[pos:])
+    return "".join(out)
+
 
 @dataclass
 class Cell:
@@ -151,6 +223,7 @@ def _extract_path_from_body(content: str) -> tuple[str, str]:
 def parse(document: str) -> ParseResult:
     """Parse a literate markdown document into a cell sequence."""
     frontmatter, body, fm_lines = _strip_frontmatter(document)
+    body = normalize_compute_tags(body)
     source_lines = body.split("\n")
 
     tokens = _md.parse(body)
@@ -233,3 +306,65 @@ def parse(document: str) -> ParseResult:
             ))
 
     return ParseResult(frontmatter=frontmatter, cells=cells, errors=errors)
+
+
+_FENCE_OPEN_RE = re.compile(r"^(`{3,})lackpy(.*)$")
+
+
+def _info_to_attrs(info: str) -> str:
+    """``@hidden`` -> ``hidden``; ``@write(p)`` -> ``write="p"``."""
+    info = info.strip()
+    if not info:
+        return ""
+    m = re.match(r"@(\w+)(?:\(([^)]*)\))?\s*$", info)
+    if not m:
+        return ""
+    name, arg = m.group(1), m.group(2)
+    if name in _PATH_ANNOTATIONS and arg:
+        return f' {name}="{arg}"'
+    return f" {name}"
+
+
+def to_compute_tags(document: str) -> str:
+    """Render lackpy fences back as `<compute>` tags — the inverse of normalisation.
+
+    Round-trip artifacts must be spelled the way the writer spelled them. A
+    document authored in tags that returns as fences teaches the writer, mid
+    conversation, that fences are the syntax — and it resumes in the form that
+    truncates any payload containing a fence.
+    """
+    lines = document.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE_OPEN_RE.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        ticks, info = m.group(1), m.group(2)
+        close_re = re.compile(r"^`{%d,}\s*$" % len(ticks))
+        body: list[str] = []
+        j = i + 1
+        while j < len(lines) and not close_re.match(lines[j]):
+            body.append(lines[j])
+            j += 1
+        out.append(f"<compute{_info_to_attrs(info)}>")
+        out.extend(body)
+        out.append(_COMPUTE_CLOSE)
+        i = j + 1 if j < len(lines) else j
+    return "\n".join(out)
+
+
+def to_markdown(document: str) -> str:
+    """A literate document as PORTABLE markdown: fences, no kernel channel.
+
+    For anything that renders markdown but not lackpy -- a README, a docs site,
+    a viewer -- where ```lackpy fences highlight and a <compute> tag is raw
+    HTML. Pure text: nothing is executed, so rendering a document is safe even
+    though running one writes files and shells out.
+
+    A block whose body contains a fence keeps its longer outer fence, so the
+    payload survives as valid CommonMark.
+    """
+    return strip_kernel_blocks(normalize_compute_tags(document)).strip()

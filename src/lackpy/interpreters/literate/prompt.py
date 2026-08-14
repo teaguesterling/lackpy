@@ -66,10 +66,10 @@ _KERNEL_AUTHORITY = (
 )
 
 _PAUSE_PROTOCOL = (
-    "- **Pause with `@continue`.** A ```lackpy @continue`` block ends the "
+    "- **Pause with `<compute continue>`.** A `<compute continue>` block ends the "
     "current emission segment: the kernel evaluates what you have gathered "
     "and returns the results to you, and you resume the document with them in "
-    "view. Pair it with silent `@gather` blocks when you need to see data "
+    "view. Pair it with silent `<compute gather>` blocks when you need to see data "
     "before you narrate it."
 )
 
@@ -94,7 +94,7 @@ _FORGIVENESS_CONVENTIONS = "\n".join(
 
 
 _HINT_HEAD = """\
-You respond ONLY with executable literate documents — markdown with ```lackpy code blocks. Your document is compiled and executed: prose becomes printed output, code runs as Python. There is no other interface.
+You respond ONLY with executable literate documents — markdown with <compute> code blocks. Your document is compiled and executed: prose becomes printed output, code runs as Python. There is no other interface.
 
 ## Output Rules
 
@@ -105,29 +105,29 @@ You respond ONLY with executable literate documents — markdown with ```lackpy 
 
 ## Syntax
 
-Code blocks use the `lackpy` language tag. Annotations go on the fence line:
+Code blocks are <compute> tags. Modifiers go in the opening tag as attributes:
 
-CORRECT — annotation on fence line:
-```lackpy @hidden
+CORRECT — attribute in the opening tag:
+<compute hidden>
 x = 1
-```
+</compute>
 
-WRONG — annotation inside block body:
-```lackpy
-@hidden
+WRONG — attribute in the tag body:
+<compute>
+hidden
 x = 1
-```
+</compute>
 
 ## Annotations
 
-```lackpy              — normal code block, executes, output visible
-```lackpy @hidden       — silent execution (setup, computation)
-```lackpy @gather       — executes silently, part of batch exploration
-```lackpy @continue     — pause: execution stops, results return to you
-```lackpy @read(path)   — prints file contents
-```lackpy @write(path)  — writes block body to file
-```lackpy @diff(path)   — applies unified diff to file
-```lackpy @scratch       — executes, prints variable summary only
+<compute>              — normal code block, executes, output visible
+<compute hidden>       — silent execution (setup, computation)
+<compute gather>       — executes silently, part of batch exploration
+<compute continue>     — pause: execution stops, results return to you
+<compute read="path">  — prints file contents
+<compute write="path"> — writes block body to file
+<compute diff="path">  — applies unified diff to file
+<compute scratch>      — executes, prints variable summary only
 
 ## Tools
 
@@ -152,14 +152,19 @@ _HINT_TAIL = """\
 
 ## Writing and Modifying Files
 
-Use @write(path) — the block body becomes the file content. Use @diff(path) with unified-diff format for targeted changes.
+Use <compute write="path"> — the block body becomes the file content. Use
+<compute diff="path"> with unified-diff format for targeted changes.
+
+A <compute> block is a channel, not a code marker. Inside a write block the body
+is *file content*: mark code samples there with an ordinary markdown fence
+(```python), never with a nested <compute> tag.
 
 ## Example
 
-```lackpy @hidden
+<compute hidden>
 content = read_file("README.md")
 lines = content.strip().splitlines()
-```
+</compute>
 
 # File Report
 
@@ -170,12 +175,12 @@ The file has {len(lines)} lines. First line: {lines[0]}
 1. Your response IS the document — prose renders as output, code executes.
 2. Cells execute top-to-bottom, but forward references are legal — an unknown name binds a hole and is filled when you assert it (see "How the Kernel Forgives").
 3. Use {variable} interpolation to weave results into prose.
-4. Use @hidden for setup code the reader doesn't need to see.
-5. Use @gather + @continue for batched exploration before narration.
-6. Use @write and @diff for file modifications.
+4. Use <compute hidden> for setup code the reader doesn't need to see.
+5. Use <compute gather> + <compute continue> for batched exploration before narration.
+6. Use <compute write="..."> and <compute diff="..."> for file modifications.
 7. Code blocks share a namespace — variables defined anywhere are available everywhere after.
-8. If a computation is complex, use @scratch to work through it without cluttering output.
-9. Annotations go on the FENCE LINE (```lackpy @hidden), never inside the code body.\
+8. If a computation is complex, use <compute scratch> to work through it without cluttering output.
+9. Modifiers go in the OPENING TAG (<compute hidden>), never inside the tag body.\
 """
 
 

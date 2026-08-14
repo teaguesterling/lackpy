@@ -170,7 +170,10 @@ def make_tool_namespace(base_dir: str | Path | None = None) -> dict:
     """Create a namespace dict with all literate tools.
 
     When base_dir is provided, tool functions resolve relative paths
-    against it instead of relying on os.chdir().
+    against it explicitly, so a tool call is correct regardless of cwd. The
+    kernel additionally runs each cell with base_dir as cwd (see
+    kernel.lightweight._cwd), which is what makes a document's *ordinary*
+    Python -- open, os.path.exists, glob -- agree with these tools.
     """
     from functools import partial
     base = Path(base_dir) if base_dir else None
