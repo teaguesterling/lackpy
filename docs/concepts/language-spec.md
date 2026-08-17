@@ -36,6 +36,7 @@ The guiding principle is: **make the dangerous things impossible, not just forbi
 | Literals | `Constant` |
 | Lists, dicts, tuples, sets | `List`, `Dict`, `Tuple`, `Set` |
 | List / dict / set comprehensions | `ListComp`, `DictComp`, `SetComp` |
+| Generator expressions | `GeneratorExp` |
 | Conditional expression | `IfExp` |
 | f-strings | `JoinedStr`, `FormattedValue` |
 | Binary ops | `BinOp` with `Add`, `Sub`, `Mult`, `Div`, `Mod`, `FloorDiv` |
@@ -47,7 +48,7 @@ The guiding principle is: **make the dangerous things impossible, not just forbi
 ### Allowed builtins
 
 ```python
-len, sorted, reversed, enumerate, zip, range,
+len, sorted, reversed, enumerate, zip, range, next,
 min, max, sum, any, all, abs, round,
 str, int, float, bool, list, dict, set, tuple,
 isinstance, print
@@ -99,6 +100,34 @@ input
 ```
 
 `open` is forbidden because file I/O should go through kit tools (which are traced and namespaced). `getattr` / `setattr` and friends are forbidden because they provide a reflection escape hatch. `map`, `filter`, and `reduce` encourage a functional style that is harder to trace; use list comprehensions instead.
+
+### Generator expressions and `next`
+
+`GeneratorExp` is allowed and `next` is a permitted builtin, so the idiomatic
+"first match" forms work:
+
+```python
+next(x for x in items if x["name"] == target)
+any(x["failed"] for x in runs)
+sum(len(f) for f in files)
+```
+
+Previously only `[x for x in items if …][0]` was legal, which was inconsistent —
+`any`, `all`, `sum`, `min`, `max` and `sorted` are all permitted builtins and a
+generator expression is the idiomatic argument to every one of them.
+
+**Loops still cannot break.** `Break`, `Continue`, `While` and `Try` remain
+forbidden, so `for … if … break` is not an alternative; use `next(...)` or a
+comprehension.
+
+!!! warning "`DENIED_ATTRIBUTES` is load-bearing, not defense-in-depth"
+
+    A generator object *can* now be constructed, so `gi_frame`, `gi_code`,
+    `f_globals` and `f_builtins` are reachable by name. They are rejected by the
+    attribute guard, and that guard is the only thing keeping
+    `(x for x in y).gi_frame.f_globals` out of reach — it is no longer merely a
+    second line of defence. `TestGeneratorFrameEscapes` asserts each of those
+    rejections. Do not prune the list.
 
 ---
 

@@ -99,9 +99,10 @@ default; a `[[tools]]` entry with the same name overrides one.
 
 With the optional `mcp` extra (`pip install lackpy[mcp]`), lackpy can connect to an
 MCP server as a client and expose its tools — full specs (params from the tool's
-input schema, docs from its description) and a security grade derived from the
-tool's MCP annotations (`readOnlyHint`/`destructiveHint`/…, conservative when
-absent). Declare servers under `[mcp_servers]`:
+input schema, docs from its description), a return annotation derived from its
+`outputSchema`, and a security grade derived from its MCP annotations
+(`readOnlyHint`/`destructiveHint`/…, conservative when absent). Declare servers
+under `[mcp_servers]`:
 
 ```toml
 [mcp_servers.fs]
@@ -112,7 +113,51 @@ args = ["--root", "."]
 # optional per-tool grade override
 [mcp_servers.fs.tools.read_file]
 grade = { w = 1, d = 0 }
+
+# optional few-shot examples, retrieved by relevance at generation time
+[[mcp_servers.fs.tools.read_file.examples]]
+intent = "read the project README"
+code = "read_file('README.md')"
 ```
+
+#### Return shapes
+
+`ToolSpec.returns` is derived from the tool's published `outputSchema`, so
+`Toolbox.format_description` renders `name(args) -> list[dict]: …` rather than
+`-> Any: …`. This matters more than it sounds: the argument schema always reached
+the prompt while the return shape never did, so a generator had to *guess* what a
+call handed back — and a wrong guess produces a program that validates, executes
+and answers incorrectly, which is the one failure class the AST whitelist cannot
+catch.
+
+The mapping unwraps fastmcp's `{"properties": {"result": …}}` envelope and falls
+back to `Any` for an absent or unrecognised schema, so nothing regresses.
+
+!!! note "Ceiling worth knowing"
+
+    fastmcp emits `{"type": "object", "additionalProperties": true}` for any
+    dict-returning tool without a model annotation — a schema carrying no key
+    names. Such a tool improves only from `Any` to `dict`. Knowing a value is a
+    dict does not tell a generator *which key holds the answer*, so for those
+    tools name the keys in the intent, or annotate the return type server-side.
+
+#### Few-shot examples
+
+`[[mcp_servers.<id>.tools.<name>.examples]]` entries (`intent` + `code`) attach
+worked examples to a discovered tool. They join the same retrieval pool as
+builtin tools' examples (`collect_example_pool` → `retrieve_examples`) and the
+most relevant are injected at generation time.
+
+Discovery gives a tool a name, a description and an argument schema, but nothing
+about *usage* — so the idiom has to be guessed. Examples close that gap through
+the same channel as the signature rather than as prose in the intent, which
+matters because prose guidance is model-dependent: the same hint has been
+measured to help one model substantially and hurt another.
+
+Entries are **additive** — description, args and grade all survive. This is the
+distinction a top-level `[[tools]]` entry of the same name cannot make, since it
+would also replace the resolver and break the call. Malformed entries (missing
+`intent` or `code`) are dropped rather than passed through.
 
 MCP I/O runs on a dedicated client loop; an MCP-backed tool call from a (synchronous)
 lackpy program is bridged to that loop without blocking generation. A server that

@@ -47,6 +47,18 @@ expression.)
 
 **Exit code:** 0 on success, 1 on failure.
 
+**Streams:** the JSON envelope is written to **stdout** whatever the outcome —
+including when every inference provider fails to produce a valid program. Parse
+stdout and branch on the exit code (or on `success`); you do not need to read
+stderr to learn why a run failed.
+
+!!! note "Changed"
+
+    The all-providers-failed envelope previously went to stderr while the success
+    envelope went to stdout. A caller reading only stdout recorded such a failure
+    as empty output with no error, which is indistinguishable from "the model
+    produced nothing" — a different and much rarer thing.
+
 **Examples:**
 
 ```bash

@@ -2,7 +2,8 @@
 
 !!! note "Status"
     Increments 1–4 are **implemented** (config-defined source; async bridge + MCP
-    client; multi-source precedence + host-config ingestion; virtual/harness tools).
+    client; multi-source precedence + host-config ingestion; virtual/harness tools),
+    as are §6b (`returns` from `outputSchema`) and §6c (per-tool examples).
     Increment 5 (kits→profile) is **design-only** here. Siblings:
     [Direction](direction.md), [Interpreter Types](interpreter-types.md), RFC 0001
     (the `lackpy-lang` leaf split).
@@ -84,7 +85,8 @@ first MCP *client*.
   hazard (§5.5) by spawning stdio subprocesses before any execution-time `os.chdir`.
 - **Spec build:** MCP `name`→name (after namespacing §4), `description`→description+docs,
   `inputSchema`→`ArgSpec`s (unknown/nested → `type="Any"`, matching
-  `resolve_python_type`'s fallback), `annotations`→grade (§6).
+  `resolve_python_type`'s fallback), `annotations`→grade (§6),
+  `outputSchema`→`returns` (§6b), and config-declared `examples` (§6c).
 
 ## 4. Multi-inventory merge, namespacing, precedence (implemented)
 
@@ -200,6 +202,48 @@ raises **w**; destructiveness/non-idempotence raises **d**; **config override al
 wins**. Do not mix partial MCP annotation defaults with the mapping — any missing hint
 ⇒ conservative. Derived grades land on the `ToolSpec` and feed `compute_grade` →
 `ResolvedTools.grade` → `ToolsPolicySource` → kibitzer with **zero downstream change**.
+
+
+## 6b. Returns from `outputSchema` (implemented)
+
+`ToolSpec.returns` was hard-coded `"Any"` for every discovered tool, so
+`Toolbox.format_description` rendered `name(args) -> Any: …`. The argument schema
+reached the generator and the return shape never did, leaving it to guess what a
+call handed back — and a wrong guess yields a program that validates, executes and
+answers incorrectly, the one class the AST whitelist cannot catch.
+
+`returns_from_schema` unwraps fastmcp's `{"properties": {"result": …}}` envelope,
+maps JSON-Schema types onto the Python-ish names already used in prompts
+(`str`/`int`/`list[...]`/`dict{k1, k2}`), resolves `anyOf` to a union, and falls
+back to `"Any"` for absent or unrecognised schemas so nothing regresses.
+
+**Known ceiling.** fastmcp emits `{"type": "object", "additionalProperties":
+true}` for any dict-returning tool lacking a model annotation — no key names — so
+such a tool improves only from `Any` to `dict`. Closing that gap is a *server-side*
+change (annotate the return type), not a lackpy one.
+
+## 6c. Examples from config (implemented)
+
+`[[mcp_servers.<id>.tools.<name>.examples]]` (`intent` + `code`) attaches
+retrieval-augmented examples to a discovered tool, following the §6 grade-override
+plumbing exactly. They join the existing pool (`collect_example_pool` →
+`retrieve_examples`), so the most relevant reach the prompt at generation time.
+
+Rationale: discovery conveys a signature but nothing about *usage*, so the idiom
+has to be guessed. Delivering it as examples alongside the signature is a
+different channel from prose in the intent, and empirically a more reliable one —
+the same shape guidance given as prose has been measured to improve one model
+substantially and degrade another.
+
+**Additive, not replacing.** Description, args and grade survive. That is the
+distinction a top-level `[[tools]]` entry cannot make: sharing the name would win
+precedence (20 > 5) and replace the resolver too, breaking the call. Malformed
+entries (missing `intent` or `code`) are dropped.
+
+*Rejected:* a server-side `lackpy_examples()` hook mirroring squackit's
+`squackit_tools()`. That pattern currently has zero implementations anywhere, and
+its failure mode is a silently smaller pool — a false-capability signal, which is
+the worst kind to build on.
 
 ## 7. Virtual / harness-provided tools (implemented)
 
