@@ -205,12 +205,23 @@ class LackpyService:
                 url=cfg.get("url"),
                 headers=cfg.get("headers"),
             )
+            tool_cfg = cfg.get("tools", {}) or {}
             overrides = {
                 name: (g["w"], g["d"])
-                for name, t in (cfg.get("tools", {}) or {}).items()
+                for name, t in tool_cfg.items()
                 if isinstance((g := (t or {}).get("grade")), dict) and "w" in g and "d" in g
             }
-            out.append((McpToolSource(spec, self._mcp_client, grade_overrides=overrides),
+            # Few-shot examples per tool. Discovery yields a signature and a
+            # description but nothing about usage, so a generator has to guess the
+            # idiom; these reach the prompt through the same retrieval path as
+            # builtin tools' examples rather than as prose in the intent.
+            examples = {
+                name: [e for e in ex if isinstance(e, dict) and e.get("intent") and e.get("code")]
+                for name, t in tool_cfg.items()
+                if isinstance((ex := (t or {}).get("examples")), list)
+            }
+            out.append((McpToolSource(spec, self._mcp_client, grade_overrides=overrides,
+                                      example_overrides={k: v for k, v in examples.items() if v}),
                         self._PREC_OWN_MCP))
 
         # host configs — earlier file wins (descending precedence, floored at 1)

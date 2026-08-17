@@ -29,15 +29,26 @@ class McpToolSource:
         spec: Connection spec for the server.
         client: Shared MCP client owning the background loop/sessions.
         grade_overrides: Optional ``{tool_name: (w, d)}`` overrides (config wins).
+        example_overrides: Optional ``{tool_name: [{"intent": ..., "code": ...}]}``
+            few-shot examples, from ``[mcp_servers.<id>.tools.<name>] examples``.
+            Discovery gives an MCP tool a name, a description and an argument
+            schema, but nothing about *usage* — so a generator sees the signature
+            and has to guess the idiom. Examples reach the prompt through the same
+            retrieval path as builtin tools' (``collect_example_pool`` ->
+            ``retrieve_examples``), which is a different channel from prose in the
+            intent and is not pattern-completable the way an example value in
+            prose is.
         connect_timeout: Per-server connect/discovery timeout (seconds).
     """
 
     def __init__(self, spec: McpServerSpec, client: McpClient,
                  grade_overrides: dict[str, tuple[int, int]] | None = None,
+                 example_overrides: dict[str, list[dict]] | None = None,
                  connect_timeout: float = 30.0) -> None:
         self._spec = spec
         self._client = client
         self._grade_overrides = grade_overrides or {}
+        self._example_overrides = example_overrides or {}
         self._connect_timeout = connect_timeout
         self._discovered: list[Any] | None = None
 
@@ -93,7 +104,8 @@ class McpToolSource:
             provider_config={"mcp_name": tool.name},
             description=tool.description or "",
             args=_args_from_schema(getattr(tool, "inputSchema", None)),
-            returns="Any",
+            returns=returns_from_schema(getattr(tool, "outputSchema", None)),
+            examples=self._example_overrides.get(tool.name, []),
             grade_w=gw,
             effects_ceiling=gd,
         )
@@ -113,3 +125,45 @@ def _args_from_schema(schema: Any) -> list[ArgSpec]:
             description=pdef.get("description", ""),
         ))
     return args
+
+
+def returns_from_schema(schema: Any) -> str:
+    """Render an MCP ``outputSchema`` as a lackpy ``returns`` annotation.
+
+    ``Toolbox.format_description`` renders each tool as
+    ``name(args) -> returns: description``, so ``returns`` is where a shape
+    belongs — beside the signature rather than competing with it as prose. Every
+    MCP tool previously arrived as ``"Any"``, leaving the generator to guess what
+    a call handed back; a wrong guess yields a program that validates, runs and
+    answers incorrectly, which the AST whitelist cannot catch.
+
+    Unwraps fastmcp's ``{"properties": {"result": ...}}`` envelope, then maps
+    JSON-Schema types onto the Python-ish names the prompt already uses. Falls
+    back to ``"Any"`` so an absent or unrecognised schema behaves as before.
+
+    Note the ceiling: fastmcp emits ``{"type": "object", "additionalProperties":
+    true}`` for any dict-returning tool without a model annotation, which carries
+    no key names. Such a tool improves only from ``Any`` to ``dict`` — knowing a
+    value is a dict does not tell you which key holds the answer.
+    """
+    if not isinstance(schema, dict):
+        return "Any"
+    props = schema.get("properties")
+    if isinstance(props, dict) and set(props) == {"result"}:
+        return returns_from_schema(props["result"])
+    if isinstance(schema.get("anyOf"), list):
+        parts = [returns_from_schema(x) for x in schema["anyOf"]]
+        parts = [p for p in dict.fromkeys(parts) if p != "Any"]
+        return " | ".join(parts) if parts else "Any"
+    t = schema.get("type")
+    if t in ("string", "integer", "number", "boolean"):
+        return {"string": "str", "integer": "int",
+                "number": "float", "boolean": "bool"}[t]
+    if t == "array":
+        return f"list[{returns_from_schema(schema.get('items'))}]"
+    if t == "object":
+        keys = list(schema.get("properties") or {})
+        if keys:
+            return "dict{" + ", ".join(keys[:6]) + ("…}" if len(keys) > 6 else "}")
+        return "dict"
+    return "Any"

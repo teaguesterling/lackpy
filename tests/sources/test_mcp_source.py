@@ -91,3 +91,76 @@ async def test_run_program_calls_mcp_tool_end_to_end(tmp_path):
         assert res2.output == 5
     finally:
         svc.close()
+
+
+# ── returns from outputSchema, and few-shot examples for MCP tools ──────────
+
+def test_returns_from_schema_shapes():
+    """An MCP tool's declared output shape becomes its `returns` annotation.
+
+    `Toolbox.format_description` renders `name(args) -> returns: description`, so
+    this puts the shape beside the signature instead of leaving it at "Any" and
+    making the generator guess. A wrong guess yields a program that validates,
+    runs, and answers incorrectly.
+    """
+    from lackpy.sources.mcp.source import returns_from_schema as r
+
+    assert r(None) == "Any"                                  # absent -> unchanged
+    assert r({"type": "string"}) == "str"
+    assert r({"type": "array", "items": {"type": "object"}}) == "list[dict]"
+    # fastmcp wraps scalar/array returns in a synthetic {"result": ...} envelope
+    assert r({"properties": {"result": {"type": "string"}},
+              "x-fastmcp-wrap-result": True}) == "str"
+    assert r({"anyOf": [{"type": "array", "items": {"type": "object"}},
+                        {"type": "object"}]}) == "list[dict] | dict"
+    # named keys are the valuable case -- they are what a program subscripts
+    assert r({"type": "object",
+              "properties": {"events": {}, "total_count": {}}}) == "dict{events, total_count}"
+    # ...and fastmcp's keyless default carries no key names, so it can only
+    # improve from "Any" to "dict". Documented so the ceiling is not mistaken
+    # for a bug.
+    assert r({"type": "object", "additionalProperties": True}) == "dict"
+
+
+def test_example_overrides_reach_the_spec():
+    from lackpy.sources.mcp.client import McpClient, McpServerSpec
+    from lackpy.sources.mcp.source import McpToolSource
+
+    client = McpClient()
+    try:
+        spec = McpServerSpec(server_id="echo", transport="stdio",
+                             command=sys.executable, args=[FIXTURE])
+        ex = [{"intent": "say hello", "code": "echo(text='hello')"}]
+        src = McpToolSource(spec, client, example_overrides={"echo": ex})
+        specs = {s.name: s for s in src.discover()}
+        assert specs["echo"].examples == ex
+        # augments rather than replaces: everything else survives
+        assert specs["echo"].description
+        assert [a.name for a in specs["echo"].args]
+        # and a tool with no examples configured is untouched
+        assert specs["add"].examples == []
+    finally:
+        client.shutdown()
+
+
+async def test_examples_from_config_reach_the_prompt(tmp_path):
+    """Config-declared examples must land in the retrieval pool, not just the spec."""
+    from lackpy.config import LackpyConfig
+    from lackpy.service import LackpyService
+    from lackpy.infer.prompt import collect_example_pool
+
+    cfg = LackpyConfig(mcp_servers={"echo": {
+        **_server_cfg(),
+        "tools": {"echo": {"examples": [
+            {"intent": "echo a greeting", "code": "echo(text='hi')"},
+            {"intent": "missing code is skipped"},          # malformed -> dropped
+        ]}},
+    }})
+    svc = LackpyService(workspace=tmp_path, config=cfg)
+    try:
+        spec = svc.toolbox.tools["echo"]
+        assert len(spec.examples) == 1, "entries without intent+code must be dropped"
+        pool = collect_example_pool([spec])
+        assert [e.code for e in pool] == ["echo(text='hi')"]
+    finally:
+        svc.close()
