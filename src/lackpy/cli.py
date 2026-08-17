@@ -181,7 +181,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
             except RuntimeError as e:
-                print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
+                # Envelope on STDOUT, same as every other outcome; the exit code
+                # carries the failure. See the note on the delegate path below.
+                print(json.dumps({"success": False, "error": str(e)}, indent=2))
                 return 1
             print(gen.program)
             return 0
@@ -190,7 +192,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             result = asyncio.run(svc.delegate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
         except RuntimeError as e:
-            print(json.dumps({"success": False, "error": str(e)}, indent=2), file=sys.stderr)
+            # A caller parses one stream. Emitting the success envelope on stdout
+            # and this one on stderr means anybody reading stdout records a failed
+            # generation as empty output with no error -- a well-formed null result
+            # indistinguishable from "the model produced nothing", which is a
+            # different and much rarer thing. The exit code still says 1.
+            print(json.dumps({"success": False, "error": str(e)}, indent=2))
             return 1
         print(json.dumps(result, indent=2, default=str))
         return 0 if result["success"] else 1
