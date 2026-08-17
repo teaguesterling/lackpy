@@ -212,3 +212,50 @@ class TestGeneratorFrameEscapes:
         reach for `next(x for x in xs if ...)` precisely because it is idiomatic.
         """
         assert validate(program, allowed_names={"xs"}).valid
+
+
+class TestDunderStringsAreNotASink:
+    """Dunder *strings* were rejected wholesale; the sink they fed is closed anyway.
+
+    The blanket rule stopped ``getattr(obj, "__class__")`` -> ``__bases__`` ->
+    ``__subclasses__()``. Every step of that chain is independently unreachable,
+    so the rule cost the ability to write or read ``__init__.py`` and to emit
+    ``__main__`` guards while adding nothing. It was also bypassable by splitting
+    the literal, so it never carried the weight it appeared to.
+
+    These assert the closure directly, so removing the rule cannot quietly
+    re-open a route.
+    """
+
+    @pytest.mark.parametrize("program", [
+        "getattr(obj, '__class__')",
+        "getattr(obj, '_' + '_class_' + '_')",          # the split-literal bypass
+        "getattr(obj, f'__{name}__')",
+        "globals()['__builtins__']",
+        "vars(obj)['__class__']",
+        "type(obj).__bases__",
+        "__import__('os')",
+    ])
+    def test_string_mediated_reflection_rejected(self, program):
+        r = validate(program, allowed_names={"obj", "name"})
+        assert not r.valid, f"{program!r} unexpectedly validated"
+
+    @pytest.mark.parametrize("program", [
+        "obj.__class__",
+        "obj.__class__.__bases__",
+        "obj.__class__.__subclasses__()",
+    ])
+    def test_direct_dunder_attributes_still_rejected(self, program):
+        """Blocked by the underscore prefix rule, not by any string check."""
+        assert _attr_rejected(validate(program, allowed_names={"obj"}))
+
+    def test_dunder_string_in_a_subscript_is_permitted_and_inert(self):
+        """The one behaviour removal newly allows, recorded deliberately.
+
+        ``obj["__class__"]`` is ``__getitem__`` -- a key lookup, not attribute
+        access. Reaching a namespace from the result still requires
+        ``.__bases__``, which the prefix rule rejects (asserted above). Kept as a
+        test so a future reader sees it was considered rather than overlooked.
+        """
+        assert validate("obj['__class__']", allowed_names={"obj"}).valid
+        assert not validate("obj['__class__'].__bases__", allowed_names={"obj"}).valid

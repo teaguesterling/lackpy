@@ -166,14 +166,29 @@ def validate(
                     f"(e.g., key=lambda x: x['field'])"
                 )
 
-    # Step 6: String literal check — no dunder strings
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if "__" in node.value:
-                errors.append(
-                    f"String containing '__' at line {node.lineno}: "
-                    f"dunder access via string is forbidden"
-                )
+    # Step 6: (removed) blanket rejection of string literals containing "__".
+    #
+    # It existed to stop getattr(obj, "__class__") -> __bases__ -> __subclasses__().
+    # That sink is closed independently and more completely:
+    #
+    #   - getattr/setattr/delattr/hasattr/vars/globals/locals/dir/type/__import__
+    #     are all in FORBIDDEN_NAMES; eval/exec/compile are not in ALLOWED_BUILTINS,
+    #     so no call can turn a string into an attribute lookup at all.
+    #   - direct attribute access (obj.__class__) is rejected by the underscore
+    #     prefix rule in step 3.5, independent of any string.
+    #
+    # It was also incomplete on its own terms — "_" + "_class_" + "_" evaluates to
+    # the same string and passed — so it never carried the weight it appeared to.
+    #
+    # Its cost was real: any string containing "__" was rejected, so a program
+    # could neither write nor read "__init__.py", emit `if __name__ ==
+    # "__main__":`, nor generate a class with a `def __init__`. Scaffolding a
+    # Python package was impossible.
+    #
+    # The one behaviour this newly permits is a dunder string in a SUBSCRIPT,
+    # e.g. obj["__class__"]. That is __getitem__ — a key lookup — not attribute
+    # access; reaching a namespace from it still requires .__bases__, which the
+    # prefix rule blocks. Asserted in TestDunderStringsAreNotASink.
 
     # Step 7: Custom rules
     if extra_rules:

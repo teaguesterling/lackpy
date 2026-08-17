@@ -160,16 +160,31 @@ for item in items:
     ...
 ```
 
-### Dunder strings
+### Dunder strings are permitted
 
-Any string constant containing `__` is rejected:
+A string constant containing `__` is ordinary data:
 
 ```python
-# Invalid — contains dunder
-name = "__class__"
+write_file("src/pkg/__init__.py", "")
+write_file("m.py", 'if __name__ == "__main__":\n    pass\n')
 ```
 
-This prevents `__` strings from being used as arguments to reflection functions, even if those functions were somehow available.
+lackpy previously rejected every such string, which meant a program could neither
+create nor read a Python package, emit a `__main__` guard, nor generate a class
+with a `def __init__`.
+
+The rule existed to stop `getattr(obj, "__class__")` → `__bases__` →
+`__subclasses__()`. That chain is closed independently and more completely:
+`getattr`, `setattr`, `vars`, `globals`, `type` and `__import__` are all forbidden
+names, `eval`/`exec`/`compile` are not permitted builtins, so **no call can turn a
+string into an attribute lookup**; and direct `obj.__class__` is rejected by the
+underscore-prefix rule regardless of any string. The old rule was also bypassable
+by splitting the literal (`"_" + "_class_" + "_"`), so it never carried the weight
+it appeared to.
+
+Attribute access is unchanged — `obj.__class__` is still rejected. Only the
+blanket rejection of dunder *strings* is gone. `TestDunderStringsAreNotASink`
+asserts each step of the reflection chain remains closed.
 
 ---
 
