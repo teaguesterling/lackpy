@@ -176,3 +176,39 @@ class TestNoOverBlocking:
         prog = "d = load()\nv = d.get('key')"
         result = validate(prog, allowed_names={"load"})
         assert result.valid, result.errors
+
+
+class TestGeneratorFrameEscapes:
+    """GeneratorExp is in the subset, so a generator object CAN now be built.
+
+    Before that change these attributes were unreachable *by construction* and
+    ``DENIED_ATTRIBUTES`` was defense-in-depth. It is now the live guard: it is
+    the only thing standing between a generator expression and
+    ``gi_frame.f_globals``. These tests exist so pruning that list fails loudly.
+    """
+
+    @pytest.mark.parametrize("program", [
+        "(x for x in xs).gi_frame",
+        "(x for x in xs).gi_frame.f_globals",
+        "(x for x in xs).gi_frame.f_builtins",
+        "(x for x in xs).gi_code",
+        "next(x for x in xs).__class__",
+    ])
+    def test_generator_internals_rejected(self, program):
+        assert _attr_rejected(validate(program, allowed_names={"xs"}))
+
+    @pytest.mark.parametrize("program", [
+        "next(x for x in xs if x)",
+        "any(x for x in xs)",
+        "all(x for x in xs)",
+        "sum(x for x in xs)",
+        "sorted(x for x in xs)",
+    ])
+    def test_idiomatic_generator_forms_accepted(self, program):
+        """The point of allowing GeneratorExp: `any`/`all`/`sum`/`next` are in
+        ALLOWED_BUILTINS and their idiomatic argument *is* a generator, so
+        forbidding the expression while permitting the functions was internally
+        inconsistent -- and it penalised stronger models specifically, since they
+        reach for `next(x for x in xs if ...)` precisely because it is idiomatic.
+        """
+        assert validate(program, allowed_names={"xs"}).valid
