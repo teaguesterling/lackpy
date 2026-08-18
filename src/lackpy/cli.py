@@ -11,6 +11,15 @@ from typing import Any
 
 
 
+# Failures a caller should receive as an envelope rather than a traceback.
+# RuntimeError is "all providers failed"; FileNotFoundError is an unresolvable
+# profile (`--profile log` where log is a tool, or the default 'debug' profile
+# that does not ship); KeyError is an unknown tool name. All three are ordinary
+# misuse, and a caller parsing stdout should not have to scrape a stack trace to
+# learn which.
+_ENVELOPE_ERRORS = (RuntimeError, FileNotFoundError, KeyError, NotImplementedError)
+
+
 def _parse_profile(profile_str: str) -> str | list[str]:
     """Parse the --profile argument.
 
@@ -180,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.generate:
             try:
                 gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
-            except RuntimeError as e:
+            except _ENVELOPE_ERRORS as e:
                 # Envelope on STDOUT, same as every other outcome; the exit code
                 # carries the failure. See the note on the delegate path below.
                 print(json.dumps({"success": False, "error": str(e)}, indent=2))
@@ -191,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         # Default: delegate (generate + run)
         try:
             result = asyncio.run(svc.delegate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
-        except RuntimeError as e:
+        except _ENVELOPE_ERRORS as e:
             # A caller parses one stream. Emitting the success envelope on stdout
             # and this one on stderr means anybody reading stdout records a failed
             # generation as empty output with no error -- a well-formed null result
