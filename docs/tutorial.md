@@ -564,10 +564,19 @@ These are additive — description, arguments and grade are untouched. That is t
 difference from a top-level `[[tools]]` entry of the same name, which would
 replace the tool outright and break the call.
 
-Prefer this to putting the same guidance in the intent. Examples reach the model
-through the same channel as the signature, where prose in the intent competes
-with the task description — and prose guidance has been measured to help one
-model and hurt another.
+**Measured caveat: this did not beat naming the shape in the intent.** On a
+six-task battery over blq/jetsam/squackit with `Qwen3-Coder-30B-A3B-Instruct`,
+with retrieval verified to be injecting the examples:
+
+| what the prompt carried | correct |
+|---|---|
+| nothing | 2/6 |
+| per-tool examples | 2/6 |
+| the return shape stated in the intent | **5/6** |
+
+So examples are worth attaching when a tool has a genuine idiom to teach, but if
+you need a specific run to work, **say the shape in the intent**. One model, one
+battery, temperature 0.2 — treat 2 vs 5 as real and 1 vs 2 as noise.
 
 ---
 

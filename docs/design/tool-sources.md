@@ -230,10 +230,19 @@ plumbing exactly. They join the existing pool (`collect_example_pool` →
 `retrieve_examples`), so the most relevant reach the prompt at generation time.
 
 Rationale: discovery conveys a signature but nothing about *usage*, so the idiom
-has to be guessed. Delivering it as examples alongside the signature is a
-different channel from prose in the intent, and empirically a more reliable one —
-the same shape guidance given as prose has been measured to improve one model
-substantially and degrade another.
+has to be guessed; config can supply it once rather than every caller repeating
+it.
+
+**The stronger claim did not survive measurement.** The feature was argued for on
+a channel hypothesis — that examples reaching the model alongside the signature
+would be more reliable than prose in the intent, which is model-dependent (the
+same hint has been measured to take one model 0/6 → 5/6 and degrade another).
+Tested on a six-task battery over blq/jetsam/squackit with
+`Qwen3-Coder-30B-A3B-Instruct`, with the examples verified to be reaching the
+prompt: **no guidance 2/6, examples 2/6, shape stated in the intent 5/6.** The
+hypothesis is unsupported on that evidence. The plumbing is kept — it is cheap,
+additive, and one model on one battery is thin ground for removing a capability —
+but it should not be recommended over stating the shape.
 
 **Additive, not replacing.** Description, args and grade survive. That is the
 distinction a top-level `[[tools]]` entry cannot make: sharing the name would win

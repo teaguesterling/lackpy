@@ -149,10 +149,17 @@ builtin tools' examples (`collect_example_pool` → `retrieve_examples`) and the
 most relevant are injected at generation time.
 
 Discovery gives a tool a name, a description and an argument schema, but nothing
-about *usage* — so the idiom has to be guessed. Examples close that gap through
-the same channel as the signature rather than as prose in the intent, which
-matters because prose guidance is model-dependent: the same hint has been
-measured to help one model substantially and hurt another.
+about *usage* — so the idiom has to be guessed. Examples let a config supply it
+once instead of every caller repeating it.
+
+!!! warning "They did not outperform saying it in the intent"
+
+    Measured on a six-task battery with `Qwen3-Coder-30B-A3B-Instruct`, retrieval
+    verified: no guidance 2/6, per-tool examples 2/6, the return shape stated in
+    the intent 5/6. The channel argument — that examples reach the model
+    alongside the signature rather than competing with the task description — is
+    not supported by that result. Attach examples for idioms worth stating once;
+    state the shape in the intent when a specific run has to work.
 
 Entries are **additive** — description, args and grade all survive. This is the
 distinction a top-level `[[tools]]` entry of the same name cannot make, since it

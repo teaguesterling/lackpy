@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..lang.grammar import ALLOWED_BUILTINS
-from .retrieval import Example, format_examples_for_prompt, retrieve_examples
+from .retrieval import (Example, expand_intent_keywords,
+                        format_examples_for_prompt, retrieve_examples)
 
 _TEMPLATE = """\
 You are a Jupyter notebook cell generator. Write a single cell \
@@ -112,6 +113,14 @@ def collect_example_pool(tool_specs: list) -> list[Example]:
     Each tool may contribute zero or more examples. Returns an empty list if
     none are defined. Example dicts are converted to Example objects; entries
     missing required fields are skipped.
+
+    **Tags default to the example's own intent words.** ``retrieve_examples``
+    scores by tag overlap and drops anything scoring zero, so an untagged example
+    is silently unreachable no matter how relevant it is — it is accepted, stored
+    on the spec, and never selected. Hand-tagging is reasonable for examples
+    registered in Python; it is a trap for examples declared in config, where the
+    omission is invisible. Deriving tags from the intent makes the common case
+    work and an explicit ``tags`` list still wins.
     """
     pool: list[Example] = []
     for spec in tool_specs:
@@ -120,7 +129,7 @@ def collect_example_pool(tool_specs: list) -> list[Example]:
             code = ex.get("code", "")
             if not intent or not code:
                 continue
-            tags = set(ex.get("tags", []))
+            tags = set(ex.get("tags") or expand_intent_keywords(intent))
             pool.append(Example(intent=intent, code=code, tags=tags))
     return pool
 
