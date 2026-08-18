@@ -225,7 +225,43 @@ class TestDunderStringsAreNotASink:
 
     These assert the closure directly, so removing the rule cannot quietly
     re-open a route.
+
+    An earlier version of this class claimed the only newly-permitted behaviour
+    was a dunder string in a subscript. That was wrong: ``str.format`` resolves
+    attributes named by the *format string*, so
+    ``"{0.__init__.__globals__[SECRET]}".format(obj)`` validated and returned a
+    module global. The rule that actually holds the line is not "reject dunder
+    strings" but "no sink resolves a string as an attribute name" -- format,
+    format_map and sort_by are those sinks, and each is closed by name below.
     """
+
+    @pytest.mark.parametrize("program", [
+        '"{0.__init__.__globals__[SECRET]}".format(obj)',
+        '"{0.__class__}".format(obj)',
+        '"{a.__class__}".format_map(d)',
+        'obj.format("x")',
+        '"{}".format(obj)',
+    ])
+    def test_format_is_not_a_route_to_attributes(self, program):
+        """format/format_map traverse attributes the AST never sees."""
+        r = validate(program, allowed_names={"obj", "d"})
+        assert not r.valid, f"{program!r} unexpectedly validated"
+
+    @pytest.mark.parametrize("program", [
+        'f"{obj}"',
+        'f"count is {len(xs)}"',
+        'write_file("__init__.py", "")',
+        '''write_file("m.py", "if __name__ == '__main__':\\n    pass\\n")''',
+        'find_names(source="**/*.py", selector=".fn#__init__")',
+    ])
+    def test_dunder_strings_as_data_still_work(self, program):
+        """The cost that justified dropping the blanket rule stays bought.
+
+        f-strings are the sanctioned replacement for format: their interpolations
+        are real AST expressions and go through the attribute rule.
+        """
+        r = validate(program, allowed_names={"obj", "xs", "write_file", "find_names"})
+        assert r.valid, f"{program!r} rejected: {r.errors}"
 
     @pytest.mark.parametrize("program", [
         "getattr(obj, '__class__')",

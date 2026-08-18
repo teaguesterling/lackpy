@@ -78,6 +78,16 @@ DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     "gi_frame", "gi_code", "cr_frame", "cr_code",
     "ag_frame", "ag_code", "tb_frame", "tb_next",
     "func_globals", "func_code",
+    # str.format/format_map traverse attributes driven by the *format string*,
+    # which is runtime data the AST never sees:
+    #     "{0.__init__.__globals__[SECRET]}".format(obj)
+    # Every name in that chain is invisible to Step 3.5 -- the only attribute in
+    # the source is ``format`` itself, which has no leading underscore. This is
+    # the one call form that turns a string into an attribute lookup, so it is
+    # denied by name. f-strings are the replacement and are safe for the exact
+    # reason format is not: their interpolations are real AST expressions and go
+    # through the attribute rule like anything else.
+    "format", "format_map",
 })
 
 ALLOWED_BUILTINS: frozenset[str] = frozenset({

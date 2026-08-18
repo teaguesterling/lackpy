@@ -12,7 +12,26 @@ from .trace import Trace, make_traced
 
 
 def _sort_by(items, key, reverse=False):
-    return sorted(items, key=lambda x: x[key] if isinstance(x, dict) else getattr(x, key), reverse=reverse)
+    """Sort dicts by key or objects by attribute.
+
+    The attribute name is caller data, so this is a place where a string becomes
+    an attribute lookup -- the same shape as str.format. The validator's Step 3.5
+    prefix rule cannot see it, because the name never appears as an ast.Attribute.
+    Underscore keys are refused here instead. Dict subscripting is untouched: a
+    mapping key is data, not a namespace.
+    """
+    def _get(x):
+        if isinstance(x, dict):
+            return x[key]
+        if isinstance(key, str) and key.startswith("_"):
+            raise ValueError(
+                f"sort_by: refusing private/dunder attribute {key!r}; "
+                f"attribute names starting with '_' are not reachable from a "
+                f"lackpy program"
+            )
+        return getattr(x, key)
+
+    return sorted(items, key=_get, reverse=reverse)
 
 
 class RestrictedRunner:

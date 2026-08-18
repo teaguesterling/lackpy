@@ -172,10 +172,16 @@ def validate(
     # That sink is closed independently and more completely:
     #
     #   - getattr/setattr/delattr/hasattr/vars/globals/locals/dir/type/__import__
-    #     are all in FORBIDDEN_NAMES; eval/exec/compile are not in ALLOWED_BUILTINS,
-    #     so no call can turn a string into an attribute lookup at all.
+    #     are all in FORBIDDEN_NAMES; eval/exec/compile are not in ALLOWED_BUILTINS.
     #   - direct attribute access (obj.__class__) is rejected by the underscore
     #     prefix rule in step 3.5, independent of any string.
+    #   - str.format/format_map DO turn a string into an attribute lookup, and
+    #     are therefore denied by name in DENIED_ATTRIBUTES. An earlier version of
+    #     this comment asserted no such call existed; it was wrong, and
+    #     "{0.__init__.__globals__[SECRET]}".format(obj) read a module global
+    #     through it. Any future builtin that takes an attribute name as DATA
+    #     belongs on that deny list too -- that, not the string literal, is the
+    #     sink. sort_by is the other one, and rejects underscore keys at runtime.
     #
     # It was also incomplete on its own terms — "_" + "_class_" + "_" evaluates to
     # the same string and passed — so it never carried the weight it appeared to.
@@ -185,10 +191,11 @@ def validate(
     # "__main__":`, nor generate a class with a `def __init__`. Scaffolding a
     # Python package was impossible.
     #
-    # The one behaviour this newly permits is a dunder string in a SUBSCRIPT,
-    # e.g. obj["__class__"]. That is __getitem__ — a key lookup — not attribute
-    # access; reaching a namespace from it still requires .__bases__, which the
-    # prefix rule blocks. Asserted in TestDunderStringsAreNotASink.
+    # What this newly permits is a dunder string as DATA: a subscript key
+    # (obj["__class__"] is __getitem__, not attribute access), a filename, or a
+    # literal in generated source. What it must never permit is a dunder string
+    # reaching a sink that resolves it as an attribute name -- see the deny list
+    # above. Asserted in TestDunderStringsAreNotASink.
 
     # Step 7: Custom rules
     if extra_rules:
