@@ -244,6 +244,26 @@ hypothesis is unsupported on that evidence. The plumbing is kept — it is cheap
 additive, and one model on one battery is thin ground for removing a capability —
 but it should not be recommended over stating the shape.
 
+**Why, mechanically.** Reading the generated programs, the failure is not that the
+examples were absent or diluted — they were in the prompt and the model ignored
+them. For `blq.events` the prompt carried `len(result['events'])` verbatim and the
+model emitted `events(severity='error', limit=1000)`, returning the raw dict. The
+prose arm never showed code; it merely *stated* that the dict has a `total_count`
+key, and the model used that key directly. The same pattern held for
+`squackit.find_names` ("returns one newline-separated STRING" → `.split()`) and
+for the cross-server task ("each event has `ref_file`" → used it).
+
+So the transferable signal is a **named field or type**, not a demonstrated
+unwrap. That also explains the one case where examples were actively harmful:
+given a single `find_names` example using a `.cls` selector, the model
+generalised to a fabricated API (`find_names('src', 'file')`), scoring below the
+no-guidance baseline. A worked example is a pattern to imitate, and imitation
+generalises in directions a declarative statement does not.
+
+If that reading is right, the better place for this information is the tool's
+`returns` annotation (§6b) and its description — both of which *name* things —
+rather than an example bank.
+
 **Additive, not replacing.** Description, args and grade survive. That is the
 distinction a top-level `[[tools]]` entry cannot make: sharing the name would win
 precedence (20 > 5) and replace the resolver too, breaking the call. Malformed
