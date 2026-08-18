@@ -50,6 +50,7 @@ API as its own cognitive task, separately from restricted Python
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any
 
 from ..tools.registry import ResolvedTools
@@ -150,7 +151,17 @@ def _build_plucker_kit(
     already documents itself as "directory the interpreter operates against";
     this honours it. Serving a corpus from a different working directory — what
     an MCP server does — is the case that made it necessary.
+
+    Resolved to an absolute path *here*, not inside the closure, because
+    ``PythonInterpreter.execute`` chdirs into ``context.base_dir`` before any
+    program runs. A relative base_dir stringified inside the closure would be
+    re-resolved against that new cwd and applied twice — ``corpus`` becoming
+    ``corpus/corpus`` — which fails with the same unhelpful IO Error this
+    function exists to prevent. ``ExecutionContext.base_dir`` is a plain Path
+    with no normalization and callers do pass relative ones.
     """
+    root = None if base_dir is None else Path(base_dir).resolve()
+
     def source(code: str | None = None) -> Any:
         try:
             from pluckit import Plucker, AstViewer
@@ -166,7 +177,7 @@ def _build_plucker_kit(
                 "set via context.config['code']"
             )
         plugins = [AstViewer, *extra_plugins]
-        kwargs = {"repo": str(base_dir)} if base_dir is not None else {}
+        kwargs = {"repo": str(root)} if root is not None else {}
         return Plucker(code=effective, plugins=plugins, **kwargs)
 
     tools = {

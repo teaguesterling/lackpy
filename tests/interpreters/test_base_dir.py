@@ -74,3 +74,38 @@ async def test_without_base_dir_the_sandbox_rejects(corpus, elsewhere):
         interp, f'source("{corpus / "sample.py"}").find(".fn").count()', ctx)
     assert not result.success
     assert "IO Error" in str(result.error) or "pattern" in str(result.error)
+
+
+# The two tests above go through PythonInterpreter.execute, which chdirs into
+# context.base_dir before running anything -- so they pass even with the repo=
+# forwarding deleted, and do not actually exercise it. These do: they build the
+# kit directly, outside any chdir, which is the shape an MCP server has.
+
+
+def test_repo_reaches_plucker_without_a_chdir(corpus, elsewhere):
+    """The forwarding itself, with nothing else standing in for it."""
+    from lackpy.interpreters.plucker import _build_plucker_kit
+
+    tools = _build_plucker_kit(None, [], base_dir=corpus)
+    plucker = tools.callables["source"]((corpus / "sample.py").read_text())
+    assert Path(plucker.repo).resolve() == corpus.resolve()
+
+
+def test_relative_base_dir_is_not_applied_twice(tmp_path_factory, monkeypatch):
+    """A relative base_dir must resolve once, not once per layer.
+
+    PythonInterpreter.execute chdirs into base_dir, so a relative path
+    stringified inside the source() closure would be re-resolved against the new
+    cwd -- 'corpus' becoming 'corpus/corpus'. ExecutionContext.base_dir is a
+    plain Path with no normalization and callers do pass relative values.
+    """
+    from lackpy.interpreters.plucker import _build_plucker_kit
+
+    parent = tmp_path_factory.mktemp("parent")
+    (parent / "corpus").mkdir()
+    (parent / "corpus" / "sample.py").write_text(SOURCE)
+    monkeypatch.chdir(parent)
+
+    tools = _build_plucker_kit(None, [], base_dir=Path("corpus"))
+    plucker = tools.callables["source"](SOURCE)
+    assert Path(plucker.repo).resolve() == (parent / "corpus").resolve()
