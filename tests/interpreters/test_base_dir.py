@@ -24,6 +24,13 @@ import pytest
 from lackpy.interpreters.base import ExecutionContext, run_interpreter
 from lackpy.interpreters.plucker import PluckerInterpreter
 
+# pluckit is an optional extra and CI installs only .[dev], so these skip there --
+# matching tests/interpreters/test_plucker.py. Importing PluckerInterpreter is
+# safe without it (the pluckit import lives inside the source() closure); running
+# a program is not, and the failure is an unhelpful "requires pluckit" assertion
+# rather than a skip.
+pytest.importorskip("pluckit")
+
 SOURCE = "def greet():\n    pass\n\n\ndef double(x):\n    return x * 2\n"
 
 
