@@ -122,6 +122,7 @@ class PluckerInterpreter(DelegatingInterpreter):
         tools = _build_plucker_kit(
             default_code=default_code,
             extra_plugins=extra_plugins,
+            base_dir=context.base_dir,
         )
         return dataclasses.replace(context, tools=tools)
 
@@ -129,12 +130,26 @@ class PluckerInterpreter(DelegatingInterpreter):
 def _build_plucker_kit(
     default_code: str | None,
     extra_plugins: list,
+    base_dir: "Path | None" = None,
 ) -> ResolvedTools:
     """Construct a ResolvedTools whose ``source`` returns a live Plucker.
 
-    The ``source`` callable is a closure over the default code and the
-    extra plugins list, so each plucker interpreter invocation gets a
-    tools that reflects its current context.
+    The ``source`` callable is a closure over the default code, the extra
+    plugins list and the base directory, so each plucker interpreter
+    invocation gets a tools that reflects its current context.
+
+    ``base_dir`` is forwarded to ``Plucker(repo=...)``. fledgling >= 0.13
+    sandboxes the DuckDB connection to a project root and rejects anything
+    outside it; without a root that root is the process cwd, so an interpreter
+    asked to read a corpus it is not sitting in fails with
+
+        IO Error: Failed to initialize file processing: Failed to process
+        pattern '<path>'
+
+    which names neither the root nor the reason. ``ExecutionContext.base_dir``
+    already documents itself as "directory the interpreter operates against";
+    this honours it. Serving a corpus from a different working directory — what
+    an MCP server does — is the case that made it necessary.
     """
     def source(code: str | None = None) -> Any:
         try:
@@ -151,7 +166,8 @@ def _build_plucker_kit(
                 "set via context.config['code']"
             )
         plugins = [AstViewer, *extra_plugins]
-        return Plucker(code=effective, plugins=plugins)
+        kwargs = {"repo": str(base_dir)} if base_dir is not None else {}
+        return Plucker(code=effective, plugins=plugins, **kwargs)
 
     tools = {
         "source": ToolSpec(
