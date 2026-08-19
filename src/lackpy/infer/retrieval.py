@@ -84,12 +84,31 @@ class Example:
     tags: set[str] = field(default_factory=set)
 
 
+# Function words carry no topical signal, and retrieval scores by raw tag
+# overlap with min_score=1 -- so without this, "rename the symbol foo in the
+# repo" and "count the number of errors in the log" score 2 on {the, in} alone
+# and an unrelated example can outrank a hand-tagged relevant one. That matters
+# more since example tags default to these keywords when none are declared:
+# the noise ends up on both sides of the comparison.
+_STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "of", "in", "on", "at", "to", "for", "from", "by",
+    "with", "and", "or", "but", "is", "are", "was", "were", "be", "been",
+    "it", "its", "this", "that", "these", "those", "as", "if", "then",
+    "there", "here", "so", "into", "out", "up", "down", "over", "under",
+    "any", "each", "some", "all", "no", "not", "do", "does", "did",
+    "i", "you", "we", "they", "me", "my", "your", "our",
+})
+
+
 def expand_intent_keywords(intent: str) -> set[str]:
     """Tokenize an intent and expand tokens using the synonym map.
 
     Lowercases and splits on whitespace, then for each word adds any
     synonyms from the expansion map. Substring matches also apply so
     ``don't`` inside a larger string still contributes its synonyms.
+
+    Function words are dropped (see ``_STOPWORDS``). Synonym expansions are
+    not filtered -- those are deliberate mappings, not incidental tokens.
     """
     words: set[str] = set()
     lower = intent.lower()
@@ -98,7 +117,8 @@ def expand_intent_keywords(intent: str) -> set[str]:
     for tok in tokens:
         # Strip common punctuation
         clean = tok.strip(".,;:'\"!?")
-        words.add(clean)
+        if clean and clean not in _STOPWORDS:
+            words.add(clean)
 
     # Substring-based expansion — catches "don't" even if stuck to punctuation
     for trigger, synonyms in _SYNONYMS.items():
