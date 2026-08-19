@@ -128,12 +128,22 @@ class TestUnresolvableProfileErrors:
 
     def test_default_debug_profile_explains_itself(self, toolbox, tmp_path):
         """config.profile_default is 'debug' and no debug profile ships, so
-        omitting --profile fails looking for a file that never existed."""
+        omitting --profile fails looking for a file that never existed.
+
+        The message must not assert the profile was *defaulted*: this branch
+        fires on the name, and `--profile debug` typed explicitly lands here too.
+        It is not reachable from this function which of the two happened.
+        """
         with pytest.raises(FileNotFoundError) as e:
             resolve_tools("debug", toolbox, kits_dir=tmp_path)
         msg = str(e.value)
-        assert "no debug profile ships" in msg
+        assert "No 'debug' profile ships" in msg
+        assert "built-in default" in msg
         assert "--profile none --tools" in msg
+        assert "Nothing specified a profile" not in msg, (
+            "message claims the profile was defaulted, which this branch "
+            "cannot know -- `--profile debug` reaches it too"
+        )
 
     def test_unknown_name_lists_available_profiles(self, toolbox, tmp_path):
         (tmp_path / "fix.profile").write_text("read_file\n")

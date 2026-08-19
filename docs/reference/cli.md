@@ -80,6 +80,14 @@ lackpy -c "<intent>" --generate [--profile KIT]
 
 **Exit code:** 0 on success; 1 if generation fails.
 
+**Streams:** stdout carries the program source and nothing else. On failure the
+error envelope goes to **stderr** and stdout stays empty, so
+`lackpy -c "…" --generate > out.py` never leaves JSON in `out.py`. This is the
+opposite of the delegate path above, and deliberately: there stdout is already
+JSON in every outcome, so one stream can carry all of them; here stdout is an
+artifact, and mixing a diagnostic into it corrupts the artifact. Empty stdout
+with exit 1 is the unambiguous "no program" signal.
+
 **Example:**
 
 ```bash

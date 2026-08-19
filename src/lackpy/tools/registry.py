@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..lang.grader import Grade, compute_grade
-from .toolbox import Toolbox, ToolSpec
+from .toolbox import Toolbox, ToolSpec, UnknownToolError
 
 
 @dataclass
@@ -114,12 +114,20 @@ def _load_tools_file(name: str, kits_dir: Path | None,
                     f"token is read as a profile name; to select tools directly use:"
                     f"\n    --profile none --tools {name}")
         elif name == "debug":
-            hint = ("\n\nNothing specified a profile, so the configured default "
-                    "('debug') was used — and no debug profile ships. Either set "
-                    "[profile] default in .lackpy/config.toml, or pass "
-                    "--profile none --tools <a,b>.")
+            # Fires on the NAME, so it cannot claim the profile was defaulted --
+            # `--profile debug` reaches here too, and the configured default is
+            # not visible from this function. Say what is true of both.
+            hint = ("\n\nNo 'debug' profile ships, and 'debug' is the built-in "
+                    "default — so this is also what you get when nothing "
+                    "specified a profile at all. Either set [profile] default in "
+                    ".lackpy/config.toml, or pass --profile none --tools <a,b>.")
         else:
-            avail = sorted(p.stem for p in kits_dir.glob("*.profile")) if kits_dir.is_dir() else []
+            # Both suffixes, because the fallback above loads either -- listing
+            # only *.profile reports "(none)" in a workspace where `--profile fix`
+            # works off fix.kit.
+            avail = sorted({p.stem for p in kits_dir.glob("*.profile")}
+                           | {p.stem for p in kits_dir.glob("*.kit")}) \
+                if kits_dir.is_dir() else []
             hint = (f"\n\nProfiles in {kits_dir}: {', '.join(avail) or '(none)'}. "
                     f"To select tools directly: --profile none --tools <a,b>.")
         raise FileNotFoundError(
@@ -154,7 +162,7 @@ def _resolve_tool_names(tool_names: list[str], alias_names: list[str], toolbox: 
         if name not in toolbox.tools:
             available = sorted(toolbox.tools)
             shown = ", ".join(available[:20]) + (" …" if len(available) > 20 else "")
-            raise KeyError(
+            raise UnknownToolError(
                 f"Unknown tool {name!r}: no configured source provides it. Tools come "
                 f"from builtins, config [[tools]], or an MCP server — confirm the kit's "
                 f"names match a configured source. Available now: {shown or '(none)'}"

@@ -9,15 +9,25 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .tools.toolbox import UnknownToolError
+
 
 
 # Failures a caller should receive as an envelope rather than a traceback.
 # RuntimeError is "all providers failed"; FileNotFoundError is an unresolvable
 # profile (`--profile log` where log is a tool, or the default 'debug' profile
-# that does not ship); KeyError is an unknown tool name. All three are ordinary
+# that does not ship); UnknownToolError is an unknown tool name. All are ordinary
 # misuse, and a caller parsing stdout should not have to scrape a stack trace to
 # learn which.
-_ENVELOPE_ERRORS = (RuntimeError, FileNotFoundError, KeyError, NotImplementedError)
+#
+# UnknownToolError rather than bare KeyError on purpose: this wraps the whole
+# generate/delegate call, so catching KeyError here would turn any internal dict
+# miss -- in inference, tool resolution, execution -- into an envelope reading
+# {"error": "'somekey'"} with the traceback thrown away. A bug would be reported
+# to the user as ordinary misuse. Anything added here must be a type raised
+# deliberately for a user-facing condition, never a builtin an implementation
+# error can also raise.
+_ENVELOPE_ERRORS = (RuntimeError, FileNotFoundError, UnknownToolError, NotImplementedError)
 
 
 def _parse_profile(profile_str: str) -> str | list[str]:
@@ -190,9 +200,15 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
             except _ENVELOPE_ERRORS as e:
-                # Envelope on STDOUT, same as every other outcome; the exit code
-                # carries the failure. See the note on the delegate path below.
-                print(json.dumps({"success": False, "error": str(e)}, indent=2))
+                # STDERR here, unlike the delegate path below. --generate's stdout
+                # is program SOURCE, not an envelope, so `lackpy -c … --generate >
+                # out.py` must not leave JSON in out.py. The delegate rationale --
+                # one stream carries every outcome -- only holds where that stream
+                # is already JSON. Here the artifact is on stdout, diagnostics on
+                # stderr, status in the exit code, and an empty stdout with exit 1
+                # is itself the unambiguous "no program" signal.
+                print(json.dumps({"success": False, "error": str(e)}, indent=2),
+                      file=sys.stderr)
                 return 1
             print(gen.program)
             return 0
