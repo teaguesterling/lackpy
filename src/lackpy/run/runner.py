@@ -6,7 +6,7 @@ import ast
 import builtins as _builtins_mod
 from typing import Any, Callable
 
-from ..lang.grammar import ALLOWED_BUILTINS
+from ..lang.grammar import ALLOWED_BUILTINS, DENIED_ATTRIBUTES
 from .base import ExecutionResult
 from .trace import Trace, make_traced
 
@@ -17,16 +17,34 @@ def _sort_by(items, key, reverse=False):
     The attribute name is caller data, so this is a place where a string becomes
     an attribute lookup -- the same shape as str.format. The validator's Step 3.5
     prefix rule cannot see it, because the name never appears as an ast.Attribute.
-    Underscore keys are refused here instead. Dict subscripting is untouched: a
-    mapping key is data, not a namespace.
+    The check is enforced here at runtime instead; note this sink has NO static
+    protection, unlike the rest of the model, so `sort_by(items, "__class__")`
+    passes validation and is stopped only by this function.
+
+    Both halves of Step 3.5 are applied, not just the underscore prefix: 17
+    entries in DENIED_ATTRIBUTES have no leading underscore -- including
+    ``f_globals`` and ``f_builtins``, the exact objects that list exists to keep
+    unreachable -- and a prefix-only guard let every one of them through. Not
+    exploitable through sort_by today, because it returns the items rather than
+    the key values, so the object is fetched and discarded. The reason to close
+    it anyway is that the invariant was stated once in a comment and implemented
+    twice with two different definitions: the moment a sibling returns key values
+    (a max_by, a group_by, a `return_keys=`), the prefix rule silently stops
+    being sufficient while the comment still says the sink is closed. That is the
+    same shape as the comment which claimed a string could never become an
+    attribute lookup.
+
+    Dict subscripting is untouched: a mapping key is data, not a namespace. This
+    is also why printf-style ``%`` formatting is not a sink of this class --
+    ``"%(k)s" % mapping`` resolves via __getitem__, not getattr.
     """
     def _get(x):
         if isinstance(x, dict):
             return x[key]
-        if isinstance(key, str) and key.startswith("_"):
+        if isinstance(key, str) and (key.startswith("_") or key in DENIED_ATTRIBUTES):
             raise ValueError(
-                f"sort_by: refusing private/dunder attribute {key!r}; "
-                f"attribute names starting with '_' are not reachable from a "
+                f"sort_by: refusing attribute {key!r}; names starting with '_' "
+                f"and every name in DENIED_ATTRIBUTES are unreachable from a "
                 f"lackpy program"
             )
         return getattr(x, key)
