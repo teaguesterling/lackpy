@@ -60,13 +60,37 @@ async def test_base_dir_is_honoured_from_another_cwd(corpus, elsewhere):
     assert result.output == 2
 
 
+def _fledgling_installed() -> bool:
+    """Whether the DuckDB extension that actually enforces the root is present.
+
+    pluckit passes ``root=repo`` down, but the REJECTION is fledgling's. It is a
+    DuckDB community extension, not a pip package, so no requirements file
+    expresses it and `importlib.metadata` cannot see it -- checking for a
+    `fledgling` python distribution reports "missing" on a machine where it is
+    installed and working. Ask DuckDB.
+    """
+    try:
+        import duckdb
+        rows = duckdb.connect().execute(
+            "select 1 from duckdb_extensions() "
+            "where extension_name = 'fledgling' and installed"
+        ).fetchall()
+        return bool(rows)
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _fledgling_installed(),
+                    reason="rejection is enforced by the fledgling DuckDB extension")
 @pytest.mark.asyncio
 async def test_without_base_dir_the_sandbox_rejects(corpus, elsewhere):
     """The failure this guards against, asserted so the guard cannot rot.
 
-    With no base_dir the root falls back to cwd, which does not contain the
-    corpus, and the sandbox refuses. If this ever starts passing, either the
-    sandbox changed or a default crept in — both worth knowing.
+    With a root that does not contain the corpus the sandbox refuses. Skipped
+    where fledgling is absent: without it every read succeeds regardless of
+    root, so an unguarded version of this test asserts a rejection that cannot
+    happen and fails for a reason that has nothing to do with lackpy. That is
+    exactly what it did.
     """
     interp = PluckerInterpreter()
     ctx = ExecutionContext(base_dir=elsewhere)
@@ -83,22 +107,38 @@ async def test_without_base_dir_the_sandbox_rejects(corpus, elsewhere):
 
 
 def test_repo_reaches_plucker_without_a_chdir(corpus, elsewhere):
-    """The forwarding itself, with nothing else standing in for it."""
+    """The forwarding itself, with nothing else standing in for it.
+
+    Asserts against ``_ctx.repo`` rather than behaviour on purpose: the
+    behavioural difference needs the fledgling extension, and this must stay
+    meaningful without it. ``Plucker`` accepts ``repo=`` but does not expose it
+    as an attribute -- an earlier version of this test asserted ``plucker.repo``
+    and simply raised AttributeError.
+    """
     from lackpy.interpreters.plucker import _build_plucker_kit
 
     tools = _build_plucker_kit(None, [], base_dir=corpus)
     plucker = tools.callables["source"]((corpus / "sample.py").read_text())
-    assert Path(plucker.repo).resolve() == corpus.resolve()
+    assert Path(plucker._ctx.repo).resolve() == corpus.resolve()
 
 
-def test_relative_base_dir_is_not_applied_twice(tmp_path_factory, monkeypatch):
+def test_relative_base_dir_survives_the_interpreters_chdir(tmp_path_factory,
+                                                            monkeypatch):
     """A relative base_dir must resolve once, not once per layer.
 
-    PythonInterpreter.execute chdirs into base_dir, so a relative path
-    stringified inside the source() closure would be re-resolved against the new
-    cwd -- 'corpus' becoming 'corpus/corpus'. ExecutionContext.base_dir is a
-    plain Path with no normalization and callers do pass relative values.
+    The chdir is reproduced explicitly because it is the whole mechanism:
+    PythonInterpreter.execute does ``os.chdir(context.base_dir)`` BEFORE the
+    program runs, so a relative path stringified inside the source() closure is
+    re-resolved against the new cwd -- 'corpus' from parent/ becoming
+    parent/corpus/corpus. Building the kit without that chdir passes whether or
+    not the path was resolved, which is why the first version of this test
+    proved nothing.
+
+    ExecutionContext.base_dir is a plain Path with no normalization, and callers
+    (ctl.py, StagedDslStrategy) do pass relative values.
     """
+    import os
+
     from lackpy.interpreters.plucker import _build_plucker_kit
 
     parent = tmp_path_factory.mktemp("parent")
@@ -107,5 +147,8 @@ def test_relative_base_dir_is_not_applied_twice(tmp_path_factory, monkeypatch):
     monkeypatch.chdir(parent)
 
     tools = _build_plucker_kit(None, [], base_dir=Path("corpus"))
+    monkeypatch.chdir(parent / "corpus")   # what the interpreter does next
     plucker = tools.callables["source"](SOURCE)
-    assert Path(plucker.repo).resolve() == (parent / "corpus").resolve()
+    assert Path(plucker._ctx.repo).resolve() == (parent / "corpus").resolve(), (
+        "relative base_dir was re-resolved against the interpreter's new cwd"
+    )
