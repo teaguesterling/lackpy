@@ -176,3 +176,122 @@ class TestNoOverBlocking:
         prog = "d = load()\nv = d.get('key')"
         result = validate(prog, allowed_names={"load"})
         assert result.valid, result.errors
+
+
+class TestGeneratorFrameEscapes:
+    """GeneratorExp is in the subset, so a generator object CAN now be built.
+
+    Before that change these attributes were unreachable *by construction* and
+    ``DENIED_ATTRIBUTES`` was defense-in-depth. It is now the live guard: it is
+    the only thing standing between a generator expression and
+    ``gi_frame.f_globals``. These tests exist so pruning that list fails loudly.
+    """
+
+    @pytest.mark.parametrize("program", [
+        "(x for x in xs).gi_frame",
+        "(x for x in xs).gi_frame.f_globals",
+        "(x for x in xs).gi_frame.f_builtins",
+        "(x for x in xs).gi_code",
+        "next(x for x in xs).__class__",
+    ])
+    def test_generator_internals_rejected(self, program):
+        assert _attr_rejected(validate(program, allowed_names={"xs"}))
+
+    @pytest.mark.parametrize("program", [
+        "next(x for x in xs if x)",
+        "any(x for x in xs)",
+        "all(x for x in xs)",
+        "sum(x for x in xs)",
+        "sorted(x for x in xs)",
+    ])
+    def test_idiomatic_generator_forms_accepted(self, program):
+        """The point of allowing GeneratorExp: `any`/`all`/`sum`/`next` are in
+        ALLOWED_BUILTINS and their idiomatic argument *is* a generator, so
+        forbidding the expression while permitting the functions was internally
+        inconsistent -- and it penalised stronger models specifically, since they
+        reach for `next(x for x in xs if ...)` precisely because it is idiomatic.
+        """
+        assert validate(program, allowed_names={"xs"}).valid
+
+
+class TestDunderStringsAreNotASink:
+    """Dunder *strings* were rejected wholesale; the sink they fed is closed anyway.
+
+    The blanket rule stopped ``getattr(obj, "__class__")`` -> ``__bases__`` ->
+    ``__subclasses__()``. Every step of that chain is independently unreachable,
+    so the rule cost the ability to write or read ``__init__.py`` and to emit
+    ``__main__`` guards while adding nothing. It was also bypassable by splitting
+    the literal, so it never carried the weight it appeared to.
+
+    These assert the closure directly, so removing the rule cannot quietly
+    re-open a route.
+
+    An earlier version of this class claimed the only newly-permitted behaviour
+    was a dunder string in a subscript. That was wrong: ``str.format`` resolves
+    attributes named by the *format string*, so
+    ``"{0.__init__.__globals__[SECRET]}".format(obj)`` validated and returned a
+    module global. The rule that actually holds the line is not "reject dunder
+    strings" but "no sink resolves a string as an attribute name" -- format,
+    format_map and sort_by are those sinks, and each is closed by name below.
+    """
+
+    @pytest.mark.parametrize("program", [
+        '"{0.__init__.__globals__[SECRET]}".format(obj)',
+        '"{0.__class__}".format(obj)',
+        '"{a.__class__}".format_map(d)',
+        'obj.format("x")',
+        '"{}".format(obj)',
+    ])
+    def test_format_is_not_a_route_to_attributes(self, program):
+        """format/format_map traverse attributes the AST never sees."""
+        r = validate(program, allowed_names={"obj", "d"})
+        assert not r.valid, f"{program!r} unexpectedly validated"
+
+    @pytest.mark.parametrize("program", [
+        'f"{obj}"',
+        'f"count is {len(xs)}"',
+        'write_file("__init__.py", "")',
+        '''write_file("m.py", "if __name__ == '__main__':\\n    pass\\n")''',
+        'find_names(source="**/*.py", selector=".fn#__init__")',
+    ])
+    def test_dunder_strings_as_data_still_work(self, program):
+        """The cost that justified dropping the blanket rule stays bought.
+
+        f-strings are the sanctioned replacement for format: their interpolations
+        are real AST expressions and go through the attribute rule.
+        """
+        r = validate(program, allowed_names={"obj", "xs", "write_file", "find_names"})
+        assert r.valid, f"{program!r} rejected: {r.errors}"
+
+    @pytest.mark.parametrize("program", [
+        "getattr(obj, '__class__')",
+        "getattr(obj, '_' + '_class_' + '_')",          # the split-literal bypass
+        "getattr(obj, f'__{name}__')",
+        "globals()['__builtins__']",
+        "vars(obj)['__class__']",
+        "type(obj).__bases__",
+        "__import__('os')",
+    ])
+    def test_string_mediated_reflection_rejected(self, program):
+        r = validate(program, allowed_names={"obj", "name"})
+        assert not r.valid, f"{program!r} unexpectedly validated"
+
+    @pytest.mark.parametrize("program", [
+        "obj.__class__",
+        "obj.__class__.__bases__",
+        "obj.__class__.__subclasses__()",
+    ])
+    def test_direct_dunder_attributes_still_rejected(self, program):
+        """Blocked by the underscore prefix rule, not by any string check."""
+        assert _attr_rejected(validate(program, allowed_names={"obj"}))
+
+    def test_dunder_string_in_a_subscript_is_permitted_and_inert(self):
+        """The one behaviour removal newly allows, recorded deliberately.
+
+        ``obj["__class__"]`` is ``__getitem__`` -- a key lookup, not attribute
+        access. Reaching a namespace from the result still requires
+        ``.__bases__``, which the prefix rule rejects (asserted above). Kept as a
+        test so a future reader sees it was considered rather than overlooked.
+        """
+        assert validate("obj['__class__']", allowed_names={"obj"}).valid
+        assert not validate("obj['__class__'].__bases__", allowed_names={"obj"}).valid

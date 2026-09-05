@@ -124,14 +124,26 @@ class TestNamespaceCheck:
 
 
 class TestStringCheck:
-    def test_rejects_dunder_in_string(self):
-        result = validate("x = '__class__'")
-        assert not result.valid
-        assert any("__" in e for e in result.errors)
-
     def test_accepts_normal_string(self):
         result = validate("x = 'hello world'")
         assert result.valid, result.errors
+
+    def test_accepts_dunder_in_string(self):
+        """Dunder strings are data, not a sink. See TestDunderStringsAreNotASink.
+
+        The blanket rejection this replaces made ordinary Python authoring
+        impossible: no ``__init__.py`` could be written or read, no
+        ``if __name__ == "__main__":`` emitted, no ``def __init__`` generated.
+        """
+        assert validate("x = '__class__'").valid
+        for program in (
+            "write_file('src/pkg/__init__.py', '')",
+            "read_file('src/pkg/__init__.py')",
+            'write_file("m.py", \'if __name__ == "__main__":\\n    pass\\n\')',
+            'write_file("c.py", "class C:\\n    def __init__(self):\\n        pass\\n")',
+        ):
+            r = validate(program, allowed_names={"read_file", "write_file"})
+            assert r.valid, f"{program!r} -> {r.errors}"
 
 
 class TestForLoopCheck:

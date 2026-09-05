@@ -79,6 +79,22 @@ class ToolSpec:
     path_index: int | None = None
 
 
+class UnknownToolError(KeyError):
+    """A tool name no configured source provides.
+
+    Subclasses KeyError so existing `except KeyError` callers are unaffected,
+    but gives the CLI something specific to catch: catching bare KeyError at the
+    process boundary turns any internal dict miss into a user-facing envelope
+    reading {"error": "'somekey'"} with the traceback discarded.
+
+    __str__ is overridden because KeyError.__str__ is repr() of its argument,
+    which wraps a carefully written multi-sentence message in quotes.
+    """
+
+    def __str__(self) -> str:  # noqa: D105
+        return str(self.args[0]) if self.args else ""
+
+
 class Toolbox:
     """Registry of tool providers and their resolved tool specs.
 
@@ -181,14 +197,14 @@ class Toolbox:
             KeyError: If the tool name is not registered or its provider is not loaded.
         """
         if name not in self.tools:
-            raise KeyError(f"Unknown tool: {name}")
+            raise UnknownToolError(f"Unknown tool: {name}")
         spec = self.tools[name]
         owner = self._spec_owner.get(name)
         if owner is not None:
             return owner.resolve(spec)
         provider = self._providers.get(spec.provider)
         if provider is None:
-            raise KeyError(f"No provider '{spec.provider}' registered for tool '{name}'")
+            raise UnknownToolError(f"No provider '{spec.provider}' registered for tool '{name}'")
         return provider.resolve(spec)
 
     def resolve_docs(self, name: str, docs_root: Path) -> Path | None:

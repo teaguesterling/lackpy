@@ -47,6 +47,18 @@ expression.)
 
 **Exit code:** 0 on success, 1 on failure.
 
+**Streams:** the JSON envelope is written to **stdout** whatever the outcome —
+including when every inference provider fails to produce a valid program. Parse
+stdout and branch on the exit code (or on `success`); you do not need to read
+stderr to learn why a run failed.
+
+!!! note "Changed"
+
+    The all-providers-failed envelope previously went to stderr while the success
+    envelope went to stdout. A caller reading only stdout recorded such a failure
+    as empty output with no error, which is indistinguishable from "the model
+    produced nothing" — a different and much rarer thing.
+
 **Examples:**
 
 ```bash
@@ -67,6 +79,14 @@ lackpy -c "<intent>" --generate [--profile KIT]
 **Output:** The program text (not JSON).
 
 **Exit code:** 0 on success; 1 if generation fails.
+
+**Streams:** stdout carries the program source and nothing else. On failure the
+error envelope goes to **stderr** and stdout stays empty, so
+`lackpy -c "…" --generate > out.py` never leaves JSON in `out.py`. This is the
+opposite of the delegate path above, and deliberately: there stdout is already
+JSON in every outcome, so one stream can carry all of them; here stdout is an
+artifact, and mixing a diagnostic into it corrupts the artifact. Empty stdout
+with exit 1 is the unambiguous "no program" signal.
 
 **Example:**
 

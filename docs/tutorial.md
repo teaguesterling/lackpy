@@ -492,6 +492,94 @@ The `Trace` also has `files_read` and `files_modified` lists, populated when too
 
 ---
 
+## 11. Tools from an MCP server
+
+With `pip install lackpy[mcp]`, an MCP server's tools become lackpy tools. Declare
+the server and the whole surface appears in your toolbox:
+
+```toml
+# .lackpy/config.toml
+[mcp_servers.build]
+transport = "stdio"
+command = "blq"
+args = ["mcp", "serve"]
+cwd = "/path/to/repo"          # set this; a server rooted elsewhere answers about elsewhere
+```
+
+```bash
+lackpy --workspace . -c "return the number of error events from the test run" \
+       --profile none --tools status,events
+```
+
+### Curate the tools you expose
+
+There is no "all tools" mode — `--profile` (or `--tools`) is required, and that is
+deliberate. A three-server toolbox can be ~95 tools and ~6,900 prompt tokens; a
+task-sized selection is 1–2 tools and ~200–470. Fewer tools is a smaller prompt,
+which is faster *and* more reliable.
+
+Note the invocation form: a bare `--profile status` is read as a profile *name*,
+not a tool. Use `--profile none --tools status,events`, or a `.profile` file.
+
+### What the generator knows about a discovered tool
+
+Discovery gives each tool its name, its description and its argument schema, plus
+a return annotation derived from the server's `outputSchema`:
+
+```
+  events(limit, run_id, severity, …) -> dict{events, total_count}: Get events with optional severity filter.
+  log(n, branch) -> list[dict]: Condensed commit history.
+```
+
+That `-> dict{events, total_count}` is doing real work. Without it the generator
+sees only the *arguments* and has to guess the return shape — and a wrong guess
+produces a program that validates, runs, and answers incorrectly:
+
+```python
+# what a guess looks like
+events(severity='error')            # -> {'events': [...], 'total_count': 1}
+len(events(severity='error'))       # 2 -- the number of KEYS, not events
+```
+
+Some servers publish a keyless `{"type": "object"}`, which can only become `dict`.
+For those, name the keys in your intent.
+
+### Teaching a tool its idiom
+
+Nothing in an MCP schema says how a tool is *used*. Attach worked examples and
+they join the retrieval pool, so the most relevant are injected at generation
+time:
+
+```toml
+[[mcp_servers.build.tools.events.examples]]
+intent = "how many errors did the last run produce"
+code = "result = events(severity='error')\nlen(result['events'])"
+
+[[mcp_servers.build.tools.events.examples]]
+intent = "which file did the failure come from"
+code = "result = events(severity='error')\nresult['events'][0]['ref_file']"
+```
+
+These are additive — description, arguments and grade are untouched. That is the
+difference from a top-level `[[tools]]` entry of the same name, which would
+replace the tool outright and break the call.
+
+**Measured caveat: this did not beat naming the shape in the intent.** On a
+six-task battery over blq/jetsam/squackit with `Qwen3-Coder-30B-A3B-Instruct`,
+with retrieval verified to be injecting the examples:
+
+| what the prompt carried | correct |
+|---|---|
+| nothing | 2/6 |
+| per-tool examples | 2/6 |
+| the return shape stated in the intent | **5/6** |
+
+So examples are worth attaching when a tool has a genuine idiom to teach, but if
+you need a specific run to work, **say the shape in the intent**. One model, one
+battery, temperature 0.2 — treat 2 vs 5 as real and 1 vs 2 as noise.
+
+---
+
 ## Next steps
 
 - [Concepts: Architecture](concepts/architecture.md) — internals of the pipeline

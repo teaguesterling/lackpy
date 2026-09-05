@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..lang.grader import Grade, compute_grade
-from .toolbox import Toolbox, ToolSpec
+from .toolbox import Toolbox, ToolSpec, UnknownToolError
 
 
 @dataclass
@@ -72,7 +72,7 @@ def resolve_tools(
     if isinstance(selection, str) and selection == "none":
         resolved = _resolve_tool_names([], [], toolbox)
     elif isinstance(selection, str):
-        meta = _load_tools_file(selection, kits_dir)
+        meta = _load_tools_file(selection, kits_dir, toolbox)
         resolved = _resolve_tool_names(meta.tool_names, meta.tool_names, toolbox)
         resolved.docs = meta.docs
     elif isinstance(selection, list):
@@ -93,7 +93,8 @@ class ToolsFileMetadata:
     docs: list[str] = field(default_factory=list)
 
 
-def _load_tools_file(name: str, kits_dir: Path | None) -> ToolsFileMetadata:
+def _load_tools_file(name: str, kits_dir: Path | None,
+                     toolbox: "Toolbox | None" = None) -> ToolsFileMetadata:
     if kits_dir is None:
         kits_dir = Path(".lackpy/kits")
     # Prefer .profile; fall back to legacy .kit (both are listed by profile_list, so
@@ -102,8 +103,36 @@ def _load_tools_file(name: str, kits_dir: Path | None) -> ToolsFileMetadata:
     if not tools_file.exists():
         tools_file = kits_dir / f"{name}.kit"
     if not tools_file.exists():
+        # A bare `--profile <token>` is read as a profile NAME, so `--profile log`
+        # looks for log.profile rather than selecting the `log` tool. That is the
+        # single most common way to misuse this API, and the bare FileNotFoundError
+        # gave no hint of it. If the name is actually a tool, say so and give the
+        # invocation that works.
+        hint = ""
+        if toolbox is not None and name in getattr(toolbox, "tools", {}):
+            hint = (f"\n\n{name!r} IS a registered tool, not a profile. A single bare "
+                    f"token is read as a profile name; to select tools directly use:"
+                    f"\n    --profile none --tools {name}")
+        elif name == "debug":
+            # Fires on the NAME, so it cannot claim the profile was defaulted --
+            # `--profile debug` reaches here too, and the configured default is
+            # not visible from this function. Say what is true of both.
+            hint = ("\n\nNo 'debug' profile ships, and 'debug' is the built-in "
+                    "default — so this is also what you get when nothing "
+                    "specified a profile at all. Either set [profile] default in "
+                    ".lackpy/config.toml, or pass --profile none --tools <a,b>.")
+        else:
+            # Both suffixes, because the fallback above loads either -- listing
+            # only *.profile reports "(none)" in a workspace where `--profile fix`
+            # works off fix.kit.
+            avail = sorted({p.stem for p in kits_dir.glob("*.profile")}
+                           | {p.stem for p in kits_dir.glob("*.kit")}) \
+                if kits_dir.is_dir() else []
+            hint = (f"\n\nProfiles in {kits_dir}: {', '.join(avail) or '(none)'}. "
+                    f"To select tools directly: --profile none --tools <a,b>.")
         raise FileNotFoundError(
-            f"Profile/tool-set file not found: {kits_dir / f'{name}.profile'} (or .kit)")
+            f"Profile/tool-set file not found: {kits_dir / f'{name}.profile'} (or .kit)"
+            + hint)
     text = tools_file.read_text()
     lines = text.strip().split("\n")
     in_frontmatter = False
@@ -133,7 +162,7 @@ def _resolve_tool_names(tool_names: list[str], alias_names: list[str], toolbox: 
         if name not in toolbox.tools:
             available = sorted(toolbox.tools)
             shown = ", ".join(available[:20]) + (" …" if len(available) > 20 else "")
-            raise KeyError(
+            raise UnknownToolError(
                 f"Unknown tool {name!r}: no configured source provides it. Tools come "
                 f"from builtins, config [[tools]], or an MCP server — confirm the kit's "
                 f"names match a configured source. Available now: {shown or '(none)'}"

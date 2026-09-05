@@ -109,3 +109,44 @@ class TestQuartermaster:
     def test_none_raises_not_implemented(self, toolbox):
         with pytest.raises(NotImplementedError):
             resolve_tools(None, toolbox)
+
+
+class TestUnresolvableProfileErrors:
+    """A bare `--profile <token>` is read as a profile NAME, not a tool.
+
+    That is the most common way to misuse this API — `--profile log` looks for
+    log.profile and fails with program='' and no usable reason. These assert the
+    error says what actually went wrong and gives the invocation that works.
+    """
+
+    def test_names_the_tool_and_the_fix(self, toolbox, tmp_path):
+        with pytest.raises(FileNotFoundError) as e:
+            resolve_tools("read_file", toolbox, kits_dir=tmp_path)
+        msg = str(e.value)
+        assert "IS a registered tool, not a profile" in msg
+        assert "--profile none --tools read_file" in msg
+
+    def test_default_debug_profile_explains_itself(self, toolbox, tmp_path):
+        """config.profile_default is 'debug' and no debug profile ships, so
+        omitting --profile fails looking for a file that never existed.
+
+        The message must not assert the profile was *defaulted*: this branch
+        fires on the name, and `--profile debug` typed explicitly lands here too.
+        It is not reachable from this function which of the two happened.
+        """
+        with pytest.raises(FileNotFoundError) as e:
+            resolve_tools("debug", toolbox, kits_dir=tmp_path)
+        msg = str(e.value)
+        assert "No 'debug' profile ships" in msg
+        assert "built-in default" in msg
+        assert "--profile none --tools" in msg
+        assert "Nothing specified a profile" not in msg, (
+            "message claims the profile was defaulted, which this branch "
+            "cannot know -- `--profile debug` reaches it too"
+        )
+
+    def test_unknown_name_lists_available_profiles(self, toolbox, tmp_path):
+        (tmp_path / "fix.profile").write_text("read_file\n")
+        with pytest.raises(FileNotFoundError) as e:
+            resolve_tools("nosuchprofile", toolbox, kits_dir=tmp_path)
+        assert "fix" in str(e.value)

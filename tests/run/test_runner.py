@@ -146,3 +146,61 @@ class TestSortByBuiltin:
         )
         assert result.success
         assert result.output == [{'v': 3}, {'v': 2}, {'v': 1}]
+
+
+class TestSortByIsNotAnAttributeSink:
+    """sort_by takes an attribute name as DATA, so it is a string->getattr sink.
+
+    It has no static protection: the name never appears as an ast.Attribute, so
+    Step 3.5 cannot see it and `sort_by(items, "__class__")` validates fine.
+    The whole guard is the runtime check in _sort_by, and these pin it to the
+    same list the validator uses -- the two must not drift apart.
+    """
+
+    def test_every_denied_attribute_is_refused(self):
+        """Not just underscore names: 17 DENIED_ATTRIBUTES have no underscore.
+
+        f_globals and f_builtins are among them -- the exact objects that list
+        exists to keep unreachable -- and a prefix-only guard passed all 17.
+        """
+        from lackpy.lang.grammar import DENIED_ATTRIBUTES
+        from lackpy.run.runner import _sort_by
+
+        def gen():
+            yield 1
+
+        g = gen()
+        next(g)
+
+        reachable = []
+        for attr in sorted(DENIED_ATTRIBUTES):
+            try:
+                _sort_by([g], attr)
+                reachable.append(attr)
+            except ValueError:
+                pass
+        assert not reachable, f"denied attributes reachable via sort_by: {reachable}"
+
+    def test_dunder_keys_are_refused(self):
+        from lackpy.run.runner import _sort_by
+
+        with pytest.raises(ValueError, match="refusing attribute"):
+            _sort_by([object()], "__class__")
+
+    def test_ordinary_keys_still_work(self):
+        """The guard must not cost the feature: dicts and plain attributes."""
+        from lackpy.run.runner import _sort_by
+
+        assert _sort_by([{"n": 2}, {"n": 1}], "n") == [{"n": 1}, {"n": 2}]
+        assert _sort_by([{"n": 1}, {"n": 2}], "n", reverse=True)[0] == {"n": 2}
+
+    def test_a_mapping_key_is_data_not_a_namespace(self):
+        """Dict subscripting is deliberately untouched by the guard.
+
+        Same reason printf-style `%` is not a sink of this class: "%(k)s" %
+        mapping resolves via __getitem__, not getattr.
+        """
+        from lackpy.run.runner import _sort_by
+
+        rows = [{"__class__": 2}, {"__class__": 1}]
+        assert _sort_by(rows, "__class__") == [{"__class__": 1}, {"__class__": 2}]

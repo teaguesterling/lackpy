@@ -36,6 +36,7 @@ The guiding principle is: **make the dangerous things impossible, not just forbi
 | Literals | `Constant` |
 | Lists, dicts, tuples, sets | `List`, `Dict`, `Tuple`, `Set` |
 | List / dict / set comprehensions | `ListComp`, `DictComp`, `SetComp` |
+| Generator expressions | `GeneratorExp` |
 | Conditional expression | `IfExp` |
 | f-strings | `JoinedStr`, `FormattedValue` |
 | Binary ops | `BinOp` with `Add`, `Sub`, `Mult`, `Div`, `Mod`, `FloorDiv` |
@@ -47,7 +48,7 @@ The guiding principle is: **make the dangerous things impossible, not just forbi
 ### Allowed builtins
 
 ```python
-len, sorted, reversed, enumerate, zip, range,
+len, sorted, reversed, enumerate, zip, range, next,
 min, max, sum, any, all, abs, round,
 str, int, float, bool, list, dict, set, tuple,
 isinstance, print
@@ -100,6 +101,34 @@ input
 
 `open` is forbidden because file I/O should go through kit tools (which are traced and namespaced). `getattr` / `setattr` and friends are forbidden because they provide a reflection escape hatch. `map`, `filter`, and `reduce` encourage a functional style that is harder to trace; use list comprehensions instead.
 
+### Generator expressions and `next`
+
+`GeneratorExp` is allowed and `next` is a permitted builtin, so the idiomatic
+"first match" forms work:
+
+```python
+next(x for x in items if x["name"] == target)
+any(x["failed"] for x in runs)
+sum(len(f) for f in files)
+```
+
+Previously only `[x for x in items if …][0]` was legal, which was inconsistent —
+`any`, `all`, `sum`, `min`, `max` and `sorted` are all permitted builtins and a
+generator expression is the idiomatic argument to every one of them.
+
+**Loops still cannot break.** `Break`, `Continue`, `While` and `Try` remain
+forbidden, so `for … if … break` is not an alternative; use `next(...)` or a
+comprehension.
+
+!!! warning "`DENIED_ATTRIBUTES` is load-bearing, not defense-in-depth"
+
+    A generator object *can* now be constructed, so `gi_frame`, `gi_code`,
+    `f_globals` and `f_builtins` are reachable by name. They are rejected by the
+    attribute guard, and that guard is the only thing keeping
+    `(x for x in y).gi_frame.f_globals` out of reach — it is no longer merely a
+    second line of defence. `TestGeneratorFrameEscapes` asserts each of those
+    rejections. Do not prune the list.
+
 ---
 
 ## Additional checks
@@ -131,16 +160,31 @@ for item in items:
     ...
 ```
 
-### Dunder strings
+### Dunder strings are permitted
 
-Any string constant containing `__` is rejected:
+A string constant containing `__` is ordinary data:
 
 ```python
-# Invalid — contains dunder
-name = "__class__"
+write_file("src/pkg/__init__.py", "")
+write_file("m.py", 'if __name__ == "__main__":\n    pass\n')
 ```
 
-This prevents `__` strings from being used as arguments to reflection functions, even if those functions were somehow available.
+lackpy previously rejected every such string, which meant a program could neither
+create nor read a Python package, emit a `__main__` guard, nor generate a class
+with a `def __init__`.
+
+The rule existed to stop `getattr(obj, "__class__")` → `__bases__` →
+`__subclasses__()`. That chain is closed independently and more completely:
+`getattr`, `setattr`, `vars`, `globals`, `type` and `__import__` are all forbidden
+names, `eval`/`exec`/`compile` are not permitted builtins, so **no call can turn a
+string into an attribute lookup**; and direct `obj.__class__` is rejected by the
+underscore-prefix rule regardless of any string. The old rule was also bypassable
+by splitting the literal (`"_" + "_class_" + "_"`), so it never carried the weight
+it appeared to.
+
+Attribute access is unchanged — `obj.__class__` is still rejected. Only the
+blanket rejection of dunder *strings* is gone. `TestDunderStringsAreNotASink`
+asserts each step of the reflection chain remains closed.
 
 ---
 

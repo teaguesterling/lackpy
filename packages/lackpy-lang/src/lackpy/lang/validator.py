@@ -166,14 +166,36 @@ def validate(
                     f"(e.g., key=lambda x: x['field'])"
                 )
 
-    # Step 6: String literal check — no dunder strings
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if "__" in node.value:
-                errors.append(
-                    f"String containing '__' at line {node.lineno}: "
-                    f"dunder access via string is forbidden"
-                )
+    # Step 6: (removed) blanket rejection of string literals containing "__".
+    #
+    # It existed to stop getattr(obj, "__class__") -> __bases__ -> __subclasses__().
+    # That sink is closed independently and more completely:
+    #
+    #   - getattr/setattr/delattr/hasattr/vars/globals/locals/dir/type/__import__
+    #     are all in FORBIDDEN_NAMES; eval/exec/compile are not in ALLOWED_BUILTINS.
+    #   - direct attribute access (obj.__class__) is rejected by the underscore
+    #     prefix rule in step 3.5, independent of any string.
+    #   - str.format/format_map DO turn a string into an attribute lookup, and
+    #     are therefore denied by name in DENIED_ATTRIBUTES. An earlier version of
+    #     this comment asserted no such call existed; it was wrong, and
+    #     "{0.__init__.__globals__[SECRET]}".format(obj) read a module global
+    #     through it. Any future builtin that takes an attribute name as DATA
+    #     belongs on that deny list too -- that, not the string literal, is the
+    #     sink. sort_by is the other one, and rejects underscore keys at runtime.
+    #
+    # It was also incomplete on its own terms — "_" + "_class_" + "_" evaluates to
+    # the same string and passed — so it never carried the weight it appeared to.
+    #
+    # Its cost was real: any string containing "__" was rejected, so a program
+    # could neither write nor read "__init__.py", emit `if __name__ ==
+    # "__main__":`, nor generate a class with a `def __init__`. Scaffolding a
+    # Python package was impossible.
+    #
+    # What this newly permits is a dunder string as DATA: a subscript key
+    # (obj["__class__"] is __getitem__, not attribute access), a filename, or a
+    # literal in generated source. What it must never permit is a dunder string
+    # reaching a sink that resolves it as an attribute name -- see the deny list
+    # above. Asserted in TestDunderStringsAreNotASink.
 
     # Step 7: Custom rules
     if extra_rules:

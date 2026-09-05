@@ -13,6 +13,7 @@ ALLOWED_NODES: set[type] = {
     ast.Compare, ast.BoolOp, ast.UnaryOp, ast.BinOp,
     ast.JoinedStr, ast.FormattedValue,
     ast.Constant, ast.Starred, ast.Slice,
+    ast.GeneratorExp,
     # Comprehension internals
     ast.comprehension, ast.IfExp,
     # Lambda (restricted to key= argument — enforced by validator)
@@ -65,15 +66,28 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
 #
 # These names have NO leading underscore, so the prefix rule would miss them. They
 # are frame/generator/coroutine/traceback internals that expose a real namespace
-# (``f_globals``/``f_builtins``). They are believed UNREACHABLE in the current
-# subset (no GeneratorExp / Try / Raise / sys => no frame, generator, or traceback
-# object can be constructed), but they are denied explicitly as defense-in-depth
-# so a future grammar addition cannot silently re-open the route.
+# (``f_globals``/``f_builtins``). They were previously unreachable by construction
+# (no GeneratorExp / Try / Raise / sys => no frame, generator, or traceback object
+# could be built). GeneratorExp is now in the subset, so a generator object CAN be
+# constructed and this list is the live guard rather than defense-in-depth: it is
+# what keeps ``(x for x in y).gi_frame.f_globals`` unreachable. Do not prune it.
+# Try / Raise / sys remain excluded, so frames and tracebacks still cannot be
+# obtained by any other route.
 DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     "f_globals", "f_builtins", "f_locals", "f_code", "f_back",
     "gi_frame", "gi_code", "cr_frame", "cr_code",
     "ag_frame", "ag_code", "tb_frame", "tb_next",
     "func_globals", "func_code",
+    # str.format/format_map traverse attributes driven by the *format string*,
+    # which is runtime data the AST never sees:
+    #     "{0.__init__.__globals__[SECRET]}".format(obj)
+    # Every name in that chain is invisible to Step 3.5 -- the only attribute in
+    # the source is ``format`` itself, which has no leading underscore. This is
+    # the one call form that turns a string into an attribute lookup, so it is
+    # denied by name. f-strings are the replacement and are safe for the exact
+    # reason format is not: their interpolations are real AST expressions and go
+    # through the attribute rule like anything else.
+    "format", "format_map",
 })
 
 ALLOWED_BUILTINS: frozenset[str] = frozenset({
@@ -81,5 +95,6 @@ ALLOWED_BUILTINS: frozenset[str] = frozenset({
     "min", "max", "sum", "any", "all", "abs", "round",
     "str", "int", "float", "bool", "list", "dict", "set", "tuple",
     "isinstance", "print",
+    "next",
     "sort_by",
 })

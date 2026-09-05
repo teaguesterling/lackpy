@@ -120,3 +120,34 @@ class TestFormatExamplesForPrompt:
 
     def test_empty_list_returns_empty_string(self):
         assert format_examples_for_prompt([]) == ""
+
+
+class TestStopwordsDoNotScore:
+    """Function words must not create overlap between unrelated intents.
+
+    Retrieval scores by raw tag overlap with min_score=1, and example tags
+    default to the intent's own keywords when none are declared -- so an
+    unfiltered "the"/"in" lands on both sides and two unrelated intents match.
+    """
+
+    def test_unrelated_intents_share_no_keywords(self):
+        a = expand_intent_keywords("count the number of errors in the log")
+        b = expand_intent_keywords("rename the symbol foo in the repo")
+        assert not (a & b), f"unrelated intents overlap on {sorted(a & b)}"
+
+    def test_stopwords_are_dropped(self):
+        words = expand_intent_keywords("find all of the functions in the repo")
+        assert "the" not in words and "in" not in words and "of" not in words
+        assert "functions" in words and "repo" in words
+
+    def test_a_hand_tagged_example_outranks_a_stopword_match(self):
+        from lackpy.infer.retrieval import Example, retrieve_examples
+
+        relevant = Example(intent="rename a symbol", code="",
+                           tags={"rename", "symbol"})
+        noise = Example(intent="count errors", code="",
+                        tags=expand_intent_keywords("count the errors in the log"))
+        got = retrieve_examples("rename the symbol foo in the repo",
+                                [noise, relevant], n=6)
+        assert got and got[0] is relevant
+        assert noise not in got
