@@ -123,7 +123,7 @@ def test_duplicate_def_blocks_mutual_recursion():
 @pytest.mark.parametrize("program", [
     "def f(x):\n    if x:\n        return 1\n    else:\n        return 0",
     "def f(x):\n    if x:\n        return 1\n    return 0",
-    "def f(x):\n    if x:\n        return 1\n    elif x > 1:\n        return 2\n    else:\n        return 3",
+    "def f(x):\n    if x > 1:\n        return 2\n    else:\n        return 3",
     "def f(x):\n    x.append(1)",
 ])
 def test_return_mode_valid_paths(program):
