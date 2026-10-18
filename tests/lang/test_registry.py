@@ -37,3 +37,10 @@ def test_ported_rules_have_ids():
         "safety.unknown-call",
     ):
         assert rule_by_id(rule_id).id == rule_id
+
+
+def test_handler_class_checks_are_safety_tier():
+    # Task 8 fix round 2: style.try-named was folded into safety.except-base.
+    assert rule_by_id("safety.except-base").tier == "safety"
+    with pytest.raises(KeyError):
+        rule_by_id("style.try-named")

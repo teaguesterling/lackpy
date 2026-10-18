@@ -1,4 +1,4 @@
-"""Style rules for try: named errors, a small body, approved handler shapes (Task 8).
+"""Style rules for try: a small body, no else or finally, approved handler shapes (Task 8).
 
 The design (section 4.3, "Rules for try") gives four handler shapes:
 
@@ -11,92 +11,23 @@ Print calls and assignments may come before the shape, and a handler may
 also end with no shape and fall through (design 4.3: handlers that report and
 fall through conform when they satisfy the same rule). One idea covers all of
 them: after a try, every name that the body assigns is assigned in each
-handler, or the handler leaves the flow (definite assignment). ``safety.except-base`` owns the bare
-``except`` and the non-Exception classes.
+handler, or the handler leaves the flow (definite assignment).
+``safety.except-base`` owns every check on the handler's classes.
 """
 
 from __future__ import annotations
 
 import ast
-import importlib
+from collections import Counter
 
-from .builtins_policy import ALLOWED
-from .dictionary import MODULES
 from .registry import Context, Violation, register
-from .rules_safety import UNCATCHABLE, _bound_names, handler_classes, is_dotted_name
+from .rules_safety import program_bindings
 
 MAX_TRY_BODY = 3
 
 
-def _exception_members() -> frozenset[tuple[str, str]]:
-    """The (module, member) pairs in ``MODULES`` whose real attribute is an exception class."""
-    found = set()
-    for module, members in MODULES.items():
-        mod = importlib.import_module(module)
-        for member in members:
-            value = getattr(mod, member, None)
-            if isinstance(value, type) and issubclass(value, Exception):
-                found.add((module, member))
-    return frozenset(found)
-
-
-EXCEPTION_MEMBERS = _exception_members()  # for example ("json", "JSONDecodeError"), ("re", "error")
-
-
 def _tries(ctx: Context):
     return (n for n in ast.walk(ctx.tree) if isinstance(n, ast.Try))
-
-
-@register(
-    "style.try-named", "style",
-    summary="Name each error class in an except: a builtin error such as KeyError, "
-            "or a dictionary error such as json.JSONDecodeError. Do not use Exception.",
-    rationale="The named class says which failure the handler expects. "
-              "Exception also catches the defects that the program must show.",
-    bad="d = {}\ntry:\n    x = d['k']\nexcept Exception:\n    x = 0",
-    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0",
-)
-def check_try_named(ctx: Context) -> list[Violation]:
-    out = []
-    bound = _program_bindings(ctx)
-    for node in ast.walk(ctx.tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        for cls in handler_classes(node):
-            if not is_dotted_name(cls) or (isinstance(cls, ast.Name) and cls.id in UNCATCHABLE):
-                continue  # safety.except-base owns these
-            if not _named_class(cls, ctx) or (isinstance(cls, ast.Name) and cls.id in bound):
-                out.append(Violation(
-                    "style.try-named", node.lineno,
-                    f"Except at line {node.lineno} must name error classes, not "
-                    f"'{ast.unparse(cls)}' (use a builtin error such as KeyError, "
-                    f"or json.JSONDecodeError or re.error)"))
-    return out
-
-
-def _program_bindings(ctx: Context) -> set[str]:
-    """Every name the program binds, other than a ``from m import x`` member binding.
-
-    Assignment, augmented and for/comprehension targets, parameters, def names,
-    except-as names and import aliases. A handler class name bound anywhere
-    (``KeyError = 3``, ``def f(KeyError)``) is not the builtin class. A member
-    binding is checked against ``EXCEPTION_MEMBERS`` instead.
-    """
-    names = {n.id for n in ast.walk(ctx.tree)
-             if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)}
-    names |= {name for name, _ in _bound_names(ctx.tree)}
-    return names - ctx.member_bindings.keys()
-
-
-def _named_class(cls: ast.expr, ctx: Context) -> bool:
-    if isinstance(cls, ast.Name):
-        if cls.id in ctx.member_bindings:
-            return ctx.member_bindings[cls.id] in EXCEPTION_MEMBERS
-        return cls.id != "Exception" and ALLOWED.get(cls.id) == "exception"
-    if isinstance(cls, ast.Attribute) and isinstance(cls.value, ast.Name):
-        module = ctx.module_bindings.get(cls.value.id)
-        return (module, cls.attr) in EXCEPTION_MEMBERS
-    return False
 
 
 @register(
@@ -231,6 +162,18 @@ def _handler_problem(try_node: ast.Try, handler: ast.ExceptHandler,
 )
 def check_try_handler(ctx: Context) -> list[Violation]:
     out = []
+    # Python deletes the as-name when the handler ends, so an outer binding of
+    # that name is gone after the try. Other except-as sites of the same name
+    # bind and delete their own value, so they do not count.
+    handler_names = Counter(n.name for n in ast.walk(ctx.tree)
+                            if isinstance(n, ast.ExceptHandler) and n.name)
+    other_bindings = Counter(program_bindings(ctx.tree)) - handler_names
+    for handler in (n for n in ast.walk(ctx.tree) if isinstance(n, ast.ExceptHandler)):
+        if handler.name and other_bindings[handler.name]:
+            out.append(Violation(
+                "style.try-handler", handler.lineno,
+                f"Except at line {handler.lineno} binds '{handler.name}', which the program "
+                f"also binds; the handler deletes it at its end (use another name, such as err)"))
     for node in _tries(ctx):
         body_names = _assigned_names(node.body)
         for handler in node.handlers:

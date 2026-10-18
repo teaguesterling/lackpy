@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import ast
 import builtins
+import importlib
 
+from . import builtins_policy
 from .dictionary import MODULES, hint_for
 from .grammar import ALLOWED_BUILTINS, ALLOWED_NODES, DENIED_ATTRIBUTES, FORBIDDEN_NAMES
 from .registry import Context, Violation, register
@@ -524,7 +526,7 @@ def check_call_target(ctx: Context) -> list[Violation]:
     return out
 
 
-# except — a handler must never catch what is not an Exception, or a limit signal.
+# except — every handler-class check lives here, in the safety tier.
 #
 # BaseException and its direct subclasses outside Exception (SystemExit,
 # KeyboardInterrupt, GeneratorExit, BaseExceptionGroup) carry interpreter
@@ -536,9 +538,13 @@ def check_call_target(ctx: Context) -> list[Violation]:
 # runs without end (measured: a key= recursion that catches RecursionError
 # ran past 60 s). RuntimeError is RecursionError's base, so it is listed too.
 #
-# The class expression is evaluated when an exception arrives, so it must be a
-# name, a dotted name, or a tuple of them. A call there would run code (a tool)
-# inside the handler search; that is unwaivable here.
+# Every other route to a limit signal is closed the same way, so no waiver can
+# reopen it: ``Exception`` (it catches RecursionError), and any class that does
+# not resolve statically to an approved class. A name bound anywhere in the
+# program (``E = RecursionError``, ``errs = (KeyError, RecursionError)``,
+# ``def f(KeyError)``) is not the builtin class, so it is rejected. The class
+# expression is evaluated when an exception arrives, so it must be a name, a
+# dotted name, or a tuple of them; a call there would run code (a tool).
 
 BASE_ONLY_EXCEPTIONS = frozenset(
     name for name in dir(builtins)
@@ -547,7 +553,24 @@ BASE_ONLY_EXCEPTIONS = frozenset(
     and not issubclass(getattr(builtins, name), Exception)
 )
 LIMIT_SIGNALS = frozenset({"RecursionError", "RuntimeError", "MemoryError"})
-UNCATCHABLE = BASE_ONLY_EXCEPTIONS | LIMIT_SIGNALS
+UNCATCHABLE = BASE_ONLY_EXCEPTIONS | LIMIT_SIGNALS | {"Exception"}
+
+_APPROVED_HINT = "name an approved error class, for example KeyError, json.JSONDecodeError or re.error"
+
+
+def _exception_members() -> frozenset[tuple[str, str]]:
+    """The (module, member) pairs in ``MODULES`` whose real attribute is an exception class."""
+    found = set()
+    for module, members in MODULES.items():
+        mod = importlib.import_module(module)
+        for member in members:
+            value = getattr(mod, member, None)
+            if isinstance(value, type) and issubclass(value, Exception):
+                found.add((module, member))
+    return frozenset(found)
+
+
+EXCEPTION_MEMBERS = _exception_members()  # for example ("json", "JSONDecodeError"), ("re", "error")
 
 
 def handler_classes(handler: ast.ExceptHandler) -> list[ast.expr]:
@@ -566,18 +589,44 @@ def is_dotted_name(node: ast.expr) -> bool:
     return isinstance(node, ast.Name)
 
 
+def program_bindings(tree: ast.Module) -> list[str]:
+    """Every binding in the program, one entry per binding site.
+
+    Assignment, augmented, for, comprehension and with targets, parameters,
+    def and class names, except-as names and import aliases.
+    """
+    names = [n.id for n in ast.walk(tree)
+             if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)]
+    return names + [name for name, _ in _bound_names(tree)]
+
+
+def _approved_class(cls: ast.expr, ctx: Context) -> bool:
+    """Whether ``cls`` resolves statically to an approved exception class."""
+    if isinstance(cls, ast.Name):
+        if cls.id in ctx.member_bindings:
+            return ctx.member_bindings[cls.id] in EXCEPTION_MEMBERS
+        return cls.id not in UNCATCHABLE and builtins_policy.ALLOWED.get(cls.id) == "exception"
+    if isinstance(cls, ast.Attribute) and isinstance(cls.value, ast.Name):
+        module = ctx.module_bindings.get(cls.value.id)
+        return (module, cls.attr) in EXCEPTION_MEMBERS
+    return False
+
+
 @register(
     "safety.except-base", "safety",
-    summary="Name the error in every except, as a name, a dotted name or a tuple of them. "
-            "Do not catch BaseException, RecursionError, RuntimeError or MemoryError.",
-    rationale="A bare except and except BaseException also catch the signals that stop the "
-              "program, such as a time limit. A handler of RecursionError or MemoryError can "
-              "retry without end. A call in the except line runs code during the error.",
-    bad="d = {}\ntry:\n    x = d['k']\nexcept:\n    x = 0",
+    summary="Name each error in an except as an approved class: a builtin error such as "
+            "KeyError, or json.JSONDecodeError or re.error, or a tuple of them. Do not catch "
+            "Exception, BaseException, RecursionError, RuntimeError or MemoryError.",
+    rationale="A bare except, Exception and BaseException also catch the signals that stop "
+              "the program, such as a time limit or a recursion limit. A handler of "
+              "RecursionError can retry without end. A name that the program binds, or a call, "
+              "can hide any class.",
+    bad="d = {}\ntry:\n    x = d['k']\nexcept Exception:\n    x = 0",
     good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0",
 )
 def check_except_base(ctx: Context) -> list[Violation]:
     out = []
+    bound = set(program_bindings(ctx.tree)) - ctx.member_bindings.keys()
     for node in ast.walk(ctx.tree):
         if not isinstance(node, ast.ExceptHandler):
             continue
@@ -588,14 +637,20 @@ def check_except_base(ctx: Context) -> list[Violation]:
             continue
         for cls in handler_classes(node):
             if not is_dotted_name(cls):
-                out.append(Violation(
-                    "safety.except-base", node.lineno,
-                    f"Forbidden except expression '{ast.unparse(cls)}' at line {node.lineno} "
-                    f"(use a class name, a dotted name, or a tuple of them)"))
+                message = (f"Forbidden except expression '{ast.unparse(cls)}' at line {node.lineno} "
+                           f"(use a class name, a dotted name, or a tuple of them, "
+                           f"for example KeyError)")
             elif isinstance(cls, ast.Name) and cls.id in UNCATCHABLE:
-                out.append(Violation(
-                    "safety.except-base", node.lineno,
-                    f"Forbidden except of '{cls.id}' at line {node.lineno} "
-                    f"(catch a subclass of Exception that is not a limit signal, "
-                    f"for example KeyError)"))
+                message = (f"Forbidden except of '{cls.id}' at line {node.lineno} "
+                           f"(catch a subclass of Exception that is not a limit signal, "
+                           f"for example KeyError)")
+            elif isinstance(cls, ast.Name) and cls.id in bound:
+                message = (f"Forbidden except of '{cls.id}' at line {node.lineno} "
+                           f"('{cls.id}' is bound in the program; {_APPROVED_HINT})")
+            elif not _approved_class(cls, ctx):
+                message = (f"Forbidden except of '{ast.unparse(cls)}' at line {node.lineno} "
+                           f"(not an error class; {_APPROVED_HINT})")
+            else:
+                continue
+            out.append(Violation("safety.except-base", node.lineno, message))
     return out

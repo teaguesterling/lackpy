@@ -45,6 +45,11 @@ def _ids(result):
     "try:\n    x = 1\nexcept KeyError:\n    x = 0\n    print(x)",
     # assignments may also come before continue or return
     "for i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        y = 2\n        continue",
+    # NotImplementedError is RecursionError's sibling, not its base
+    "try:\n    x = 1\nexcept NotImplementedError:\n    x = 0",
+    # two handlers may reuse one as-name: each binds and deletes its own value
+    "d = {}\ntry:\n    x = d['a']\nexcept KeyError as e:\n    print(e)\n    x = 0\n"
+    "try:\n    y = d['b']\nexcept KeyError as e:\n    print(e)\n    y = 0",
 ])
 def test_valid(program):
     result = validate(program)
@@ -53,7 +58,7 @@ def test_valid(program):
 
 @pytest.mark.parametrize("program, rule_id", [
     # from the brief
-    ("d = {}\nk = 1\ntry:\n    x = d[k]\nexcept Exception:\n    x = 0", "style.try-named"),
+    ("d = {}\nk = 1\ntry:\n    x = d[k]\nexcept Exception:\n    x = 0", "safety.except-base"),
     ("d = {}\nk = 1\ntry:\n    x = d[k]\nexcept BaseException:\n    x = 0", "safety.except-base"),
     ("d = {}\nk = 1\ntry:\n    x = d[k]\nexcept BaseException:  # ste: safety.except-base, test\n    x = 0",
      "safety.except-base"),
@@ -72,13 +77,13 @@ def test_valid(program):
     ("try:\n    x = 1\nexcept SystemExit:\n    x = 0", "safety.except-base"),
     ("try:\n    x = 1\nexcept KeyboardInterrupt:\n    x = 0", "safety.except-base"),
     ("try:\n    x = 1\nexcept GeneratorExit:\n    x = 0", "safety.except-base"),
-    # try-named: everything that is not a named exception class
-    ("try:\n    x = 1\nexcept (KeyError, Exception):\n    x = 0", "style.try-named"),
-    ("E = KeyError\ntry:\n    x = 1\nexcept E:\n    x = 0", "style.try-named"),
+    # fix round 2: every handler-class check is safety.except-base (style.try-named removed)
+    ("try:\n    x = 1\nexcept (KeyError, Exception):\n    x = 0", "safety.except-base"),
+    ("E = KeyError\ntry:\n    x = 1\nexcept E:\n    x = 0", "safety.except-base"),
     ("try:\n    x = 1\nexcept len([]):\n    x = 0", "safety.except-base"),  # ruling 4: a call
-    ("import json\ntry:\n    x = 1\nexcept json.loads:\n    x = 0", "style.try-named"),
-    ("from collections import Counter\ntry:\n    x = 1\nexcept Counter:\n    x = 0", "style.try-named"),
-    ("try:\n    x = 1\nexcept print:\n    x = 0", "style.try-named"),
+    ("import json\ntry:\n    x = 1\nexcept json.loads:\n    x = 0", "safety.except-base"),
+    ("from collections import Counter\ntry:\n    x = 1\nexcept Counter:\n    x = 0", "safety.except-base"),
+    ("try:\n    x = 1\nexcept print:\n    x = 0", "safety.except-base"),
     # try-handler: the loop and def positions (controller ruling)
     ("try:\n    x = 1\nexcept KeyError:\n    continue", "style.try-handler"),
     ("for i in [1]:\n    print(i)\ntry:\n    x = 1\nexcept KeyError:\n    continue", "style.try-handler"),
@@ -104,12 +109,12 @@ def test_valid(program):
      "        y = sorted([x], key=k)\n    return 0\nprint(sorted([1], key=k))", "safety.except-base"),
     # fix round 1, ruling 2: an exception class name bound anywhere in the program
     ("for KeyError in [Exception]:\n    try:\n        x = 1\n    except KeyError:\n        x = 0",
-     "style.try-named"),
+     "safety.except-base"),
     ("def f(KeyError):\n    try:\n        x = 1\n    except KeyError:\n        x = 0\n    return x\n"
-     "print(f(Exception))", "style.try-named"),
-    ("KeyError = 3\ntry:\n    x = 1\nexcept KeyError:\n    x = 0", "style.try-named"),
+     "print(f(Exception))", "safety.except-base"),
+    ("KeyError = 3\ntry:\n    x = 1\nexcept KeyError:\n    x = 0", "safety.except-base"),
     ("try:\n    x = 1\nexcept KeyError as ValueError:\n    x = 0\n"
-     "try:\n    y = 1\nexcept ValueError:\n    y = 0", "style.try-named"),
+     "try:\n    y = 1\nexcept ValueError:\n    y = 0", "safety.except-base"),
     # fix round 1, ruling 3: the as-name is deleted when the handler ends
     ("d = {}\ntry:\n    x = d['a']\nexcept KeyError as x:\n    x = 0\nprint(x)", "style.try-handler"),
     ("d = {}\ntry:\n    e = d['a']\nexcept KeyError as e:\n    e = 0\nprint(e)", "style.try-handler"),
@@ -117,6 +122,16 @@ def test_valid(program):
     ("try:\n    x = 1\nexcept read_file('x'):\n    x = 0", "safety.except-base"),
     ("def f():\n    return KeyError\ntry:\n    x = 1\nexcept (KeyError, f()):\n    x = 0",
      "safety.except-base"),
+    # fix round 2, ruling 1: routes to a limit signal inside the key= recursion
+    ("def k(x):\n    try:\n        y = sorted([x], key=k)\n    except Exception:\n"
+     "        y = sorted([x], key=k)\n    return 0\nprint(sorted([1], key=k))", "safety.except-base"),
+    ("E = RecursionError\ndef k(x):\n    try:\n        y = sorted([x], key=k)\n    except E:\n"
+     "        y = sorted([x], key=k)\n    return 0\nprint(sorted([1], key=k))", "safety.except-base"),
+    ("errs = (KeyError, RecursionError)\ndef k(x):\n    try:\n        y = sorted([x], key=k)\n"
+     "    except errs:\n        y = sorted([x], key=k)\n    return 0\nprint(sorted([1], key=k))",
+     "safety.except-base"),
+    # fix round 2, ruling 2: the as-name must not be bound elsewhere (the handler deletes it)
+    ("d = {}\nx = 1\ntry:\n    y = d['a']\nexcept KeyError as x:\n    y = 0\nprint(x)", "style.try-handler"),
     # except-as names are bindings (Tasks 4 and 5 rules)
     ("try:\n    x = 1\nexcept KeyError as __x:\n    x = 0", "safety.dunder-name"),
 ])
@@ -156,3 +171,22 @@ def test_try_and_handler_are_allowed_nodes():
 def test_try_star_stays_forbidden():
     result = validate("try:\n    x = 1\nexcept* KeyError:\n    x = 0")
     assert "safety.node" in _ids(result)
+
+
+def test_try_named_is_not_a_rule():
+    # Fix round 2: every handler-class check is safety-tier, so no waiver can reopen a limit signal.
+    from lackpy.lang.registry import RULES
+    ids = {r.id for r in RULES}
+    assert "style.try-named" not in ids
+    assert "safety.except-base" in ids
+
+
+@pytest.mark.parametrize("program", [
+    "try:\n    x = 1\nexcept Exception:\n    x = 0",
+    "E = KeyError\ntry:\n    x = 1\nexcept E:\n    x = 0",
+    "import json\ntry:\n    x = 1\nexcept json.loads:\n    x = 0",
+    "try:\n    x = 1\nexcept RecursionError:\n    x = 0",
+])
+def test_except_base_messages_name_the_alternative(program):
+    messages = [v.message for v in validate(program).violations if v.rule_id == "safety.except-base"]
+    assert messages and all("KeyError" in m for m in messages), messages
