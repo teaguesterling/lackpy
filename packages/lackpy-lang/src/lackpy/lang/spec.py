@@ -86,3 +86,104 @@ def format_style_guide() -> str:
                     [[f"`{w}`", hint] for w, hint in UNAPPROVED.items()]) + [""]
     lines += ["Part 3 (intent rules) arrives with Plan 3.", ""]
     return "\n".join(lines)
+
+
+# --- the pre-prompt -------------------------------------------------------------
+#
+# A short teaching text that goes BEFORE the full guide. The guide is a reference;
+# this names the habits a model brings from ordinary Python and gives the approved
+# form for each. The order of HABITS is measured, not guessed: it follows the
+# violation counts of Qwen3-30B-A3B-Instruct and haiku on the 30-task usability
+# eval of 2026-10-18 (scripts/eval/ste_usability/FINDINGS.md, finding 4).
+
+HABITS: list[tuple[str, str]] = [
+    ("`except Exception:` or a bare `except:`",
+     "name the error you expect: `except KeyError:`"),
+    ("`exit()` or `sys.exit()` to stop on a problem",
+     "state the condition: `assert cond, \"why it must hold\"`"),
+    ("`raise SomeError(...)` when a check fails",
+     "`assert cond, \"why it must hold\"`"),
+    ("`open(p)` or `with open(p) as f:`",
+     "`text = Path(p).read_text()`"),
+    ("an I/O call inside another call, like `json.loads(Path(p).read_text())`",
+     "put the I/O call on its own line: `text = Path(p).read_text()`"),
+    ("`json.load(f)` / `json.dump(obj, f)`",
+     "`data = json.loads(text)`, and `Path(p).write_text(json.dumps(obj))`"),
+    ("`finally:` or `else:` on a `try`",
+     "put cleanup code after the try block; lackpy has no finally"),
+    ("`while`, `class`, `global`, `lambda` stored in a name",
+     "a for loop, a dict, a returned value, or a top-level def"),
+]
+
+PREPROMPT_EXAMPLES: list[tuple[str, str]] = [
+    ("Patch one occurrence in a file", '''from pathlib import Path
+
+path = Path("notes.md")
+text = path.read_text()
+assert text.count("Status: draft") == 1, "the status line occurs once"
+path.write_text(text.replace("Status: draft", "Status: final"))
+'''),
+    ("Read JSON lines, skip bad ones, count", '''import json
+from collections import Counter
+from pathlib import Path
+
+counts = Counter()
+text = Path("data/rows.jsonl").read_text()
+for line in text.splitlines():
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    counts[row["status"]] += 1
+for status in sorted(counts):
+    print(status, counts[status])
+'''),
+    ("Scan files with a helper function", '''from pathlib import Path
+
+
+def todo_count(text):
+    return text.count("TODO")
+
+
+paths = Path("src").glob("*.cpp")
+for p in sorted(paths):
+    text = p.read_text()
+    print(p.name, todo_count(text))
+'''),
+]
+
+_PREPROMPT_HEAD = """\
+# Writing lackpy
+
+A lackpy program is plain Python 3. It uses only the standard library, and it
+does file I/O through `pathlib.Path`. A validator checks every program before it
+runs and rejects any rule it breaks. The full style guide follows this page.
+
+Approved imports: `pathlib` (`Path`), `json`, `re`, `collections`, `math`,
+`statistics`, `hashlib`, `datetime`. Nothing else.
+
+## Habits to replace
+
+These come from ordinary Python. The validator rejects each one.
+"""
+
+_PREPROMPT_SHAPE = """\
+## Shape
+
+- One effect per statement. An I/O call gets its own line.
+- A call nests at most 2 deep: `print(len(x))` is fine.
+- A `try` names its error, has at most 3 statements, and its handler ends in
+  `continue`, `return`, `pass`, or assignments to every name the body assigns.
+- A `def` is top level, has at most 12 statements, and is defined before use.
+- Every `assert` has a message.
+"""
+
+
+def format_preprompt() -> str:
+    """A one-page lesson on lackpy, to put before the full guide."""
+    lines = [_PREPROMPT_HEAD]
+    lines += _table(["Do not write", "Write instead"], [[a, b] for a, b in HABITS])
+    lines += ["", _PREPROMPT_SHAPE, "## Worked examples", ""]
+    for title, program in PREPROMPT_EXAMPLES:
+        lines += [f"### {title}", "", "```python", program.rstrip(), "```", ""]
+    return "\n".join(lines)
