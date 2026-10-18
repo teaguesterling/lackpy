@@ -120,7 +120,7 @@ def _bound_names(tree: ast.Module):
 @register(
     "safety.dunder-name", "safety",
     summary="Do not use a name that starts with two underscores. "
-            "You can read __name__ and __file__.",
+            "You can read `__name__` and `__file__`.",
     rationale="Dunder names lead to the builtins, the import machinery and the module namespace. "
               "__name__ and __file__ are only strings.",
     bad="x = __builtins__",
@@ -154,7 +154,7 @@ def _is_type_name(node: ast.AST) -> bool:
 
 @register(
     "safety.type-form", "safety",
-    summary="Use type only as type(<expr>).__name__.",
+    summary="Use type only as `type(<expr>).__name__`.",
     rationale="type returns a class. A class leads to object and to every subclass. "
               "The name of the class is a string, and it is safe.",
     bad="t = type(3)",
@@ -248,7 +248,7 @@ def _allowed_private(node: ast.Attribute, ctx: Context) -> bool:
 @register(
     "safety.attr-private", "safety",
     summary="Do not use an attribute whose name starts with an underscore. "
-            "You can read module.__version__ and type(<expr>).__name__.",
+            "You can read `module.__version__` and `type(<expr>).__name__`.",
     rationale="Underscore attributes lead from a value to its type, its module and its globals. "
               "That chain is the main way out of a Python sandbox.",
     bad="name = 'a'.__class__",
@@ -614,9 +614,9 @@ def _approved_class(cls: ast.expr, ctx: Context) -> bool:
 
 @register(
     "safety.except-base", "safety",
-    summary="Name each error in an except as an approved class: a builtin error such as "
-            "KeyError, or json.JSONDecodeError or re.error, or a tuple of them. Do not catch "
-            "Exception, BaseException, RecursionError, RuntimeError or MemoryError.",
+    summary="Catch only a named error class, such as KeyError or json.JSONDecodeError, or a "
+            "tuple of them. Do not catch Exception, BaseException, RecursionError, "
+            "RuntimeError or MemoryError.",
     rationale="A bare except, Exception and BaseException also catch the signals that stop "
               "the program, such as a time limit or a recursion limit. A handler of "
               "RecursionError can retry without end. A name that the program binds, or a call, "

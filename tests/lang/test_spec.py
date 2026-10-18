@@ -14,6 +14,7 @@ def test_get_spec_has_required_keys():
     assert "forbidden_nodes" in spec
     assert "forbidden_names" in spec
     assert "allowed_builtins" in spec
+    assert "rules" in spec
 
 
 def test_get_spec_values_are_lists():

@@ -151,8 +151,8 @@ def _handler_problem(try_node: ast.Try, handler: ast.ExceptHandler,
 
 @register(
     "style.try-handler", "style",
-    summary="In each except, use only print calls and assignments, then optionally continue "
-            "(in a for body), return <value> (in a def) or pass. An except that does not "
+    summary="An except may hold only print calls and assignments. It may end with continue "
+            "(in a for body), `return <value>` (in a def) or pass. An except that does not "
             "continue or return must assign every name that the try body assigns.",
     rationale="After a try, every name that the body assigns must have a value, or the "
               "handler must leave the flow. Each shape gives one sentence in the procedure, "
