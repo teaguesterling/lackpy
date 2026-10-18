@@ -9,7 +9,7 @@ in the rule registry (and is not "extra"). The figures are not printed then.
 "admitted" counts programs where ValidationResult.valid is true.
 "by_rule" counts, per Violation.rule_id, the programs with at least one such violation.
 "structural" counts programs whose every violation is vocabulary: VOCAB_IDS,
-plus the transitional cases in is_vocabulary().
+plus ``.format`` (ruled vocabulary: its replacement is an f-string).
 """
 import argparse
 import ast
@@ -26,9 +26,6 @@ CANON_ROWS = 7003
 CANON_SHA256 = "fc7ba975c23d207ade7cd072ec71719a065680ba5f5e3ed62f33232844c9672e"
 KIT = {"read_file", "find_files", "write_file", "edit_file"}
 VOCAB_IDS = {"safety.forbidden-name", "safety.unknown-call", "safety.import", "safety.module-attr"}
-# Transitional: until safety.import exists, an import is a safety.node violation on
-# the Import, ImportFrom and alias nodes. The baseline counted imports as vocabulary.
-IMPORT_NODE_MESSAGES = {f"Forbidden AST node: {n}" for n in ("Import", "ImportFrom", "alias")}
 # The baseline counted ``.format`` as vocabulary (the replacement is an f-string).
 FORMAT_MESSAGE = "Forbidden attribute access: '.format'"
 
@@ -36,8 +33,6 @@ FORMAT_MESSAGE = "Forbidden attribute access: '.format'"
 def is_vocabulary(v):
     if v.rule_id in VOCAB_IDS:
         return True
-    if v.rule_id == "safety.node":
-        return v.message.split(" at line")[0] in IMPORT_NODE_MESSAGES
     if v.rule_id == "safety.attr-denied":
         return v.message.split(" at line")[0] == FORMAT_MESSAGE
     return False

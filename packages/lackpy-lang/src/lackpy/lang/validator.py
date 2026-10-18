@@ -6,6 +6,7 @@ import ast
 from dataclasses import dataclass, field
 
 from . import rules_safety  # noqa: F401  (registers the rules into RULES)
+from .dictionary import MODULES
 from .registry import RULES, Context, Violation, Waiver
 
 
@@ -30,6 +31,26 @@ class ValidationResult:
     variables: list[str] = field(default_factory=list)
     violations: list[Violation] = field(default_factory=list)
     waivers: list[Waiver] = field(default_factory=list)
+
+
+def _collect_bindings(tree: ast.Module) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+    """Read the approved top-level imports into (module_bindings, member_bindings).
+
+    Only the module's own body counts. ``safety.import`` rejects an import
+    anywhere else, and every unapproved form, so neither gives a binding.
+    """
+    modules: dict[str, str] = {}
+    members: dict[str, tuple[str, str]] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            for a in stmt.names:
+                if a.name in MODULES:
+                    modules[a.asname or a.name] = a.name
+        elif isinstance(stmt, ast.ImportFrom) and stmt.level == 0 and stmt.module in MODULES:
+            for a in stmt.names:
+                if a.name in MODULES[stmt.module]:
+                    members[a.asname or a.name] = (stmt.module, a.name)
+    return modules, members
 
 
 def validate(
@@ -67,14 +88,15 @@ def validate(
         for child in ast.iter_child_nodes(node):
             parents[id(child)] = node
 
+    module_bindings, member_bindings = _collect_bindings(tree)
     ctx = Context(
         tree=tree,
         source=program,
         parents=parents,
         allowed_names=frozenset(allowed_names),
         defined_functions={},
-        module_bindings={},
-        member_bindings={},
+        module_bindings=module_bindings,
+        member_bindings=member_bindings,
     )
 
     violations: list[Violation] = []
@@ -89,9 +111,10 @@ def validate(
     # ``calls`` drives the kibitzer planned-tool-call pre-check, so it holds only
     # named (Name-target) calls. Method calls (``data.split(...)``) are left out on
     # purpose: recording ``split``/``items`` there would surface them as ungranted
-    # "tools".
+    # "tools". Calls to import bindings (``Path(...)``) are left out for the same reason.
     calls = [node.func.id for node in ast.walk(tree)
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+             and node.func.id not in member_bindings]
 
     variables: list[str] = []
     for node in ast.walk(tree):

@@ -10,11 +10,13 @@ class TestForbiddenNodes:
         result = validate("import os")
         assert not result.valid
         assert any("Import" in e for e in result.errors)
+        assert "safety.import" in [v.rule_id for v in result.violations]
 
     def test_rejects_import_from(self):
         result = validate("from os import path")
         assert not result.valid
         assert any("Import" in e for e in result.errors)
+        assert "safety.import" in [v.rule_id for v in result.violations]
 
     def test_rejects_function_def(self):
         result = validate("def foo():\n    pass")

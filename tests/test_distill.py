@@ -102,9 +102,14 @@ class TestInferRelevantTool:
         assert result == "find_files"
 
     def test_pathlib_maps_to_find_files(self):
+        # pathlib is an approved module now, so 'pathlib' is no forbidden name.
+        # A pathlib error is an unapproved member; take its text from the validator.
+        from lackpy.lang.validator import validate
+        errors = validate("import pathlib\npathlib.walk('.')").errors
+        assert not any("Forbidden name: 'pathlib'" in e for e in errors), errors
         result = _infer_relevant_tool(
             "stdlib_leak",
-            ["Forbidden name: 'pathlib' at line 1"],
+            errors,
             {"read_file", "find_files"},
         )
         assert result == "find_files"

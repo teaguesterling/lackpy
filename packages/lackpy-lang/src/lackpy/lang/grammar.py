@@ -22,6 +22,8 @@ ALLOWED_NODES: set[type] = {
     ast.Lambda, ast.arguments, ast.arg,
     # Keyword arguments
     ast.keyword,
+    # Imports (only dictionary modules, in the approved forms — safety.import)
+    ast.Import, ast.ImportFrom, ast.alias,
     # Context nodes
     ast.Load, ast.Store, ast.Del,
     # Operators
@@ -32,7 +34,6 @@ ALLOWED_NODES: set[type] = {
 }
 
 FORBIDDEN_NODES: set[type] = {
-    ast.Import, ast.ImportFrom,
     ast.FunctionDef, ast.AsyncFunctionDef,
     ast.ClassDef,
     ast.While,
@@ -56,8 +57,9 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "memoryview", "bytearray", "bytes",
     "map", "filter", "reduce",
     "input",
-    # stdlib modules that models reach for instead of using kit tools (issue #4)
-    "os", "sys", "pathlib", "subprocess", "shutil",
+    # stdlib modules that models reach for instead of using kit tools (issue #4).
+    # pathlib is an approved module now (dictionary.MODULES).
+    "os", "sys", "subprocess", "shutil",
 })
 
 # Attribute names that are always denied, even without an underscore prefix.

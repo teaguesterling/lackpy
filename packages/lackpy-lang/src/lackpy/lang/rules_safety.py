@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 
+from .dictionary import MODULES, hint_for
 from .grammar import ALLOWED_BUILTINS, ALLOWED_NODES, DENIED_ATTRIBUTES, FORBIDDEN_NAMES
 from .registry import Context, Violation, register
 
@@ -64,7 +65,8 @@ def check_forbidden_name(ctx: Context) -> list[Violation]:
     for node in ast.walk(ctx.tree):
         if isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
             out.append(Violation("safety.forbidden-name", node.lineno,
-                                 f"Forbidden name: '{node.id}' at line {node.lineno}"))
+                                 f"Forbidden name: '{node.id}' at line {node.lineno}",
+                                 hint=hint_for(node.id)))
     return out
 
 
@@ -121,6 +123,7 @@ def _attribute_violation(rule_id: str, node: ast.Attribute) -> Violation:
         rule_id, node.lineno,
         f"Forbidden attribute access: '.{node.attr}' at line {node.lineno} "
         f"(private/dunder/internal attribute access is not permitted)",
+        hint=hint_for(node.attr),
     )
 
 
@@ -153,6 +156,105 @@ def check_attr_denied(ctx: Context) -> list[Violation]:
             and not node.attr.startswith("_") and node.attr in DENIED_ATTRIBUTES]
 
 
+
+# Imports — the dictionary (dictionary.MODULES) is the whole import surface.
+#
+# validate() builds ctx.module_bindings and ctx.member_bindings from the
+# approved top-level imports. An import anywhere else is rejected, so each
+# binding names a module or a member for the whole program. A binding by
+# value (``s = statistics``) is not tracked: the runtime proxy (Plan 2) closes
+# that gap. The message keeps the old safety.node text for an import
+# statement, byte for byte, because consumers match on it.
+
+def _import_problem(node: ast.Import | ast.ImportFrom, ctx: Context) -> tuple[bool, list[str]]:
+    """Return (rejected, subjects). The subjects are the words to look up a hint for."""
+    subjects: list[str] = []
+    rejected = not isinstance(ctx.parents.get(id(node)), ast.Module)
+    bound: list[str] = []
+    if isinstance(node, ast.Import):
+        for a in node.names:
+            if a.name not in MODULES:  # also rejects a dotted name, ``import m.sub``
+                rejected = True
+                subjects += [a.name, a.name.split(".")[0]]
+            bound.append(a.asname or a.name)
+    else:
+        module = node.module or ""
+        if node.level or module not in MODULES:
+            rejected = True
+            subjects += [module, module.split(".")[0]]
+        for a in node.names:
+            if a.name not in MODULES.get(module, ()):  # also rejects ``*``
+                rejected = True
+                subjects.insert(0, f"{module}.{a.name}")
+            bound.append(a.asname or a.name)
+    # A binding must not be a forbidden name or start with an underscore
+    # (``import json as __builtins__`` would replace the program's builtins).
+    if any(b.startswith("_") or b in FORBIDDEN_NAMES for b in bound):
+        rejected = True
+    return rejected, subjects
+
+
+@register(
+    "safety.import", "safety",
+    summary="Import only a dictionary module, at the top level, with import m or from m import x.",
+    rationale="An import gives the program a module. Each dictionary module and member is reviewed. "
+              "Other modules reach the file system, processes or the interpreter.",
+    bad="import os\nnames = os.listdir('.')",
+    good="import json\ndata = json.loads('[1]')",
+)
+def check_import(ctx: Context) -> list[Violation]:
+    out = []
+    for node in ast.walk(ctx.tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            rejected, subjects = _import_problem(node, ctx)
+            if rejected:
+                out.append(Violation(
+                    "safety.import", node.lineno,
+                    f"Forbidden AST node: {type(node).__name__} at line {node.lineno}",
+                    hint=hint_for(*subjects),
+                ))
+    return out
+
+
+@register(
+    "safety.module-attr", "safety",
+    summary="Use only the approved members of an imported module. Do not assign to them.",
+    rationale="A module holds more than its approved members, for example the modules that it imports. "
+              "An assignment to a module member changes the module for the host.",
+    bad="import json\ndata = json.load('[1]')",
+    good="import json\ndata = json.loads('[1]')",
+)
+def check_module_attr(ctx: Context) -> list[Violation]:
+    bindings = ctx.module_bindings.keys() | ctx.member_bindings.keys()
+    out = []
+    for node in ast.walk(ctx.tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        # A store anywhere along a chain from a binding (``collections.Counter.x = f``)
+        # changes a host module or class.
+        root = node.value
+        while isinstance(root, ast.Attribute):
+            root = root.value
+        if (not isinstance(node.ctx, ast.Load) and isinstance(root, ast.Name)
+                and root.id in bindings):
+            out.append(Violation(
+                "safety.module-attr", node.lineno,
+                f"Forbidden assignment to module member: '{ast.unparse(node)}' at line {node.lineno}",
+            ))
+            continue
+        if not (isinstance(node.value, ast.Name) and node.value.id in ctx.module_bindings):
+            continue
+        module = ctx.module_bindings[node.value.id]
+        subject = f"{module}.{node.attr}"
+        if node.attr not in MODULES[module]:
+            out.append(Violation(
+                "safety.module-attr", node.lineno,
+                f"Unknown module member: '{subject}' at line {node.lineno} (not in the dictionary)",
+                hint=hint_for(subject),
+            ))
+    return out
+
+
 # Namespace check — every ast.Call is inspected (not only ``func is ast.Name``):
 # a call whose target is an attribute (``data.split(...)``) is permitted only
 # because the attribute name already passed the attribute rules; a call whose
@@ -162,14 +264,14 @@ def check_attr_denied(ctx: Context) -> list[Violation]:
 
 @register(
     "safety.unknown-call", "safety",
-    summary="Call only an allowed builtin or a name that the caller allows.",
+    summary="Call only an allowed builtin, a name that the caller allows, or an imported member.",
     rationale="The validator must know each function that a program calls. "
               "An unknown name can be a missing tool or a guess.",
     bad="x = frobnicate(1)",
-    good="x = len([1])",
+    good="from collections import Counter\nc = Counter([1, 1])\nn = len(c)",
 )
 def check_unknown_call(ctx: Context) -> list[Violation]:
-    allowed = ALLOWED_BUILTINS | ctx.allowed_names
+    allowed = ALLOWED_BUILTINS | ctx.allowed_names | ctx.member_bindings.keys()
     out = []
     for node in ast.walk(ctx.tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
@@ -179,6 +281,7 @@ def check_unknown_call(ctx: Context) -> list[Violation]:
                     "safety.unknown-call", node.lineno,
                     f"Unknown function: '{name}' at line {node.lineno} "
                     f"(not in kit or builtins)",
+                    hint=hint_for(name),
                 ))
     return out
 
