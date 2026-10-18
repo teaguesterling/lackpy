@@ -25,3 +25,11 @@ The snapshot holds **7,003** distinct non-empty bodies (6,984 parse). It was bui
 from the live history on 2026-10-18 later gave only 3,351 calls (11 sessions) and 3,104
 bodies. The live extract is not comparable with the baseline, so do not use it for
 `baseline.json`.
+
+## Snapshot identity
+
+Canonical: **7,003** bodies, SHA-256 `fc7ba975c23d207ade7cd072ec71719a065680ba5f5e3ed62f33232844c9672e`.
+Definition: distinct non-empty bodies, sorted, each UTF-8 encoded and followed by a NUL byte, hashed.
+`coverage.py` checks both on the default snapshot (mismatch: stderr message, exit 3). With
+`--snapshot PATH` it skips the check. Its JSON always carries `snapshot_rows` and `snapshot_sha256`.
+`extract.py` without `--calls` warns on stderr when the count differs from 7,003.

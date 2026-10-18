@@ -1,6 +1,7 @@
 """Measure how much of the frozen heredoc corpus today's lackpy validator admits.
 
 Usage: python scripts/corpus/coverage.py [--snapshot PATH] [--json]
+Exit 3 on "snapshot mismatch" (default snapshot only).
 Exit 2 with "corpus not found: <path>" on stderr when the snapshot is missing.
 
 Until the rule registry exists, validate() error strings map to keys per
@@ -10,6 +11,7 @@ Appendix A of docs/superpowers/specs/2026-10-18-lackpy-ste-design.md.
 import argparse
 import ast
 import collections
+import hashlib
 import json
 import re
 import sys
@@ -17,6 +19,9 @@ import warnings
 from pathlib import Path
 
 DEFAULT = Path("~/.local/share/lackpy/corpus/heredocs-2026-10-18.parquet").expanduser()
+# Identity of the canonical snapshot: distinct non-empty bodies, sorted, each followed by a NUL byte, SHA-256.
+CANON_ROWS = 7003
+CANON_SHA256 = "fc7ba975c23d207ade7cd072ec71719a065680ba5f5e3ed62f33232844c9672e"
 KIT = {"read_file", "find_files", "write_file", "edit_file"}
 VOCAB_PREFIXES = ("name:", "import:", "call:")
 VOCAB_KEYS = {"attr:format"}
@@ -84,6 +89,14 @@ def main() -> int:
 
     bodies = [r[0] for r in duckdb.connect().execute(
         f"SELECT body FROM read_parquet('{snap}') WHERE body <> ''").fetchall()]
+    h = hashlib.sha256()
+    for b in sorted(bodies):
+        h.update(b.encode() + b"\0")
+    rows, sha = len(bodies), h.hexdigest()
+    if snap == DEFAULT and (rows, sha) != (CANON_ROWS, CANON_SHA256):
+        print(f"snapshot mismatch: expected {CANON_ROWS}/{CANON_SHA256[:12]}, got {rows}/{sha[:12]}",
+              file=sys.stderr)
+        return 3
     progs = []
     for b in bodies:
         try:
@@ -99,6 +112,8 @@ def main() -> int:
     structural = sum(1 for k in progs if is_structural(k))
     by_rule = collections.Counter(k for ks in progs for k in ks)
     out = {
+        "snapshot_rows": rows,
+        "snapshot_sha256": sha,
         "parsed": n,
         "admitted": admitted,
         "admitted_pct": round(100 * admitted / n, 1),
@@ -109,6 +124,7 @@ def main() -> int:
     if args.json:
         print(json.dumps(out, indent=1))
     else:
+        print(f"snapshot {rows}/{sha[:12]}")
         print(f"parsed {n}; admitted {admitted} ({out['admitted_pct']}%); "
               f"structural {structural} ({out['structural_pct']}%)")
         for k, v in list(out["by_rule"].items())[:20]:

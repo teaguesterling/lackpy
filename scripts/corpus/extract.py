@@ -38,6 +38,9 @@ FROM calls
 """
 
 
+CANON_ROWS = 7003  # see coverage.py
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--snapshot", type=Path, default=DEFAULT)
@@ -61,6 +64,9 @@ def main() -> int:
         f"FROM bodies WHERE body <> '' GROUP BY body ORDER BY body) TO '{out}' (FORMAT parquet)"
     )
     n = con.execute(f"SELECT count(*) FROM read_parquet('{out}')").fetchone()[0]
+    if not args.calls and n != CANON_ROWS:
+        print(f"warning: {n} bodies, canonical snapshot has {CANON_ROWS}; "
+              "coverage.py will not match baseline.json", file=sys.stderr)
     print(f"wrote {out}: {n} distinct non-empty bodies")
     return 0
 
