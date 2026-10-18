@@ -38,3 +38,9 @@ def test_preprompt_is_short_and_ends_before_the_guide():
     text = format_preprompt()
     assert len(text) < 5000
     assert "Part 1. Program rules" not in text
+
+
+def test_preprompt_states_the_ruled_nesting_depth():
+    text = format_preprompt()
+    assert "A call nests at most 3 deep" in text
+    assert "an I/O call inside another call" not in text

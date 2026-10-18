@@ -46,6 +46,9 @@ DANGEROUS = {
     "bare_except": "d = {}\ntry:\n    x = d['k']\nexcept:\n    x = 0",
     "import_os": "import os\nx = os.listdir('.')",
     "class_traversal": "x = ().__class__",
+    # host mutation: a store to an attribute of a class or an object
+    "attr_store_on_class": "from collections import Counter\nC = Counter\nC.most_common = len",
+    "attr_store_via_subscript": "from pathlib import Path\n[Path][0].read_text = print",
     # I2: compiles only inside a loop
     "top_level_break": "x = 1\nbreak",
 }

@@ -132,6 +132,28 @@ name = 'a'.__class__
 name = 'a'.upper()
 ```
 
+### safety.attr-store
+
+Do not assign to or delete an attribute.
+
+**Tier:** safety
+
+**Why:** An attribute store on a class or object that the host passes in changes the host for every later program. A name is local to the program.
+
+**Not approved:**
+
+```python
+x = []
+x.y = 1
+```
+
+**Approved:**
+
+```python
+x = {}
+x['y'] = 1
+```
+
 ### safety.attr-denied
 
 Do not use a denied attribute, such as format or f_globals.
@@ -736,52 +758,49 @@ y = words.pop()
 
 ### style.call-nesting
 
-Nest calls at most 2 deep in arguments.
+Nest calls at most 3 deep in arguments.
 
 **Tier:** style
 
-**Why:** print(len(x)) reads at once. A third level makes the reader unwrap from the inside.
+**Why:** print(len(sorted(x))) still reads at once. A fourth level makes the reader unwrap from the inside.
 
 **Not approved:**
 
 ```python
 x = [3, 1]
-print(len(sorted(x)))
+print(len(sorted(list(x))))
 ```
 
 **Approved:**
 
 ```python
 x = [3, 1]
-n = len(sorted(x))
+n = len(sorted(list(x)))
 print(n)
 ```
 
 ### style.io-position
 
-Keep an I/O call out of arguments. In a chain, make it the first method call.
+In a chain, make the I/O call the first method call.
 
 **Tier:** style
 
-**Why:** I/O is the step that can fail. Put it on a line of its own, or at the start of a chain, so the reader finds it.
+**Why:** I/O is the step that can fail. Put it at the start of a chain, so the reader finds it. An I/O call may be an argument.
 
 **Not approved:**
 
 ```python
-import json
 from pathlib import Path
-p = 'a.json'
-d = json.loads(Path(p).read_text())
+p = 'a'
+t = Path(p).read_text().read_text()
 ```
 
 **Approved:**
 
 ```python
-import json
 from pathlib import Path
-p = 'a.json'
-text = Path(p).read_text()
-d = json.loads(text)
+p = 'a'
+t = Path(p).read_text().strip()
 ```
 
 ### style.comprehension-nested

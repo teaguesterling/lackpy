@@ -105,8 +105,6 @@ HABITS: list[tuple[str, str]] = [
      "`assert cond, \"why it must hold\"`"),
     ("`open(p)` or `with open(p) as f:`",
      "`text = Path(p).read_text()`"),
-    ("an I/O call inside another call, like `json.loads(Path(p).read_text())`",
-     "put the I/O call on its own line: `text = Path(p).read_text()`"),
     ("`json.load(f)` / `json.dump(obj, f)`",
      "`data = json.loads(text)`, and `Path(p).write_text(json.dumps(obj))`"),
     ("`finally:` or `else:` on a `try`",
@@ -171,7 +169,7 @@ _PREPROMPT_SHAPE = """\
 ## Shape
 
 - One effect per statement. An I/O call gets its own line.
-- A call nests at most 2 deep: `print(len(x))` is fine.
+- A call nests at most 3 deep: `print(len(sorted(x)))` is fine.
 - A `try` names its error, has at most 3 statements, and its handler ends in
   `continue`, `return`, `pass`, or assignments to every name the body assigns.
 - A `def` is top level, has at most 12 statements, and is defined before use.

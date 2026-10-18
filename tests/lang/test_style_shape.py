@@ -27,6 +27,13 @@ def _ids(result):
     "s = 'a'\nprint(s.strip().lower())",
     # a comprehension passed as an argument adds no depth: its calls count from their own position
     "x = [1]\nprint(sum(len(sorted(x)) for _ in x))",
+    # depth 3 is the maximum
+    "x = [1]\nprint(len(sorted(x)))",
+    # an I/O call may be an argument
+    PJ + "p = 'a'\nd = json.loads(Path(p).read_text())",
+    P + "p = 'a'\nn = len(Path(p).read_text())",
+    PJ + "p = 'a'\nprint(Path(p).exists())",
+    PJ + "p = 'a'\nprint(sorted(Path(p).glob('*')))",
     # an I/O call that is not an argument
     P + "p = 'a'\nif Path(p).exists():\n    print(1)",
     P + "p = 'a'\nok = Path(p).exists()\nprint(ok)",
@@ -41,21 +48,18 @@ def test_valid(program):
 
 
 @pytest.mark.parametrize("program, rule_id", [
-    (PJ + "p = 'a'\nd = json.loads(Path(p).read_text())", "style.io-position"),
-    (PJ + "p = 'a'\nprint(Path(p).exists())", "style.io-position"),
-    (PJ + "p = 'a'\nprint(sorted(Path(p).glob('*')))", "style.io-position"),
-    (P + "p = 'a'\nn = len(Path(p).read_text())", "style.io-position"),
-    (P + "p = 'a'\nn = len(x=Path(p).read_text())", "style.io-position"),
     # the I/O call is not the innermost method call of its chain
     (P + "s = 'a'\nt = s.strip().read_text()", "style.io-position"),
     ("xs = [1]\ng = (x for x in xs)", "style.genexp-consumed"),
     ("xs = [1]\nfor y in (x for x in xs):\n    print(y)", "style.genexp-consumed"),
     ("xs = [1]\ndef f():\n    return (x for x in xs)\nprint(f())", "style.genexp-consumed"),
     ("xs = [1]\nt = [(x for x in xs)]", "style.genexp-consumed"),
-    ("x = [1]\nprint(len(sorted(x)))", "style.call-nesting"),
-    ("x = [1]\nprint(len(sorted(x)) + 1)", "style.call-nesting"),
-    ("x = [1]\nprint(len(sorted(x, key=len)))", "style.call-nesting"),
-    ("x = [1]\nprint(sum(len(sorted(set(x))) for _ in x))", "style.call-nesting"),
+    ("x = [1]\nprint(len(sorted(list(x))))", "style.call-nesting"),
+    ("x = [1]\nprint(len(sorted(list(x))) + 1)", "style.call-nesting"),
+    ("x = [1]\nprint(len(sorted(list(x), key=len)))", "style.call-nesting"),
+    ("x = [1]\nprint(sum(len(sorted(list(set(x)))) for _ in x))", "style.call-nesting"),
+    # an I/O call is never the receiver of an I/O call
+    (P + "p = 'a'\nt = Path(p).read_text().read_text()", "style.io-position"),
     ("x = {}\na = x.b.c.d", "style.attr-chain"),
     ("s = 'a'\ny = s.strip().lower().split().pop()", "style.method-chain"),
     ("rows = [[1]]\ny = [[a for a in r] for r in rows]", "style.comprehension-nested"),
@@ -76,6 +80,6 @@ def test_elif_chain_reports_once_on_the_top_if():
 
 
 def test_call_nesting_reports_once_per_outer_call():
-    hits = [v for v in validate("x = [1]\nprint(len(sorted(x)))").violations
+    hits = [v for v in validate("x = [1]\nprint(len(sorted(list(x))))").violations
             if v.rule_id == "style.call-nesting"]
     assert len(hits) == 1

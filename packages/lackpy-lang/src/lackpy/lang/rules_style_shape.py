@@ -11,7 +11,7 @@ import ast
 from .dictionary import PATH_IO_METHODS
 from .registry import Context, Violation, register
 
-MAX_CALL_NESTING = 2
+MAX_CALL_NESTING = 3
 MAX_METHOD_CHAIN = 3
 MAX_ATTR_NAMES = 3  # a.b.c is allowed, a.b.c.d is not
 ELIF_BRANCHES = 3
@@ -154,9 +154,10 @@ def check_method_chain(ctx: Context) -> list[Violation]:
 @register(
     "style.call-nesting", "style",
     summary=f"Nest calls at most {MAX_CALL_NESTING} deep in arguments.",
-    rationale="print(len(x)) reads at once. A third level makes the reader unwrap from the inside.",
-    bad="x = [3, 1]\nprint(len(sorted(x)))",
-    good="x = [3, 1]\nn = len(sorted(x))\nprint(n)",
+    rationale="print(len(sorted(x))) still reads at once. A fourth level makes the reader "
+              "unwrap from the inside.",
+    bad="x = [3, 1]\nprint(len(sorted(list(x))))",
+    good="x = [3, 1]\nn = len(sorted(list(x)))\nprint(n)",
 )
 def check_call_nesting(ctx: Context) -> list[Violation]:
     out, covered = [], set()
@@ -178,27 +179,20 @@ def check_call_nesting(ctx: Context) -> list[Violation]:
 
 @register(
     "style.io-position", "style",
-    summary="Keep an I/O call out of arguments. In a chain, make it the first method call.",
-    rationale="I/O is the step that can fail. Put it on a line of its own, "
-              "or at the start of a chain, so the reader finds it.",
-    bad="import json\nfrom pathlib import Path\np = 'a.json'\nd = json.loads(Path(p).read_text())",
-    good="import json\nfrom pathlib import Path\np = 'a.json'\ntext = Path(p).read_text()\nd = json.loads(text)",
+    summary="In a chain, make the I/O call the first method call.",
+    rationale="I/O is the step that can fail. Put it at the start of a chain, "
+              "so the reader finds it. An I/O call may be an argument.",
+    bad="from pathlib import Path\np = 'a'\nt = Path(p).read_text().read_text()",
+    good="from pathlib import Path\np = 'a'\nt = Path(p).read_text().strip()",
 )
 def check_io_position(ctx: Context) -> list[Violation]:
     out = []
     for call in _calls(ctx):
-        for arg in _arg_calls(call):
-            for node in [arg, *_receiver_chain(arg)]:
-                if _is_io(node):
-                    out.append(Violation(
-                        "style.io-position", node.lineno,
-                        f"I/O call .{node.func.attr}() at line {node.lineno} must not be an argument",
-                        hint="Assign the I/O result to a name first"))
         if _is_io(call) and any(_is_method_call(n) for n in _receiver_chain(call)):
             out.append(Violation(
                 "style.io-position", call.lineno,
                 f"I/O call .{call.func.attr}() at line {call.lineno} must be the first "
-                "method call in its chain",
+                "method call of its chain",
                 hint="Start the chain with the I/O call"))
     return out
 

@@ -294,6 +294,23 @@ def check_attr_private(ctx: Context) -> list[Violation]:
 
 
 @register(
+    "safety.attr-store", "safety",
+    summary="Do not assign to or delete an attribute.",
+    rationale="An attribute store on a class or object that the host passes in changes the host "
+              "for every later program. A name is local to the program.",
+    bad="x = []\nx.y = 1",
+    good="x = {}\nx['y'] = 1",
+)
+def check_attr_store(ctx: Context) -> list[Violation]:
+    return [Violation(
+        "safety.attr-store", node.lineno,
+        f"Assignment to an attribute is not allowed: '{ast.unparse(node)}' at line {node.lineno}",
+        hint="build a new value and assign it to a name")
+        for node in ast.walk(ctx.tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))]
+
+
+@register(
     "safety.attr-denied", "safety",
     summary="Do not use a denied attribute, such as format or f_globals.",
     rationale="These attributes have no underscore, but they expose frames and globals, "
