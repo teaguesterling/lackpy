@@ -12,11 +12,11 @@ A waiver names style rules only. A waiver that names a safety rule gives `meta.w
 
 ### safety.parse
 
-The program must parse as Python.
+The program must parse and compile as Python.
 
 **Tier:** safety
 
-**Why:** The other rules read the syntax tree. A program that does not parse has no tree.
+**Why:** The other rules read the syntax tree. A program that does not parse has no tree. A program that does not compile cannot run.
 
 **Not approved:**
 
@@ -267,6 +267,37 @@ except KeyError:
     x = 0
 ```
 
+### safety.try-finally
+
+Do not use finally on a try. Use a with statement for cleanup.
+
+**Tier:** safety
+
+**Why:** A return, continue or break in finally discards the exception in flight, such as a recursion limit or a sandbox refusal.
+
+**Not approved:**
+
+```python
+d = {}
+try:
+    x = d['k']
+except KeyError:
+    x = 0
+finally:
+    print('done')
+```
+
+**Approved:**
+
+```python
+d = {}
+try:
+    x = d['k']
+except KeyError:
+    x = 0
+print('done')
+```
+
 ### style.assert-message
 
 Give every assert a message that is a string or an f-string.
@@ -356,11 +387,11 @@ words = sorted(['b', 'a'], key=lambda w: w)
 
 ### style.def-top-level
 
-Write def only at the top level of the program, with no decorator.
+Write def only at the top level of the program.
 
 **Tier:** style
 
-**Why:** A def inside a block or another def hides its scope. A decorator runs code that the reader cannot see.
+**Why:** A def inside a block or another def hides its scope.
 
 **Not approved:**
 
@@ -571,13 +602,13 @@ except KeyError:
     a = 0
 ```
 
-### style.try-else-finally
+### style.try-else
 
-Do not use else or finally on a try. Use with for cleanup.
+Do not use else on a try. Put the statements after the try.
 
 **Tier:** style
 
-**Why:** else and finally add paths that the reader must follow. A with statement does the cleanup.
+**Why:** else adds a path that the reader must follow.
 
 **Not approved:**
 
@@ -587,8 +618,8 @@ try:
     x = d['k']
 except KeyError:
     x = 0
-finally:
-    print('done')
+else:
+    print(x)
 ```
 
 **Approved:**
@@ -599,7 +630,7 @@ try:
     x = d['k']
 except KeyError:
     x = 0
-print('done')
+print(x)
 ```
 
 ### style.try-handler

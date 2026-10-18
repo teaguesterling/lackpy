@@ -34,7 +34,8 @@ def test_valid(program):
 @pytest.mark.parametrize("program, rule_id", [
     ("def f():\n    def g():\n        return 1\n    return 1", "style.def-top-level"),
     ("if True:\n    def f():\n        return 1", "style.def-top-level"),
-    ("@dec\ndef f():\n    return 1", "style.def-top-level"),
+    # final review I1: a decorator runs code at def time, so it is safety.node
+    ("@dec\ndef f():\n    return 1", "safety.node"),
     ("def f():\n    return f()", "style.def-before-use"),
     ("def f():\n    return g()\ndef g():\n    return 1", "style.def-before-use"),
     ("def f():\n    return 1\nx = f()\ndef g():\n    return 1\ny = g()\nz = h()\ndef h():\n    return 1",
@@ -143,3 +144,24 @@ def test_return_mode_fall_through_invalid(program):
 def test_def_before_use_rationale_is_accurate():
     from lackpy.lang.registry import rule_by_id
     assert "direct call" in rule_by_id("style.def-before-use").rationale
+
+
+# Final review I1: with a waiver of the old style rule, @write_file ran the tool at def
+# time with calls=[], and @read_file made f the tool's result. Decorators are safety.node.
+@pytest.mark.parametrize("program", [
+    "@write_file\ndef f():  # ste: style.def-top-level, needed\n    return 1\nf",
+    "@read_file\ndef f():  # ste: style.def-top-level, needed\n    return 1\nx = f\nx",
+    "def g():\n    return 1\n@g\ndef f():\n    return 1",
+])
+def test_decorator_is_safety_and_not_waivable(program):
+    result = validate(program, allowed_names={"read_file", "write_file"})
+    assert not result.valid
+    assert any(v.rule_id == "safety.node" and "decorator" in v.message
+               for v in result.violations), result.violations
+
+
+def test_nested_def_stays_style():
+    program = ("def outer():\n    def inner():  # ste: style.def-top-level, test\n"
+               "        return 1\n    return inner()  # ste: style.def-before-use, test")
+    result = validate(program)
+    assert "safety.node" not in _ids(result), result.violations

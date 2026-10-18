@@ -65,8 +65,9 @@ def test_valid(program):
     ("d = {}\nk = 1\ntry:\n    x = d[k]\nexcept KeyError:\n    pass\nprint(x)", "style.try-handler"),
     ("try:\n    a = 1\n    b = 2\n    c = 3\n    e = 4\nexcept KeyError:\n    a = b = c = e = 0",
      "style.try-body"),
-    ("try:\n    x = 1\nexcept KeyError:\n    x = 0\nelse:\n    x = 2", "style.try-else-finally"),
-    ("try:\n    x = 1\nexcept KeyError:\n    x = 0\nfinally:\n    print(1)", "style.try-else-finally"),
+    ("try:\n    x = 1\nexcept KeyError:\n    x = 0\nelse:\n    x = 2", "style.try-else"),
+    # final review C1: finally is safety (it can discard an in-flight exception)
+    ("try:\n    x = 1\nexcept KeyError:\n    x = 0\nfinally:\n    print(1)", "safety.try-finally"),
     ("try:\n    x = 1\nexcept KeyError as e:\n    t = e.__traceback__", "safety.attr-private"),
     ("try:\n    x = 1\nexcept KeyError as e:\n    t = e.with_traceback(None).tb_frame", "safety.attr-denied"),
     # controller ruling: AttributeError.obj can hold any object
@@ -190,3 +191,57 @@ def test_try_named_is_not_a_rule():
 def test_except_base_messages_name_the_alternative(program):
     messages = [v.message for v in validate(program).violations if v.rule_id == "safety.except-base"]
     assert messages and all("KeyError" in m for m in messages), messages
+
+
+# Final review C1: a return or continue in finally discards the exception in flight,
+# a RecursionError or a sandbox refusal included. Each program validated with one
+# style waiver before the fix; finally is now safety.try-finally, which no waiver lifts.
+C1_PROGRAMS = {
+    "continue_in_finally_hangs_key_recursion": (
+        "def k(x):\n"
+        "    for i in [1, 2]:\n"
+        "        try:  # ste: style.try-else-finally, cleanup\n"
+        "            y = sorted([x], key=k)\n"
+        "        finally:\n"
+        "            continue\n"
+        "    return 0\n"
+        "z = sorted([1], key=k)\n"
+        "z"),
+    "return_in_finally_swallows_recursion": (
+        "def f(n):\n"
+        "    try:  # ste: style.try-else-finally, cleanup\n"
+        "        return f(n + 1)  # ste: style.def-before-use, demo\n"
+        "    finally:\n"
+        "        return 0\n"
+        "y = f(0)\n"
+        "y"),
+    "return_in_finally_swallows_a_refusal": (
+        "def f(p):\n"
+        "    try:  # ste: style.try-else-finally, cleanup\n"
+        "        return guarded(p)\n"
+        "    finally:\n"
+        "        return 'swallowed'\n"
+        "x = f('/etc/passwd')\n"
+        "x"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(C1_PROGRAMS))
+def test_finally_is_rejected_with_a_waiver(name):
+    result = validate(C1_PROGRAMS[name], allowed_names={"guarded"})
+    assert not result.valid
+    assert "safety.try-finally" in _ids(result), result.violations
+
+
+def test_finally_rule_is_safety_and_else_stays_style():
+    from lackpy.lang.registry import rule_by_id
+    assert rule_by_id("safety.try-finally").tier == "safety"
+    assert rule_by_id("style.try-else").tier == "style"
+    assert "finally" not in rule_by_id("style.try-else").summary
+
+
+def test_else_alone_is_waivable():
+    program = ("d = {}\ntry:  # ste: style.try-else, test\n    x = d['k']\nexcept KeyError:\n"
+               "    x = 0\nelse:\n    print(x)")
+    result = validate(program)
+    assert result.valid, result.violations

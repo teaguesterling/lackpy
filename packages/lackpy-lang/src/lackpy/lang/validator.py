@@ -22,7 +22,11 @@ class ValidationResult:
     Attributes:
         valid: Whether the program passed all checks.
         errors: List of validation error messages.
-        calls: Function names called in the program.
+        calls: Function names called in the program. The list is advisory: best-effort
+            named calls of builtins and allowed names, for the kibitzer pre-check. It is
+            not a soundness boundary. A tool reached through a rebound name or passed
+            as an argument (``key=read_file``) is not in it. Sound effect derivation
+            is Plan 3's job.
         variables: Variable names assigned in the program.
         violations: The failed checks, each with its rule id.
             ``errors == [v.message for v in violations]``.
@@ -115,6 +119,16 @@ def validate(
     # Waivers: a ``# ste:`` comment removes a style violation on its line.
     violations, waivers, meta = apply_waivers(violations, program)
     violations.extend(meta)
+
+    # safety.parse, compile step: some programs pass every rule and still fail to
+    # compile (two starred targets, a repeated parameter or keyword). Compile only a
+    # program with no other violation, so the messages of a rejected program do not change.
+    if not violations:
+        try:
+            compile(tree, "<lackpy>", "exec")
+        except SyntaxError as e:
+            violations.append(Violation("safety.parse", e.lineno,
+                                        f"Compile error: {e.msg} (line {e.lineno})"))
 
     # Custom rules: callables (ast.Module) -> list[str].
     if extra_rules:

@@ -246,3 +246,54 @@ class TestLambdaRestriction:
             allowed_names=set(),
         )
         assert not result.valid
+
+
+# Final review I2(a): break and continue compile only inside a loop of their own scope.
+# They validated at top level and directly in a def, and then compile() raised SyntaxError.
+@pytest.mark.parametrize("program", [
+    "break",
+    "continue",
+    "if True:\n    break",
+    "def f():\n    break\n    return 1\nx = f()",
+    "def f():\n    continue",
+    # a def body inside a for is its own scope
+    "for i in [1]:\n    def f():  # ste: style.def-top-level, test\n        break",
+    # a for's else clause is not its body
+    "for i in [1]:\n    print(i)\nelse:\n    break",
+])
+def test_break_continue_outside_a_for_body_rejected(program):
+    result = validate(program)
+    assert any(v.rule_id == "safety.node" and ("Break" in v.message or "Continue" in v.message)
+               for v in result.violations), result.violations
+
+
+@pytest.mark.parametrize("program", [
+    "for i in [1]:\n    break",
+    "for i in [1]:\n    if i:\n        continue\n    print(i)",
+    "for i in [1]:\n    with open_thing() as t:\n        break",
+    "d = {}\nfor k in ['a']:\n    try:\n        x = d[k]\n    except KeyError:\n        continue\n    print(x)",
+    "for i in [1]:\n    for j in [2]:\n        print(j)\n    else:\n        break",
+    "def f(xs):\n    for x in xs:\n        if x:\n            break\n    return 1",
+])
+def test_break_continue_inside_a_for_body_allowed(program):
+    result = validate(program, allowed_names={"open_thing"})
+    assert not any("Break" in v.message or "Continue" in v.message for v in result.violations), \
+        result.violations
+
+
+# Final review I2(b): a program that passes every rule but fails to compile is invalid.
+@pytest.mark.parametrize("program", [
+    "a, *b, *c = [1, 2, 3]",
+    "def f(a, a):\n    return a",
+    "print(sep='', sep='')",
+])
+def test_program_that_does_not_compile_is_invalid(program):
+    result = validate(program)
+    assert not result.valid
+    assert any(v.rule_id == "safety.parse" and "Compile error" in v.message
+               for v in result.violations), result.violations
+
+
+def test_calls_is_documented_as_advisory():
+    # Final review I3: calls is best-effort, not a soundness boundary.
+    assert "advisory" in ValidationResult.__doc__

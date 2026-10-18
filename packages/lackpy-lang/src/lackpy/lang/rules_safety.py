@@ -19,15 +19,34 @@ from .registry import Context, Violation, register
 
 @register(
     "safety.parse", "safety",
-    summary="The program must parse as Python.",
-    rationale="The other rules read the syntax tree. A program that does not parse has no tree.",
+    summary="The program must parse and compile as Python.",
+    rationale="The other rules read the syntax tree. A program that does not parse has no tree. "
+              "A program that does not compile cannot run.",
     bad="x = (",
     good="x = 1",
 )
 def check_parse(ctx: Context) -> list[Violation]:
     # validate() emits safety.parse itself when ast.parse fails, because no
     # Context exists then. A Context always holds a parsed tree, so this is empty.
+    # validate() also compiles a program that passes every rule (a compile error
+    # there, such as two starred targets, is safety.parse too).
     return []
+
+
+def in_for_body(node: ast.AST, ctx: Context) -> bool:
+    """Whether ``node`` is inside the body of a ``for`` loop of its own function or program.
+
+    A def or lambda between them starts a new scope, and a ``for``'s else clause is
+    not its body, so neither counts.
+    """
+    child, parent = node, ctx.parents.get(id(node))
+    while parent is not None:
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            return False
+        if isinstance(parent, ast.For) and child in parent.body:
+            return True
+        child, parent = parent, ctx.parents.get(id(parent))
+    return False
 
 
 def _inside_def(node: ast.AST, ctx: Context) -> bool:
@@ -56,6 +75,13 @@ def check_node(ctx: Context) -> list[Violation]:
             out.append(Violation(
                 "safety.node", node.lineno,
                 f"Forbidden AST node: Return at line {node.lineno} (return is only allowed inside a def)"))
+        elif node_type in (ast.Break, ast.Continue) and not in_for_body(node, ctx):
+            # Outside a loop of its own scope, break and continue are a SyntaxError at compile.
+            word = node_type.__name__.lower()
+            out.append(Violation(
+                "safety.node", node.lineno,
+                f"Forbidden AST node: {node_type.__name__} at line {node.lineno} "
+                f"({word} is only allowed inside a for body of the same def or program)"))
         elif node_type not in ALLOWED_NODES:
             line = getattr(node, "lineno", None)
             out.append(Violation(
@@ -63,6 +89,12 @@ def check_node(ctx: Context) -> list[Violation]:
                 f"Forbidden AST node: {node_type.__name__}"
                 + (f" at line {node.lineno}" if hasattr(node, "lineno") else ""),
             ))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.decorator_list:
+            # A decorator runs when the def runs, and its result replaces the function.
+            out.append(Violation(
+                "safety.node", node.lineno,
+                f"Forbidden decorator on function '{node.name}' at line {node.lineno} "
+                f"(a decorator runs code when the def runs; call the function instead)"))
     return out
 
 
@@ -654,3 +686,24 @@ def check_except_base(ctx: Context) -> list[Violation]:
                 continue
             out.append(Violation("safety.except-base", node.lineno, message))
     return out
+
+
+# finally runs on every path out of the try, an exception in flight included. A
+# ``return``, ``continue`` or ``break`` in it discards that exception: a
+# RecursionError (so key= recursion retries without end), or a sandbox refusal
+# (a BaseException that the runner must see). No waiver can lift this, so finally
+# is a safety rule. A with statement does cleanup.
+
+@register(
+    "safety.try-finally", "safety",
+    summary="Do not use finally on a try. Use a with statement for cleanup.",
+    rationale="A return, continue or break in finally discards the exception in flight, "
+              "such as a recursion limit or a sandbox refusal.",
+    bad="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nfinally:\n    print('done')",
+    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nprint('done')",
+)
+def check_try_finally(ctx: Context) -> list[Violation]:
+    return [Violation("safety.try-finally", node.lineno,
+                      f"Try at line {node.lineno} must not have finally: "
+                      f"(it can discard an exception in flight; use with for cleanup)")
+            for node in ast.walk(ctx.tree) if isinstance(node, ast.Try) and node.finalbody]

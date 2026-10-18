@@ -1,4 +1,7 @@
-"""Style rules for try: a small body, no else or finally, approved handler shapes (Task 8).
+"""Style rules for try: a small body, no else, approved handler shapes (Task 8).
+
+``finally`` is ``safety.try-finally`` (final review): a return or continue in it
+discards an exception in flight, so no waiver may lift it.
 
 The design (section 4.3, "Rules for try") gives four handler shapes:
 
@@ -21,7 +24,7 @@ import ast
 from collections import Counter
 
 from .registry import Context, Violation, register
-from .rules_safety import program_bindings
+from .rules_safety import in_for_body, program_bindings
 
 MAX_TRY_BODY = 3
 
@@ -46,22 +49,15 @@ def check_try_body(ctx: Context) -> list[Violation]:
 
 
 @register(
-    "style.try-else-finally", "style",
-    summary="Do not use else or finally on a try. Use with for cleanup.",
-    rationale="else and finally add paths that the reader must follow. "
-              "A with statement does the cleanup.",
-    bad="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nfinally:\n    print('done')",
-    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nprint('done')",
+    "style.try-else", "style",
+    summary="Do not use else on a try. Put the statements after the try.",
+    rationale="else adds a path that the reader must follow.",
+    bad="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nelse:\n    print(x)",
+    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nprint(x)",
 )
-def check_try_else_finally(ctx: Context) -> list[Violation]:
-    out = []
-    for node in _tries(ctx):
-        for word, body in (("else", node.orelse), ("finally", node.finalbody)):
-            if body:
-                out.append(Violation(
-                    "style.try-else-finally", node.lineno,
-                    f"Try at line {node.lineno} must not have {word}:"))
-    return out
+def check_try_else(ctx: Context) -> list[Violation]:
+    return [Violation("style.try-else", node.lineno, f"Try at line {node.lineno} must not have else:")
+            for node in _tries(ctx) if node.orelse]
 
 
 _SCOPES = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda,
@@ -87,18 +83,6 @@ def _assigned_names(stmts: list[ast.stmt]) -> set[str]:
             names.add(node.id)
         stack.extend(ast.iter_child_nodes(node))
     return names
-
-
-def _in_for_body(node: ast.AST, ctx: Context) -> bool:
-    """Whether ``node`` is inside the body of a ``for`` loop of its own function or program."""
-    child, parent = node, ctx.parents.get(id(node))
-    while parent is not None:
-        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            return False
-        if isinstance(parent, ast.For) and child in parent.body:
-            return True
-        child, parent = parent, ctx.parents.get(id(parent))
-    return False
 
 
 def _in_def(node: ast.AST, ctx: Context) -> bool:
@@ -136,7 +120,7 @@ def _handler_problem(try_node: ast.Try, handler: ast.ExceptHandler,
         return ("only print calls and assignments may come before the end "
                 "(continue, return <value>, pass, or nothing)")
     if isinstance(terminal, ast.Continue):
-        return None if _in_for_body(try_node, ctx) else "continue is only allowed in a for body"
+        return None if in_for_body(try_node, ctx) else "continue is only allowed in a for body"
     if isinstance(terminal, ast.Return):
         if terminal.value is None:
             return "return must give a value"

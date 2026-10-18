@@ -48,7 +48,8 @@ def _ends_valued(body: list[ast.stmt]) -> bool:
     if isinstance(last, ast.If):
         return bool(last.orelse) and _ends_valued(last.body) and _ends_valued(last.orelse)
     if isinstance(last, ast.Try):
-        # style.try-else-finally rejects else and finally, so the paths are the body and each handler.
+        # style.try-else and safety.try-finally reject else and finally, so the paths are the
+        # body and each handler.
         return _ends_valued(last.body) and all(_ends_valued(h.body) for h in last.handlers)
     return False
 
@@ -67,9 +68,8 @@ def _is_constant(node: ast.AST | None) -> bool:
 
 @register(
     "style.def-top-level", "style",
-    summary="Write def only at the top level of the program, with no decorator.",
-    rationale="A def inside a block or another def hides its scope. A decorator runs code that "
-              "the reader cannot see.",
+    summary="Write def only at the top level of the program.",
+    rationale="A def inside a block or another def hides its scope.",
     bad="def outer():\n    def inner():\n        return 1\n    return inner()",
     good="def inner():\n    return 1\ndef outer():\n    return inner()",
 )
@@ -80,10 +80,6 @@ def check_def_top_level(ctx: Context) -> list[Violation]:
             out.append(Violation(
                 "style.def-top-level", fn.lineno,
                 f"Function '{fn.name}' at line {fn.lineno} must be defined at the top level"))
-        elif fn.decorator_list:
-            out.append(Violation(
-                "style.def-top-level", fn.lineno,
-                f"Function '{fn.name}' at line {fn.lineno} must not have a decorator"))
     return out
 
 
