@@ -62,7 +62,7 @@ class RestrictedRunner:
                              program_file, path_policy, trace, captured, _capturing_print)
         except (Exception, LackpyRefusal) as e:
             # Exception covers RecursionError and MemoryError (design §8, gate 4).
-            return ExecutionResult(success=False, error=str(e),
+            return ExecutionResult(success=False, error=_error_text(e),
                                    trace=trace, stdout="".join(captured))
 
     def _run(self, program: str, namespace: dict[str, Callable], params: dict[str, Any],
@@ -94,15 +94,24 @@ class RestrictedRunner:
             return ExecutionResult(success=False, error=f"Compile error: {e.msg} (line {e.lineno})",
                                    trace=trace)
 
+        base = build_namespace(program_file=program_file, path_policy=path_policy,
+                               print_fn=print_fn)
+        # A tool or param must not replace a namespace name, and the namespace
+        # must not silently replace the caller's value: refuse the run instead.
+        reserved = set(base) | set(base["__builtins__"])
+        for kind, names in (("kit tool", namespace), ("param", params)):
+            clash = sorted(set(names) & reserved)
+            if clash:
+                return ExecutionResult(
+                    success=False, trace=trace,
+                    error=f"{kind} name {clash[0]!r} collides with a lackpy namespace name",
+                )
         exec_globals: dict[str, Any] = {
             name: make_traced(name, fn, trace, kibitzer_session=kibitzer_session)
             for name, fn in namespace.items()
         }
         exec_globals.update(params)
-        # The namespace goes on last: no tool or param can replace __builtins__,
-        # __name__, __file__, type or print.
-        exec_globals.update(build_namespace(program_file=program_file,
-                                            path_policy=path_policy, print_fn=print_fn))
+        exec_globals.update(base)
         bound = set(exec_globals)
 
         _run_validated_code(code, exec_globals)
@@ -115,6 +124,18 @@ class RestrictedRunner:
 
         return ExecutionResult(success=True, output=output, trace=trace,
                                variables=variables, stdout="".join(captured))
+
+
+def _error_text(e: BaseException) -> str:
+    """Return ``str(e)``, or a fixed text when ``str(e)`` itself raises.
+
+    ``str(KeyError(n))`` raises ``ValueError`` for an int over 4,300 digits;
+    the runner must still return a result (review I1).
+    """
+    try:
+        return str(e)
+    except (Exception, LackpyRefusal):
+        return f"{type(e).__name__} (its message could not be converted to text)"
 
 
 def _run_validated_code(code: object, globals_dict: dict[str, Any]) -> None:

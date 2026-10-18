@@ -184,12 +184,61 @@ class TestRuntimeNamespace:
         assert result.error
 
     def test_kit_namespace_tools_run_inside_the_new_builtins(self, runner, mock_namespace):
-        result = runner.run("open('x')", mock_namespace)
-        assert not result.success
+        # A kit tool and an approved builtin both work in one program.
+        result = runner.run("files = find_files('*.py')\nlen(sorted(files))", mock_namespace)
+        assert result.success, result.error
+        assert result.output == 2
+        assert [e.tool for e in result.trace.entries] == ["find_files"]
 
     def test_params_cannot_replace_the_builtins(self, runner):
         # A param or kit tool named like a namespace global must not replace it.
         import builtins
+        # Since review M3 the run refuses at bind time, before the program runs.
         result = runner.run("open", params={"__builtins__": vars(builtins)})
         assert not result.success
-        assert "open" in result.error
+        assert "'__builtins__' collides" in result.error
+
+    def test_unprintable_error_does_not_raise(self, runner):
+        # Review I1: str(KeyError(n)) raises ValueError for an int over 4,300 digits.
+        program = (
+            "n = 1\n"
+            "for i in range(5000):\n"
+            "    n = n * 10\n"
+            "d = {}\n"
+            "d[n]\n"
+        )
+        result = runner.run(program)
+        assert not result.success
+        assert "KeyError" in result.error
+
+
+_NAMESPACE_KEYS = ["type", "print", "__file__", "__name__", "__builtins__", "len", "KeyError"]
+
+
+class TestNameCollisions:
+    """Review M3: a param or kit tool must not collide with a namespace name.
+
+    Neither side may win silently: the caller's value and the namespace's
+    value are both meaningful. The run fails at bind time, naming the name.
+    """
+
+    @pytest.mark.parametrize("name", _NAMESPACE_KEYS)
+    def test_param_collision_is_a_failed_result(self, runner, name):
+        result = runner.run("x = 1", params={name: "caller value"})
+        assert not result.success
+        assert repr(name) in result.error
+        assert "collides" in result.error
+
+    @pytest.mark.parametrize("name", _NAMESPACE_KEYS)
+    def test_tool_collision_is_a_failed_result(self, runner, name):
+        called = []
+        result = runner.run("x = 1", {name: lambda *a: called.append(a)})
+        assert not result.success
+        assert repr(name) in result.error
+        assert "collides" in result.error
+        assert called == []
+
+    def test_non_colliding_names_still_bind(self, runner):
+        result = runner.run("x = n + 1", {"tool": lambda: 0}, params={"n": 1})
+        assert result.success, result.error
+        assert result.variables == {"x": 2}
