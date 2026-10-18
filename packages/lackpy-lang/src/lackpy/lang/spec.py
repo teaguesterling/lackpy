@@ -1,12 +1,11 @@
 """The lackpy language spec as structured data, exposable as an MCP resource."""
 
-import sys
-
 from .builtins_policy import ALLOWED
 from .dictionary import MODULES, PATH_MEMBERS, UNAPPROVED
 from .grammar import ALLOWED_NODES, FORBIDDEN_NODES, FORBIDDEN_NAMES, ALLOWED_BUILTINS
 from .validator import validate as _validate  # noqa: F401  (importing it registers every rule)
 from .registry import RULES
+from .rules_safety import LIMIT_SIGNALS
 
 
 def format_spec() -> str:
@@ -41,7 +40,13 @@ def get_spec() -> dict:
 
 
 _PREFACE = """\
-This guide defines the lackpy language. A lackpy program is a plain Python 3 program. It runs unchanged under CPython with only the standard library, from the workspace directory, and gives the same output there as inside lackpy. Inside lackpy it can only do less: a sandbox refusal is an error, never a different result. Every rule has one of two tiers. A *safety* rule protects the sandbox, and nothing waives it. A *style* rule keeps programs short and uniform, and a waiver can lift it. A waiver is a comment of the form `# ste: <rule-id>, <why>`. The why is required. A waiver covers one statement: put it at the end of the statement's first line, or on the line directly above. For a compound statement, a waiver covers the header only, not the body. A waiver names style rules only. A waiver that names a safety rule gives `meta.waiver-safety`. The builtin exception classes in Part 2 come from Python {version}, the interpreter that generated this file.
+A lackpy program is a plain Python 3 program. It runs unchanged under CPython with only the standard library, from the workspace directory. It gives the same output there as inside lackpy. Inside lackpy it can only do less. A sandbox refusal is an error, never a different result.
+
+Every rule has one of two tiers. A *safety* rule protects the sandbox, and nothing waives it. A *style* rule keeps programs short and uniform. A waiver can lift a style rule.
+
+A waiver is a comment of the form `# ste: <rule-id>, <why>`. The why is required. A waiver covers one statement. Put it at the end of the statement's first line, or on the line directly above. For a compound statement, a waiver covers the header only, not the body.
+
+A waiver names style rules only. A waiver that names a safety rule gives `meta.waiver-safety`. A misplaced or malformed waiver gives `meta.waiver-unknown`.
 """
 
 
@@ -53,9 +58,8 @@ def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
 
 def format_style_guide() -> str:
     """Render the style guide (Parts 1 and 2) from the registry and the dictionary."""
-    v = sys.version_info
     lines = ["# lackpy Style Guide", "",
-             _PREFACE.format(version=f"{v.major}.{v.minor}.{v.micro}").rstrip(), "",
+             _PREFACE.rstrip(), "",
              "## Part 1. Program rules", ""]
     for r in RULES:
         lines += [f"### {r.id}", "", r.summary, "", f"**Tier:** {r.tier}", "",
@@ -63,12 +67,13 @@ def format_style_guide() -> str:
                   "**Not approved:**", "", "```python", r.bad.rstrip("\n"), "```", "",
                   "**Approved:**", "", "```python", r.good.rstrip("\n"), "```", ""]
     functions = sorted(n for n, k in ALLOWED.items() if k == "function")
-    exceptions = sorted(n for n, k in ALLOWED.items() if k == "exception")
+    uncatchable = ", ".join(f"`{n}`" for n in sorted(LIMIT_SIGNALS | {"Exception"}))
     lines += ["## Part 2. Dictionary", "", "### Approved builtins", ""]
     lines += _table(["Kind", "Names"], [
         ["Functions and types", ", ".join(f"`{n}`" for n in functions)],
-        ["Exception classes", ", ".join(f"`{n}`" for n in exceptions)],
+        ["Exception classes", "Every built-in subclass of `Exception`."],
     ]) + [""]
+    lines += [f"`safety.except-base` forbids catching {uncatchable}.", ""]
     lines += ["### Approved modules and members", ""]
     lines += _table(["Module", "Members"], [
         [f"`{m}`", ", ".join(f"`{x}`" for x in sorted(members))] for m, members in MODULES.items()

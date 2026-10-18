@@ -1,6 +1,12 @@
 # lackpy Style Guide
 
-This guide defines the lackpy language. A lackpy program is a plain Python 3 program. It runs unchanged under CPython with only the standard library, from the workspace directory, and gives the same output there as inside lackpy. Inside lackpy it can only do less: a sandbox refusal is an error, never a different result. Every rule has one of two tiers. A *safety* rule protects the sandbox, and nothing waives it. A *style* rule keeps programs short and uniform, and a waiver can lift it. A waiver is a comment of the form `# ste: <rule-id>, <why>`. The why is required. A waiver covers one statement: put it at the end of the statement's first line, or on the line directly above. For a compound statement, a waiver covers the header only, not the body. A waiver names style rules only. A waiver that names a safety rule gives `meta.waiver-safety`. The builtin exception classes in Part 2 come from Python 3.12.3, the interpreter that generated this file.
+A lackpy program is a plain Python 3 program. It runs unchanged under CPython with only the standard library, from the workspace directory. It gives the same output there as inside lackpy. Inside lackpy it can only do less. A sandbox refusal is an error, never a different result.
+
+Every rule has one of two tiers. A *safety* rule protects the sandbox, and nothing waives it. A *style* rule keeps programs short and uniform. A waiver can lift a style rule.
+
+A waiver is a comment of the form `# ste: <rule-id>, <why>`. The why is required. A waiver covers one statement. Put it at the end of the statement's first line, or on the line directly above. For a compound statement, a waiver covers the header only, not the body.
+
+A waiver names style rules only. A waiver that names a safety rule gives `meta.waiver-safety`. A misplaced or malformed waiver gives `meta.waiver-unknown`.
 
 ## Part 1. Program rules
 
@@ -71,7 +77,7 @@ Do not use a name that starts with two underscores. You can read `__name__` and 
 
 **Tier:** safety
 
-**Why:** Dunder names lead to the builtins, the import machinery and the module namespace. __name__ and __file__ are only strings.
+**Why:** Dunder names lead to the builtins, the import machinery and the module namespace. `__name__` and `__file__` are only strings.
 
 **Not approved:**
 
@@ -403,7 +409,7 @@ Take plain parameters. Use no `*args` or `**kwargs`, and only constant defaults.
 
 **Tier:** style
 
-**Why:** A default is evaluated once, when the def runs. A constant default has no hidden state. *args and **kwargs hide the parameters.
+**Why:** A default is evaluated once, when the def runs. A constant default has no hidden state. `*args` and `**kwargs` hide the parameters.
 
 **Not approved:**
 
@@ -827,7 +833,9 @@ y = {1: 'a', 2: 'b'}.get(x, 'c')
 | Kind | Names |
 | --- | --- |
 | Functions and types | `abs`, `all`, `any`, `bool`, `chr`, `dict`, `enumerate`, `float`, `frozenset`, `hex`, `int`, `isinstance`, `iter`, `len`, `list`, `max`, `min`, `next`, `ord`, `print`, `range`, `repr`, `reversed`, `round`, `set`, `sorted`, `str`, `sum`, `tuple`, `zip` |
-| Exception classes | `ArithmeticError`, `AssertionError`, `AttributeError`, `BlockingIOError`, `BrokenPipeError`, `BufferError`, `BytesWarning`, `ChildProcessError`, `ConnectionAbortedError`, `ConnectionError`, `ConnectionRefusedError`, `ConnectionResetError`, `DeprecationWarning`, `EOFError`, `EncodingWarning`, `EnvironmentError`, `Exception`, `ExceptionGroup`, `FileExistsError`, `FileNotFoundError`, `FloatingPointError`, `FutureWarning`, `IOError`, `ImportError`, `ImportWarning`, `IndentationError`, `IndexError`, `InterruptedError`, `IsADirectoryError`, `KeyError`, `LookupError`, `MemoryError`, `ModuleNotFoundError`, `NameError`, `NotADirectoryError`, `NotImplementedError`, `OSError`, `OverflowError`, `PendingDeprecationWarning`, `PermissionError`, `ProcessLookupError`, `RecursionError`, `ReferenceError`, `ResourceWarning`, `RuntimeError`, `RuntimeWarning`, `StopAsyncIteration`, `StopIteration`, `SyntaxError`, `SyntaxWarning`, `SystemError`, `TabError`, `TimeoutError`, `TypeError`, `UnboundLocalError`, `UnicodeDecodeError`, `UnicodeEncodeError`, `UnicodeError`, `UnicodeTranslateError`, `UnicodeWarning`, `UserWarning`, `ValueError`, `Warning`, `ZeroDivisionError` |
+| Exception classes | Every built-in subclass of `Exception`. |
+
+`safety.except-base` forbids catching `Exception`, `MemoryError`, `RecursionError`, `RuntimeError`.
 
 ### Approved modules and members
 

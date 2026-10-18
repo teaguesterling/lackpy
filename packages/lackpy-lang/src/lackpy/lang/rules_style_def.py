@@ -113,7 +113,7 @@ def check_def_before_use(ctx: Context) -> list[Violation]:
     "style.def-signature", "style",
     summary="Take plain parameters. Use no `*args` or `**kwargs`, and only constant defaults.",
     rationale="A default is evaluated once, when the def runs. A constant default has no hidden "
-              "state. *args and **kwargs hide the parameters.",
+              "state. `*args` and `**kwargs` hide the parameters.",
     bad="def f(a=[]):\n    return a",
     good="def f(a=None):\n    return a",
 )

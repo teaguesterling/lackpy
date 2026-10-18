@@ -122,7 +122,7 @@ def _bound_names(tree: ast.Module):
     summary="Do not use a name that starts with two underscores. "
             "You can read `__name__` and `__file__`.",
     rationale="Dunder names lead to the builtins, the import machinery and the module namespace. "
-              "__name__ and __file__ are only strings.",
+              "`__name__` and `__file__` are only strings.",
     bad="x = __builtins__",
     good="if __name__ == '__main__':\n    print(1)",
 )
