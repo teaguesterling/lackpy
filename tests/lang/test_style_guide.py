@@ -22,3 +22,10 @@ def test_spec_exposes_rules():
     rules = get_spec()["rules"]
     assert [r["id"] for r in rules] == [r.id for r in RULES]
     assert all(set(r) == {"id", "tier", "summary"} for r in rules)
+
+
+def test_path_members_name_the_slash_operator():
+    # Final review M5: `Path(d) / name` is the approved join; the member list must show it.
+    guide = format_style_guide()
+    section = guide.split("### Path members", 1)[1].split("###", 1)[0]
+    assert "`/`" in section

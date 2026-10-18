@@ -885,6 +885,8 @@ y = {1: 'a', 2: 'b'}.get(x, 'c')
 
 `exists`, `glob`, `is_dir`, `is_file`, `iterdir`, `joinpath`, `mkdir`, `name`, `parent`, `parts`, `read_bytes`, `read_text`, `relative_to`, `rglob`, `stem`, `suffix`, `with_suffix`, `write_bytes`, `write_text`
 
+The `/` operator joins paths, for example `Path(d) / name`.
+
 ### Unapproved words
 
 | Word | Approved alternative |

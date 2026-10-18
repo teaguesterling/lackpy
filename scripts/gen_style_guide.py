@@ -1,7 +1,6 @@
 """Write docs/reference/style-guide.md from the rule registry and the dictionary.
 
 Run with the project interpreter: .venv/bin/python scripts/gen_style_guide.py
-The exception list depends on the running Python; the preface names the version.
 """
 
 from pathlib import Path

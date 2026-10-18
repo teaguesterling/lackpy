@@ -79,7 +79,8 @@ def format_style_guide() -> str:
         [f"`{m}`", ", ".join(f"`{x}`" for x in sorted(members))] for m, members in MODULES.items()
     ]) + [""]
     lines += ["### Path members", "",
-             ", ".join(f"`{x}`" for x in sorted(PATH_MEMBERS)), ""]
+             ", ".join(f"`{x}`" for x in sorted(PATH_MEMBERS)), "",
+             "The `/` operator joins paths, for example `Path(d) / name`.", ""]
     lines += ["### Unapproved words", ""]
     lines += _table(["Word", "Approved alternative"],
                     [[f"`{w}`", hint] for w, hint in UNAPPROVED.items()]) + [""]
