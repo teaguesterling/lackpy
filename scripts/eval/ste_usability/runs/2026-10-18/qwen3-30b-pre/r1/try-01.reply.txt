@@ -1,0 +1,17 @@
+```python
+# /// intent
+# goal   = "Print the value of the 'owner' key in data/config.json, or 'none' if the key is missing"
+# reads  = ["data/config.json"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+import json
+
+config_path = Path("data/config.json")
+text = config_path.read_text()
+data = json.loads(text)
+owner = data.get("owner", "none")
+print(owner)
+```

@@ -1,0 +1,20 @@
+# /// intent
+# goal   = "For each line of data/rows.jsonl, print 'bad' if the line is not valid JSON, else the row id."
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+def process_lines():
+    lines = Path('data/rows.jsonl').read_text().splitlines()
+    for line in lines:
+        try:
+            row = json.loads(line)
+            print(row['id'])
+        except (json.JSONDecodeError, KeyError, ValueError):
+            print('bad')
+
+process_lines()

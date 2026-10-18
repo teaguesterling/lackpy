@@ -1,0 +1,29 @@
+```python
+# /// intent
+# goal   = "Replace every 'code=XNN' pattern in logs/app.log with 'code=[XNN]' and write the result to logs/app.marked.log"
+# reads  = ["logs/app.log"]
+# writes = ["logs/app.marked.log"]
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+# Read the input log file
+input_path = Path("logs/app.log")
+output_path = Path("logs/app.marked.log")
+
+# Read the content of the log file
+text = input_path.read_text()
+
+# Use regex to find all 'code=XNN' patterns and replace with 'code=[XNN]'
+# The pattern: 'code=' followed by one letter (X) and two digits (NN)
+# We use a capturing group for the letter and digits to reinsert them inside brackets
+modified_text = re.sub(r'code=([A-Za-z])(\d{2})', r'code=[\1\2]', text)
+
+# Write the modified content to the output file
+output_path.write_text(modified_text)
+
+# Print the result to confirm
+print(modified_text)
+```

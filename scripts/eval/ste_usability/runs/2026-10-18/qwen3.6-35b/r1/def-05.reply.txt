@@ -1,0 +1,24 @@
+```python
+# /// intent
+# goal   = "Read config features and join them with a default separator."
+# reads  = ["data/config.json"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+def join_items(items, sep=', '):
+    return sep.join(items)
+
+def main():
+    path = Path('data') / 'config.json'
+    text = path.read_text()
+    config = json.loads(text)
+    features = config.get('features', [])
+    result = join_items(features)
+    print(result)
+
+main()
+```

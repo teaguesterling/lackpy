@@ -1,0 +1,28 @@
+# /// intent
+# goal   = "Classify each valid row's size from data/rows.jsonl as small, medium, or large"
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+
+def size_class(size):
+    if size < 100:
+        return "small"
+    if size < 200:
+        return "medium"
+    return "large"
+
+
+text = Path("data/rows.jsonl").read_text()
+for line in text.splitlines():
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    size = row["size"]
+    classification = size_class(size)
+    print(classification)

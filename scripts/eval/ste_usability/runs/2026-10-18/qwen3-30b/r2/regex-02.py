@@ -1,0 +1,24 @@
+# /// intent
+# goal   = "Print the time (HH:MM:SS) of the first and the last line of logs/app.log, separated by a space."
+# reads  = ["logs/app.log"]
+# writes = []
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+# Read the log file
+log_path = Path("logs/app.log")
+lines = log_path.read_text().strip().splitlines()
+
+# Extract timestamps from the first and last lines
+# Format: YYYY-MM-DD HH:MM:SS
+# Use regex to extract the time part
+time_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})")
+
+first_time = time_pattern.search(lines[0]).group(1)
+last_time = time_pattern.search(lines[-1]).group(1)
+
+# Print the first and last times separated by a space
+print(f"{first_time} {last_time}")

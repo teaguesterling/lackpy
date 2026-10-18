@@ -1,0 +1,25 @@
+# /// intent
+# goal   = "Write a report.txt listing the character count of each .cpp file in src, sorted by name."
+# reads  = ["src/.cpp"]
+# writes = ["report.txt"]
+# output = "value"
+# ///
+
+import json
+from pathlib import Path
+
+def count_chars(p):
+    return len(p.read_text())
+
+def main():
+    src_dir = Path('src')
+    cpp_files = [p for p in src_dir.glob('*.cpp') if p.is_file()]
+    cpp_files.sort(key=lambda p: p.name)
+    lines = []
+    for p in cpp_files:
+        n = count_chars(p)
+        lines.append(f"{p.name}: {n}")
+    text = "\n".join(lines)
+    Path('report.txt').write_text(text)
+
+main()

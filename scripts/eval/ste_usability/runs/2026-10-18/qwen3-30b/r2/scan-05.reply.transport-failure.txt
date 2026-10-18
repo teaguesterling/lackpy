@@ -1,0 +1,9 @@
+```python
+# /// intent
+# goal   = "Generate a report with one line per .cpp file under src, sorted by name, showing the filename and its character count."
+# reads  = ["src/a.cpp", "src/b.cpp", "src/c.cpp"]
+# writes = ["report.txt"]
+# output = "printed"
+# ///
+
+import json

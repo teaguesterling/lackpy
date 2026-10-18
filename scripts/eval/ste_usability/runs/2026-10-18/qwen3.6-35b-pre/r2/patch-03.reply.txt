@@ -1,0 +1,25 @@
+```python
+# /// intent
+# goal   = "Replace 'TODO: remove' with '// done' in .cpp files under src and print changed filenames."
+# reads  = ["src/**/*.cpp"]
+# writes = ["src/a.cpp", "src/b.cpp"]
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+
+def process(p):
+    text = p.read_text()
+    if "TODO: remove" in text:
+        new = text.replace("TODO: remove", "// done")
+        p.write_text(new)
+        return True
+    return False
+
+
+paths = Path("src").glob("*.cpp")
+for path in sorted(paths):
+    if process(path):
+        print(path.name)
+```

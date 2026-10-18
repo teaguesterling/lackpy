@@ -1,0 +1,40 @@
+```python
+# /// intent
+# goal   = "Classify each valid row's size from data/rows.jsonl as small, medium, or large, and print the classification in file order."
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+# Define classification map for size ranges
+SIZE_CLASS = {
+    (0, 100): "small",
+    (100, 200): "medium",
+    (200, float('inf')): "large"
+}
+
+def classify_size(size):
+    for (low, high), classification in SIZE_CLASS.items():
+        if low <= size < high:
+            return classification
+    return "large"  # fallback for any edge case
+
+# Read the JSONL file line by line
+path = Path("data/rows.jsonl")
+if path.exists():
+    for line in path.read_text().splitlines():
+        try:
+            # Parse JSON from each line
+            row = json.loads(line)
+            # Check if 'size' is present and a number
+            if "size" in row and isinstance(row["size"], (int, float)):
+                # Classify and print the size
+                classification = classify_size(row["size"])
+                print(classification)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            # Skip invalid lines
+            continue
+```

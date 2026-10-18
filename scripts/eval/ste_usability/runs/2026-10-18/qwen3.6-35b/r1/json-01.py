@@ -1,0 +1,15 @@
+# /// intent
+# goal   = "Print the name and version from data/config.json, separated by a space."
+# reads  = ["data/config.json"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+path = Path("data/config.json")
+text = path.read_text()
+config = json.loads(text)
+
+print(config['name'], config['version'])

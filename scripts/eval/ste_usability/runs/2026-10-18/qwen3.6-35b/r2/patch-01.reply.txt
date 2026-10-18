@@ -1,0 +1,25 @@
+```python
+# /// intent
+# goal   = "Replace the docx note in registry.cpp with a new note, failing if the old note does not occur exactly once."
+# reads  = ["registry.cpp"]
+# writes = ["registry.cpp"]
+# output = "value"
+# ///
+
+from pathlib import Path
+import json
+import sys
+
+def main() -> str:
+    path = Path("registry.cpp")
+    text = path.read_text(encoding="utf-8")
+    old = "images and footnotes are not read yet"
+    new = "footnotes are not read yet"
+    if text.count(old) != 1:
+        sys.exit(1)
+    result = text.replace(old, new)
+    path.write_text(result, encoding="utf-8")
+    return "done"
+
+result = main()
+```

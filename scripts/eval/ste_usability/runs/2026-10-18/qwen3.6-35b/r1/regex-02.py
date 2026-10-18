@@ -1,0 +1,54 @@
+# /// intent
+# goal   = "Print the time (HH:MM:SS) of the first and the last line of logs/app.log, separated by a space."
+# reads  = ["logs/app.log"]
+# writes = []
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+def extract_time(text):
+    """Return the first HH:MM:SS found in text, or None."""
+    match = re.search(r'(\d{2}:\d{2}:\d{2})', text)
+    if match:
+        return match.group(1)
+    return None
+
+def read_lines(path_str):
+    """Read all lines from a file."""
+    text = Path(path_str).read_text()
+    return text.splitlines()
+
+def get_first_line(lines):
+    """Return the first line, or an empty string if empty."""
+    if lines:
+        return lines[0]
+    return ""
+
+def get_last_line(lines):
+    """Return the last line, or an empty string if empty."""
+    if lines:
+        return lines[-1]
+    return ""
+
+def main():
+    """Find times in the first and last lines of the log."""
+    path = "logs/app.log"
+    lines = read_lines(path)
+    
+    first = get_first_line(lines)
+    last = get_last_line(lines)
+    
+    t1 = extract_time(first)
+    t2 = extract_time(last)
+    
+    # Handle cases where time might not be found (though log format suggests it is)
+    if t1 is None:
+        t1 = "00:00:00"
+    if t2 is None:
+        t2 = "00:00:00"
+        
+    print(f"{t1} {t2}")
+
+main()

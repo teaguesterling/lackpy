@@ -1,0 +1,27 @@
+```python
+# /// intent
+# goal   = "Print the first tag of each valid JSON line in data/rows.jsonl, or '-' if no tags, skipping invalid lines."
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+path = Path("data/rows.jsonl")
+text = path.read_text()
+lines = text.splitlines()
+
+for line in lines:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        data = json.loads(line)
+        tags = data.get("tags", [])
+        first_tag = tags[0] if tags else '-'
+        print(first_tag)
+    except (json.JSONDecodeError, TypeError, IndexError):
+        continue
+```

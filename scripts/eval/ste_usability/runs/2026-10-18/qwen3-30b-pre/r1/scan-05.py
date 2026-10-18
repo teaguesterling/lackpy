@@ -1,0 +1,18 @@
+# /// intent
+# goal   = "Write report.txt with one line per .cpp file under src, sorted by name, in the form '<name>: <number of characters>'"
+# reads  = ["src/*.cpp"]
+# writes = ["report.txt"]
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+# Get all .cpp files under src, sorted by name
+paths = Path("src").glob("*.cpp")
+sorted_paths = sorted(paths)
+
+# Write one line per file: '<name>: <number of characters>'
+with Path("report.txt").open("w") as f:
+    for p in sorted_paths:
+        text = p.read_text()
+        f.write(f"{p.name}: {len(text)}\n")

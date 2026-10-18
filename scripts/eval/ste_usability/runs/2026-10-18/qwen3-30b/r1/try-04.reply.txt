@@ -1,0 +1,18 @@
+```python
+# /// intent
+# goal   = "Convert each word in the string 'a 3 b 7 9' to an integer if possible, skip non-integers, and print their sum"
+# reads  = []
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+# Convert each word to int if possible, skip others, then print sum
+text = 'a 3 b 7 9'
+total = sum(
+    int(word) for word in text.split() if word.lstrip('-').isdigit()
+)
+print(total)
+```

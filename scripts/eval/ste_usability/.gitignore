@@ -1,0 +1,4 @@
+runs/*/prompts/
+runs/*/prompts-pre/
+runs/*/*/r2-prompts/
+__pycache__/

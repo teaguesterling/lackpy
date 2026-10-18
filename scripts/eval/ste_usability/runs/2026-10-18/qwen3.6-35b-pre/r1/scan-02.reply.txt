@@ -1,0 +1,26 @@
+```python
+# /// intent
+# goal   = "Print the names of the files under src (any extension) that contain no TODO, sorted."
+# reads  = ["data/config.json", "data/rows.jsonl", "logs/app.log", "notes.md", "registry.cpp", "src/a.cpp", "src/b.cpp", "src/c.cpp", "src/util.h"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+
+def has_todo(text):
+    return "TODO" in text
+
+
+paths = Path("src").glob("*.cpp")
+results = []
+for p in sorted(paths):
+    text = p.read_text()
+    if not has_todo(text):
+        results.append(p.name)
+
+results.sort()
+for name in results:
+    print(name)
+```

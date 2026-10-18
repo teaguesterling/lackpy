@@ -1,0 +1,33 @@
+```python
+# /// intent
+# goal   = "Print every file suffix used under src with the number of files that have it, sorted by suffix."
+# reads  = ["src"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+from collections import Counter
+
+
+def count_suffixes(path):
+    count = 0
+    for p in path.glob("**/*"):
+        if p.is_file():
+            suffix = p.suffix
+            count += 1
+    return count
+
+
+src_path = Path("src")
+suffixes = Counter()
+
+for p in sorted(src_path.iterdir()):
+    if p.is_file():
+        name = p.suffix
+        if name:
+            suffixes[name] += 1
+
+for name in sorted(suffixes):
+    print(name, suffixes[name])
+```

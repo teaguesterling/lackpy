@@ -1,0 +1,5278 @@
+{
+ "summary": [
+  {
+   "model": "haiku",
+   "round": "r1",
+   "n": 30,
+   "valid": 24,
+   "correct": 28,
+   "correct_loose": 30,
+   "valid_and_loose": 24,
+   "valid_and_correct": 24,
+   "correct_not_valid": 4,
+   "valid_not_correct": 0,
+   "rules": {
+    "style.io-position": 3,
+    "style.try-handler": 3,
+    "style.try-body": 1
+   }
+  },
+  {
+   "model": "haiku",
+   "round": "r2",
+   "n": 30,
+   "valid": 30,
+   "correct": 28,
+   "correct_loose": 30,
+   "valid_and_loose": 30,
+   "valid_and_correct": 28,
+   "correct_not_valid": 0,
+   "valid_not_correct": 2,
+   "rules": {}
+  },
+  {
+   "model": "haiku-pre",
+   "round": "r1",
+   "n": 30,
+   "valid": 30,
+   "correct": 29,
+   "correct_loose": 30,
+   "valid_and_loose": 30,
+   "valid_and_correct": 29,
+   "correct_not_valid": 0,
+   "valid_not_correct": 1,
+   "rules": {}
+  },
+  {
+   "model": "haiku-pre",
+   "round": "r2",
+   "n": 30,
+   "valid": 30,
+   "correct": 29,
+   "correct_loose": 30,
+   "valid_and_loose": 30,
+   "valid_and_correct": 29,
+   "correct_not_valid": 0,
+   "valid_not_correct": 1,
+   "rules": {}
+  },
+  {
+   "model": "qwen3-30b",
+   "round": "r1",
+   "n": 30,
+   "valid": 12,
+   "correct": 21,
+   "correct_loose": 27,
+   "valid_and_loose": 11,
+   "valid_and_correct": 8,
+   "correct_not_valid": 13,
+   "valid_not_correct": 4,
+   "rules": {
+    "style.try-handler": 6,
+    "safety.except-base": 5,
+    "style.io-position": 5,
+    "safety.node": 2,
+    "safety.forbidden-name": 2,
+    "style.try-body": 1,
+    "style.def-length": 1,
+    "style.elif-chain": 1
+   }
+  },
+  {
+   "model": "qwen3-30b",
+   "round": "r2",
+   "n": 30,
+   "valid": 18,
+   "correct": 20,
+   "correct_loose": 25,
+   "valid_and_loose": 16,
+   "valid_and_correct": 13,
+   "correct_not_valid": 7,
+   "valid_not_correct": 5,
+   "rules": {
+    "style.try-handler": 7,
+    "style.io-position": 2,
+    "safety.forbidden-name": 1,
+    "safety.except-base": 1,
+    "safety.parse": 1,
+    "style.try-body": 1,
+    "style.def-length": 1
+   }
+  },
+  {
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "n": 30,
+   "valid": 27,
+   "correct": 27,
+   "correct_loose": 28,
+   "valid_and_loose": 25,
+   "valid_and_correct": 24,
+   "correct_not_valid": 3,
+   "valid_not_correct": 3,
+   "rules": {
+    "style.io-position": 1,
+    "style.try-handler": 1,
+    "style.elif-chain": 1,
+    "style.try-body": 1
+   }
+  },
+  {
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "n": 30,
+   "valid": 28,
+   "correct": 26,
+   "correct_loose": 27,
+   "valid_and_loose": 26,
+   "valid_and_correct": 25,
+   "correct_not_valid": 1,
+   "valid_not_correct": 3,
+   "rules": {
+    "style.try-handler": 1,
+    "style.try-body": 1
+   }
+  },
+  {
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "n": 30,
+   "valid": 14,
+   "correct": 23,
+   "correct_loose": 27,
+   "valid_and_loose": 13,
+   "valid_and_correct": 12,
+   "correct_not_valid": 11,
+   "valid_not_correct": 2,
+   "rules": {
+    "style.def-length": 6,
+    "style.try-handler": 6,
+    "style.io-position": 5,
+    "safety.node": 3,
+    "safety.unknown-call": 3,
+    "safety.import": 2,
+    "style.def-before-use": 2,
+    "safety.forbidden-name": 1,
+    "style.def-return-mode": 1
+   }
+  },
+  {
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "n": 30,
+   "valid": 17,
+   "correct": 23,
+   "correct_loose": 28,
+   "valid_and_loose": 16,
+   "valid_and_correct": 13,
+   "correct_not_valid": 10,
+   "valid_not_correct": 4,
+   "rules": {
+    "style.def-length": 6,
+    "style.try-handler": 4,
+    "safety.import": 3,
+    "safety.unknown-call": 3,
+    "style.def-before-use": 2,
+    "style.io-position": 2,
+    "safety.forbidden-name": 1,
+    "safety.node": 1
+   }
+  },
+  {
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "n": 30,
+   "valid": 24,
+   "correct": 28,
+   "correct_loose": 28,
+   "valid_and_loose": 22,
+   "valid_and_correct": 22,
+   "correct_not_valid": 6,
+   "valid_not_correct": 2,
+   "rules": {
+    "style.io-position": 5,
+    "style.call-nesting": 1
+   }
+  },
+  {
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "n": 30,
+   "valid": 28,
+   "correct": 27,
+   "correct_loose": 27,
+   "valid_and_loose": 25,
+   "valid_and_correct": 25,
+   "correct_not_valid": 2,
+   "valid_not_correct": 3,
+   "rules": {
+    "style.io-position": 2
+   }
+  }
+ ],
+ "programs": [
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 13 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 13 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 18 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 14 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 17 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": false,
+   "rules": [
+    "style.try-body",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Try at line 20 has 4 statements in its body (at most 3)",
+    "Except at line 25 has no approved shape: it falls through and leaves classification, row, size unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "haiku-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": false,
+   "rules": [
+    "safety.node"
+   ],
+   "errors": [
+    "Forbidden AST node: Raise at line 24"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": false,
+   "rules": [
+    "safety.except-base",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Forbidden except of 'Exception' at line 37 (catch a subclass of Exception that is not a limit signal, for example KeyError)",
+    "Except at line 37 has no approved shape: it falls through and leaves content, updated_content unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .read_text() at line 13 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": false,
+   "rules": [
+    "safety.node"
+   ],
+   "errors": [
+    "Forbidden AST node: Raise at line 29",
+    "Forbidden AST node: Raise at line 24"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 26 has no approved shape: it falls through and leaves data, file, line unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 30 has no approved shape: it falls through and leaves entry, file, line unassigned (assign it, or use continue or return)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": false,
+   "rules": [
+    "safety.except-base"
+   ],
+   "errors": [
+    "Forbidden except of 'Exception' at line 24 (catch a subclass of Exception that is not a limit signal, for example KeyError)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": false,
+   "rules": [
+    "safety.except-base",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Forbidden except of 'Exception' at line 26 (catch a subclass of Exception that is not a limit signal, for example KeyError)",
+    "Except at line 26 has no approved shape: it falls through and leaves content, lines unassigned (assign it, or use continue or return)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 13 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": false,
+   "rules": [
+    "safety.forbidden-name"
+   ],
+   "errors": [
+    "Forbidden name: 'open' at line 12"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": false,
+   "rules": [
+    "safety.except-base"
+   ],
+   "errors": [
+    "Forbidden except of 'Exception' at line 27 (catch a subclass of Exception that is not a limit signal, for example KeyError)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .read_text() at line 13 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .read_text() at line 12 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 22 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": false,
+   "rules": [
+    "style.try-body"
+   ],
+   "errors": [
+    "Try at line 20 has 4 statements in its body (at most 3)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 20 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": false,
+   "rules": [
+    "safety.except-base",
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Forbidden except of 'Exception' at line 25 (catch a subclass of Exception that is not a limit signal, for example KeyError)",
+    "Function 'load_valid_rows' at line 11 has 14 statements (at most 12)",
+    "Except at line 25 has no approved shape: it falls through and leaves file, line, row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": false,
+   "rules": [
+    "safety.forbidden-name",
+    "style.elif-chain"
+   ],
+   "errors": [
+    "Forbidden name: 'open' at line 24",
+    "If at line 12 has 3 branches (fewer than 3 allowed)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": false,
+   "rules": [
+    "safety.forbidden-name"
+   ],
+   "errors": [
+    "Forbidden name: 'exit' at line 25",
+    "Forbidden name: 'sys' at line 24"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": false,
+   "rules": [
+    "safety.except-base",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Forbidden except of 'Exception' at line 46 (catch a subclass of Exception that is not a limit signal, for example KeyError)",
+    "Except at line 37 has no approved shape: it falls through and leaves content, updated_content unassigned (assign it, or use continue or return)",
+    "Except at line 40 has no approved shape: it falls through and leaves content, updated_content unassigned (assign it, or use continue or return)",
+    "Except at line 43 has no approved shape: it falls through and leaves content, updated_content unassigned (assign it, or use continue or return)",
+    "Except at line 46 has no approved shape: it falls through and leaves content, updated_content unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": false,
+   "rules": [
+    "safety.parse"
+   ],
+   "errors": [
+    "Parse error: expected an indented block after 'if' statement on line 27 (line 116)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 1,
+   "stderr": "  File \"/tmp/tmpeh0j5kjg/ws/prog.py\", line 116\n    #\nIndentationError: expected an indented block after 'if' statement on line 27\n",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 26 has no approved shape: it falls through and leaves data, file, line unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 30 has no approved shape: it falls through and leaves entry, file, line unassigned (assign it, or use continue or return)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 26 has no approved shape: it falls through and leaves content, lines unassigned (assign it, or use continue or return)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 13 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 27 has no approved shape: it falls through and leaves content, line, match unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 18 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": false,
+   "rules": [
+    "style.try-body"
+   ],
+   "errors": [
+    "Try at line 19 has 4 statements in its body (at most 3)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 20 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": false,
+   "rules": [
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Function 'load_valid_rows' at line 11 has 14 statements (at most 12)",
+    "Except at line 25 has no approved shape: it falls through and leaves file, line, row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .read_text() at line 12 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 16 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": false,
+   "rules": [
+    "style.elif-chain",
+    "style.try-body"
+   ],
+   "errors": [
+    "Try at line 25 has 4 statements in its body (at most 3)",
+    "If at line 13 has 3 branches (fewer than 3 allowed)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 16 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": false,
+   "rules": [
+    "style.try-body"
+   ],
+   "errors": [
+    "Try at line 25 has 4 statements in its body (at most 3)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3-30b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": false,
+   "rules": [
+    "safety.node"
+   ],
+   "errors": [
+    "Forbidden AST node: Raise at line 36"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": false,
+   "rules": [
+    "safety.import",
+    "safety.node",
+    "safety.unknown-call",
+    "style.def-before-use",
+    "style.def-length"
+   ],
+   "errors": [
+    "Forbidden AST node: Raise at line 25",
+    "Forbidden AST node: Raise at line 20",
+    "Forbidden AST node: ImportFrom at line 30",
+    "Forbidden AST node: ImportFrom at line 35",
+    "Rebinding of imported name: 'Path' at line 35 (imported at line 30)",
+    "Unknown function: 'Path' at line 31 (not in kit or builtins)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 41 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": false,
+   "rules": [
+    "safety.forbidden-name",
+    "safety.node",
+    "safety.unknown-call",
+    "style.def-length",
+    "style.def-return-mode"
+   ],
+   "errors": [
+    "Forbidden AST node: Raise at line 27",
+    "Forbidden AST node: Raise at line 23",
+    "Forbidden name: 'open' at line 11",
+    "Unknown function: 'Path' at line 15 (not in kit or builtins)",
+    "Function 'load_config' at line 10 returns a value on some paths but can end without one",
+    "Function 'main' at line 14 has 14 statements (at most 12)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"/tmp/tmpchh2vmol/ws/prog.py\", line 34, in <module>\n    main()\n    ~~~~^^\n  File \"/tmp/tmpchh2vmol/ws/prog.py\", line 15, in main\n    p = Path('notes.md')\n        ^^^^\nNameError: name 'Path' is not defined\n",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": false,
+   "rules": [
+    "safety.import"
+   ],
+   "errors": [
+    "Forbidden AST node: Import at line 41"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 17 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": false,
+   "rules": [
+    "style.def-length"
+   ],
+   "errors": [
+    "Function 'read_rows' at line 11 has 14 statements (at most 12)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 18 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 11 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": false,
+   "rules": [
+    "style.def-before-use",
+    "style.io-position"
+   ],
+   "errors": [
+    "Function 'total_lines_in_dir' is called at line 26 before its def at line 17 ends (recursion is not allowed)",
+    "I/O call .read_text() at line 15 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .read_text() at line 12 must not be an argument"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": false,
+   "rules": [
+    "safety.unknown-call",
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Unknown function: 'Path' at line 14 (not in kit or builtins)",
+    "Function 'main' at line 12 has 18 statements (at most 12)",
+    "Except at line 15 has no approved shape: return must give a value"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"/tmp/tmpe7nypnps/ws/prog.py\", line 36, in <module>\n    main()\n    ~~~~^^\n  File \"/tmp/tmpe7nypnps/ws/prog.py\", line 14, in main\n    text = Path('logs/app.log').read_text()\n           ^^^^\nNameError: name 'Path' is not defined\n",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 17 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": false,
+   "rules": [
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Function 'process_rows' at line 11 has 14 statements (at most 12)",
+    "Except at line 14 has no approved shape: return must give a value"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 20 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": false,
+   "rules": [
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Function 'load_rows' at line 20 has 14 statements (at most 12)",
+    "Except at line 34 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": false,
+   "rules": [
+    "safety.forbidden-name",
+    "safety.import"
+   ],
+   "errors": [
+    "Forbidden name: 'sys' at line 18",
+    "Forbidden AST node: Import at line 10"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": false,
+   "rules": [
+    "safety.node",
+    "safety.unknown-call",
+    "style.def-before-use",
+    "style.def-length"
+   ],
+   "errors": [
+    "Forbidden AST node: Raise at line 39",
+    "Unknown function: 'SystemExit' at line 39 (not in kit or builtins)",
+    "Function 'read_file' is called at line 13 before its def at line 30 ends (recursion is not allowed)",
+    "Function 'write_file' is called at line 28 before its def at line 34 ends (recursion is not allowed)",
+    "Function 'fail' is called at line 26 before its def at line 38 ends (recursion is not allowed)",
+    "Function 'fail' is called at line 21 before its def at line 38 ends (recursion is not allowed)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 41 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": false,
+   "rules": [
+    "style.def-length"
+   ],
+   "errors": [
+    "Function 'main' at line 11 has 19 statements (at most 12)"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": false,
+   "rules": [
+    "safety.import",
+    "safety.unknown-call"
+   ],
+   "errors": [
+    "Forbidden AST node: ImportFrom at line 43",
+    "Unknown function: 'Path' at line 44 (not in kit or builtins)"
+   ],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 18 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": false,
+   "rules": [
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Function 'read_rows' at line 11 has 13 statements (at most 12)",
+    "Except at line 23 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 11 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": false,
+   "rules": [
+    "style.def-before-use"
+   ],
+   "errors": [
+    "Function 'total_lines' is called at line 24 before its def at line 16 ends (recursion is not allowed)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": false,
+   "rules": [
+    "safety.import",
+    "safety.unknown-call",
+    "style.def-length"
+   ],
+   "errors": [
+    "Forbidden AST node: ImportFrom at line 12",
+    "Unknown function: 'Path' at line 13 (not in kit or builtins)",
+    "Function 'count_codes' at line 17 has 14 statements (at most 12)"
+   ],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": false,
+   "rules": [
+    "style.try-handler"
+   ],
+   "errors": [
+    "Except at line 19 has no approved shape: it falls through and leaves row, row_id unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": false,
+   "rules": [
+    "style.def-length"
+   ],
+   "errors": [
+    "Function 'process_rows' at line 12 has 15 statements (at most 12)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": false,
+   "rules": [
+    "style.def-length",
+    "style.try-handler"
+   ],
+   "errors": [
+    "Function 'load_rows' at line 20 has 13 statements (at most 12)",
+    "Except at line 32 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 18 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 14 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .iterdir() at line 24 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 19 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 23 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": false,
+   "rules": [
+    "style.call-nesting"
+   ],
+   "errors": [
+    "Call at line 10 nests 3 deep (at most 2)"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r1",
+   "family": "def"
+  },
+  {
+   "task": "patch-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "patch-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "patch"
+  },
+  {
+   "task": "json-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "json-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "json"
+  },
+  {
+   "task": "scan-01",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 15 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "scan-05",
+   "valid": false,
+   "rules": [
+    "style.io-position"
+   ],
+   "errors": [
+    "I/O call .glob() at line 17 must not be an argument"
+   ],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "scan"
+  },
+  {
+   "task": "regex-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "regex-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": false,
+   "correct_loose": false,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "regex"
+  },
+  {
+   "task": "try-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "try-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "try"
+  },
+  {
+   "task": "def-01",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-02",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-03",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-04",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "def"
+  },
+  {
+   "task": "def-05",
+   "valid": true,
+   "rules": [],
+   "errors": [],
+   "correct": true,
+   "correct_loose": true,
+   "rc": 0,
+   "stderr": "",
+   "model": "qwen3.6-35b-pre",
+   "round": "r2",
+   "family": "def"
+  }
+ ]
+}

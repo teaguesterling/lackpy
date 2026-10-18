@@ -1,0 +1,41 @@
+# /// intent
+# goal   = "Change 'Status: draft' to 'Status: final' in notes.md, failing if the line does not occur exactly once."
+# reads  = ["notes.md"]
+# writes = ["notes.md"]
+# output = "none"
+# ///
+
+import json
+from pathlib import Path
+
+def main():
+    path_str = "notes.md"
+    text = read_file(path_str)
+    lines = text.split("\n")
+    new_lines = []
+    found = 0
+    for line in lines:
+        if line == "Status: draft":
+            found += 1
+            if found > 1:
+                fail("Status line occurs more than once")
+            new_lines.append("Status: final")
+        else:
+            new_lines.append(line)
+    if found != 1:
+        fail("Status line does not occur exactly once")
+    new_text = "\n".join(new_lines)
+    write_file(path_str, new_text)
+
+def read_file(path_str):
+    p = Path(path_str)
+    return p.read_text()
+
+def write_file(path_str, content):
+    p = Path(path_str)
+    p.write_text(content)
+
+def fail(msg):
+    raise SystemExit(msg)
+
+main()

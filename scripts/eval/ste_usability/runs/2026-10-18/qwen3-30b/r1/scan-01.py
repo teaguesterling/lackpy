@@ -1,0 +1,42 @@
+# /// intent
+# goal   = "Count the lines containing TODO in each .cpp file under src and print the filename and count, sorted by filename"
+# reads  = ["src/*.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+import re
+from pathlib import Path
+from collections import Counter
+
+# Define the directory to search
+src_dir = Path("src")
+
+# List to store results
+results = []
+
+# Iterate over all .cpp files in src directory
+for cpp_file in src_dir.glob("*.cpp"):
+    # Skip if not a file
+    if not cpp_file.is_file():
+        continue
+    
+    # Read the file content
+    try:
+        content = cpp_file.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        continue
+    
+    # Count lines containing "TODO"
+    todo_count = sum(1 for line in content.splitlines() if re.search(r'\bTODO\b', line, re.IGNORECASE))
+    
+    # Append result
+    results.append((cpp_file.name, todo_count))
+
+# Sort results by filename
+results.sort()
+
+# Print results
+for filename, count in results:
+    print(f"{filename}: {count}")

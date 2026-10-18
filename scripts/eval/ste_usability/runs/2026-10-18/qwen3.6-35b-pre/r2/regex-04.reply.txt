@@ -1,0 +1,36 @@
+```python
+# /// intent
+# goal   = "Print the names of the functions defined in the .cpp files under src, sorted."
+# reads  = ["src/a.cpp", "src/b.cpp", "src/c.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+
+def find_functions(filepath):
+    """Return a list of function names defined in the file."""
+    names = []
+    text = Path(filepath).read_text()
+    for line in text.splitlines():
+        match = re.match(r'^int\s+(\w+)\(', line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def main():
+    """Scan .cpp files and print sorted function names."""
+    all_names = []
+    paths = Path("src").glob("*.cpp")
+    for p in sorted(paths):
+        names = find_functions(p)
+        all_names.extend(names)
+    for name in sorted(all_names):
+        print(name)
+
+
+main()
+```

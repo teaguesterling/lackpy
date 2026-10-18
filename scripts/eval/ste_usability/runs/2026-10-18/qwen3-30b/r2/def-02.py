@@ -1,0 +1,34 @@
+# /// intent
+# goal   = "Load valid rows from a JSONL file, skipping invalid lines, and print the count of valid rows"
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+def load_valid_rows(path: Path) -> list:
+    """Load valid JSON objects from a JSONL file, skipping invalid lines."""
+    valid_rows = []
+    try:
+        with path.open('r') as file:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                    valid_rows.append(row)
+                except json.JSONDecodeError:
+                    continue
+    except (OSError, PermissionError):
+        pass
+    return valid_rows
+
+# Load the valid rows from the JSONL file
+rows_path = Path("data/rows.jsonl")
+valid_rows = load_valid_rows(rows_path)
+
+# Print the count of valid rows
+print(len(valid_rows))

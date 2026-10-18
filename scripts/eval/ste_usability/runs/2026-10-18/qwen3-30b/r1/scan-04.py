@@ -1,0 +1,32 @@
+# /// intent
+# goal   = "Print every file suffix used under src with the number of files that have it, sorted by suffix."
+# reads  = ["src/"]
+# writes = []
+# output = "printed"
+# ///
+
+import pathlib
+from collections import defaultdict
+
+# Create a Path object for the src directory
+src_dir = pathlib.Path("src")
+
+# Use a defaultdict to count files by suffix
+suffix_count = defaultdict(int)
+
+# Iterate over all files in src directory (recursively)
+for file_path in src_dir.rglob("*"):
+    # Skip if it's a directory
+    if not file_path.is_file():
+        continue
+    
+    # Get the suffix (e.g., .cpp, .h)
+    suffix = file_path.suffix
+    
+    # Increment the count for this suffix
+    suffix_count[suffix] += 1
+
+# Sort the suffixes alphabetically and print each one with its count
+for suffix in sorted(suffix_count.keys()):
+    count = suffix_count[suffix]
+    print(f"{suffix} {count}")

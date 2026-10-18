@@ -1,0 +1,35 @@
+```python
+# /// intent
+# goal   = "Print the HH:MM:SS of the first and last line of logs/app.log, separated by a space."
+# reads  = ["logs/app.log"]
+# writes = []
+# output = "printed"
+# ///
+
+from datetime import datetime
+from pathlib import Path
+
+text = Path("logs/app.log").read_text()
+lines = text.splitlines()
+
+first = lines[0]
+last = lines[-1]
+
+def parse_time(line):
+    parts = line.split()
+    return parts[1]
+
+def parse_date(line):
+    parts = line.split()
+    return parts[0]
+
+def to_datetime(line):
+    date_str = parse_date(line)
+    time_str = parse_time(line)
+    return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
+
+dt_first = to_datetime(first)
+dt_last = to_datetime(last)
+
+print(dt_first.strftime("%H:%M:%S"), dt_last.strftime("%H:%M:%S"))
+```
