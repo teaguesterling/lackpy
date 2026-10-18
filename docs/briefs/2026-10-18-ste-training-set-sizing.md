@@ -121,3 +121,89 @@ The eval says this gap is vocabulary: 26 of 30 correct, 8 of 30 valid.
   - **The corpus is one author's history.** It comes from about 12 repositories, mostly
     DuckDB extensions and evaluation harnesses. lackpy's users may write different
     programs. This is an assumption, and it is not measured.
+
+---
+
+## 8. The split, and what the snapshot lost
+
+**The frozen snapshot cannot produce a split.** Its `session_file` column holds the constant
+`"corpus"` for all 7,003 rows, so provenance did not survive the write. The saved calls table
+`heredoc_calls-2026-10-18.parquet` still holds `filename`. `scripts/corpus/provenance.py`
+rejoins the two on the body text and recovers it: **32 sessions across 20 projects**.
+
+Recommend that `extract.py` keep `filename` in the snapshot. A later re-extract cannot recover
+it, because Claude Code prunes old sessions; the pruned history now yields 3,104 bodies against
+the frozen 7,003.
+
+**The split unit is the project.** Programs inside one session patch the same files repeatedly.
+Sessions inside one project share those files. Any split below the project leaks.
+
+`scripts/corpus/split.py` enumerates every subset of 3 to 8 projects, keeps those inside the
+size band, and picks the one whose family shares sit closest to the corpus. Two constraints
+decide the result, and the second was added after the first attempt failed:
+
+  - Size between 17% and 25%.
+  - **No project may hold more than 40% of the eval set.** Without this, the best-balanced
+    answer put 1,021 of 1,748 eval programs (58%) in one project. That eval measures the
+    project, not the corpus.
+
+The chosen eval set: 7 projects, 1,202 programs, 17.2%.
+
+| Family | Train | Eval | Eval share |
+|---|---|---|---|
+| patch | 3,646 | 885 | 19.5% |
+| assert | 2,430 | 497 | 17.0% |
+| json | 1,283 | 176 | 12.1% |
+| scan | 743 | 106 | 12.5% |
+| regex | 493 | 139 | 22.0% |
+| shell | 231 | 34 | 12.8% |
+
+The worst family deviates 5.1 points from its corpus share. The balance-first answer reached
+3.8 points, and it is the one this rejects on the dominance rule.
+
+**Report per family, never as one number.** The imbalance above stops mattering when each
+family carries its own result. It is also the only way to see this:
+
+| Family | Eval n | SE at p=0.5 | 95% CI | Verdict |
+|---|---|---|---|---|
+| patch | 885 | 1.7 | ±3.3 | usable |
+| assert | 497 | 2.2 | ±4.4 | usable |
+| json | 176 | 3.8 | ±7.4 | usable |
+| scan | 106 | 4.9 | ±9.5 | marginal |
+| regex | 139 | 4.2 | ±8.3 | marginal |
+| shell | 34 | 8.6 | ±16.8 | **too small** |
+
+`shell` cannot support a claim at any effect size worth acting on. Either drop it from the
+reported families, or hold out more of it. Do not report it beside the others as if it were
+equal evidence.
+
+## 9. Private content
+
+`split.py` screens every body by pattern. **1,188 of 7,003 programs (17%) carry a flag.**
+
+| Flag | Programs |
+|---|---|
+| home path | 829 |
+| key-like word | 317 |
+| private IP | 98 |
+| long hex | 64 |
+| email | 24 |
+
+Most of the home-path flags are benign. The key-like flags need a read. Decision D4 requires a
+human review of every committed fixture. This screen narrows that read; it does not replace it.
+No body and no intent is printed by any script here, for the same reason.
+
+## 10. What is ready, and what waits
+
+Ready now, and independent of the language work:
+
+  - the reachability measurement (section 1)
+  - the split, with its manifest at `~/.local/share/lackpy/rightsize/split.json`
+  - the private-content screen
+  - the per-family power table, which sets what the eval can claim
+
+Waits for build-order steps 2 to 7:
+
+  - the transforms themselves, which need the final rule set
+  - gate 2, behavioural equivalence, which needs the transformed program
+  - intent rewriting to the frontmatter format, which needs the parser
