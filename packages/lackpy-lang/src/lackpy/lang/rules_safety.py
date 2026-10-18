@@ -28,6 +28,15 @@ def check_parse(ctx: Context) -> list[Violation]:
     return []
 
 
+def _inside_def(node: ast.AST, ctx: Context) -> bool:
+    parent = ctx.parents.get(id(node))
+    while parent is not None:
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return True
+        parent = ctx.parents.get(id(parent))
+    return False
+
+
 @register(
     "safety.node", "safety",
     summary="Use only the syntax that the language allows.",
@@ -40,7 +49,12 @@ def check_node(ctx: Context) -> list[Violation]:
     out = []
     for node in ast.walk(ctx.tree):
         node_type = type(node)
-        if node_type not in ALLOWED_NODES:
+        if node_type is ast.Return and not _inside_def(node, ctx):
+            # A return outside a function is a SyntaxError when the program compiles.
+            out.append(Violation(
+                "safety.node", node.lineno,
+                f"Forbidden AST node: Return at line {node.lineno} (return is only allowed inside a def)"))
+        elif node_type not in ALLOWED_NODES:
             line = getattr(node, "lineno", None)
             out.append(Violation(
                 "safety.node", line,
@@ -440,9 +454,29 @@ def check_module_attr(ctx: Context) -> list[Violation]:
 # (safety.call-target) — those exotic call forms are not part of the intended
 # subset and were an unchecked bypass before.
 
+def _rebound(tree: ast.Module, name: str) -> bool:
+    """Whether ``name`` is bound anywhere other than by a ``def``.
+
+    After ``g = read_file``, a call ``g(...)`` reaches a tool, but ``calls``
+    leaves out the names of program functions. A rebound def name is no longer
+    a known function.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name and not isinstance(node.ctx, ast.Load):
+            return True
+        if isinstance(node, ast.arg) and node.arg == name:
+            return True
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return True
+        if isinstance(node, ast.ExceptHandler) and node.name == name:
+            return True
+    return False
+
+
 @register(
     "safety.unknown-call", "safety",
-    summary="Call only an allowed builtin, a name that the caller allows, or an imported member.",
+    summary="Call only an allowed builtin, a name that the caller allows, a program def "
+            "or an imported member.",
     rationale="The validator must know each function that a program calls. "
               "An unknown name can be a missing tool or a guess.",
     bad="x = frobnicate(1)",
@@ -458,6 +492,8 @@ def check_unknown_call(ctx: Context) -> list[Violation]:
                 continue
             if name == "type":  # safety.type-form owns every use of `type`
                 continue
+            if name in ctx.defined_functions and not _rebound(ctx.tree, name):
+                continue  # style.def-before-use owns the position of the call
             if name not in allowed and name not in FORBIDDEN_NAMES:
                 out.append(Violation(
                     "safety.unknown-call", node.lineno,

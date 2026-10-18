@@ -18,10 +18,8 @@ class TestForbiddenNodes:
         assert any("Import" in e for e in result.errors)
         assert "safety.import" in [v.rule_id for v in result.violations]
 
-    def test_rejects_function_def(self):
-        result = validate("def foo():\n    pass")
-        assert not result.valid
-        assert any("FunctionDef" in e for e in result.errors)
+    def test_accepts_top_level_function_def(self):
+        assert validate("def foo():\n    pass").valid
 
     def test_rejects_async_function_def(self):
         result = validate("async def foo():\n    pass")

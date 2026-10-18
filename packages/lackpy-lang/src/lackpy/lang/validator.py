@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from . import rules_safety  # noqa: F401  (registers the rules into RULES)
 from . import rules_style_basic  # noqa: F401
+from . import rules_style_def  # noqa: F401
 from .dictionary import MODULES
 from .registry import RULES, Context, Violation, Waiver
 
@@ -90,12 +91,16 @@ def validate(
             parents[id(child)] = node
 
     module_bindings, member_bindings = _collect_bindings(tree)
+    defined_functions: dict[str, int] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef):
+            defined_functions.setdefault(stmt.name, stmt.lineno)
     ctx = Context(
         tree=tree,
         source=program,
         parents=parents,
         allowed_names=frozenset(allowed_names),
-        defined_functions={},
+        defined_functions=defined_functions,
         module_bindings=module_bindings,
         member_bindings=member_bindings,
     )
@@ -114,10 +119,13 @@ def validate(
     # purpose: recording ``split``/``items`` there would surface them as ungranted
     # "tools". Calls to import bindings (``Path(...)``) are left out for the same reason.
     # A call above its import is kept: at run time it reaches something else.
+    # Calls to a program def are left out too (the kibitzer pre-check wants tools only).
     calls = [node.func.id for node in ast.walk(tree)
              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
              and not (node.func.id in member_bindings
-                      and rules_safety.bound_before(tree, node.func.id, node))]
+                      and rules_safety.bound_before(tree, node.func.id, node))
+             and not (node.func.id in defined_functions
+                      and rules_style_def.defined_before(tree, node.func.id, node))]
 
     variables: list[str] = []
     for node in ast.walk(tree):

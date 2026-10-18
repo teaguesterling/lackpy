@@ -23,7 +23,8 @@ def test_forbidden_names_not_in_builtins():
 
 def test_key_forbidden_nodes_present():
     assert ast.Import not in FORBIDDEN_NODES  # Task 4: approved imports are allowed
-    assert ast.FunctionDef in FORBIDDEN_NODES
+    assert ast.FunctionDef not in FORBIDDEN_NODES  # Task 7: top-level def is allowed
+    assert ast.AsyncFunctionDef in FORBIDDEN_NODES
     assert ast.While in FORBIDDEN_NODES
     assert ast.ClassDef in FORBIDDEN_NODES
 

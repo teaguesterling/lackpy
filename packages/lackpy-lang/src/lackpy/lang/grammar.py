@@ -9,6 +9,8 @@ ALLOWED_NODES: set[type] = {
     ast.Module, ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign,
     ast.For, ast.If, ast.With, ast.withitem,
     ast.Assert, ast.Continue, ast.Break, ast.Pass,
+    # Top-level def, with the style.def-* rules (Yield, Global and Nonlocal stay forbidden)
+    ast.FunctionDef, ast.Return,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
     ast.List, ast.Dict, ast.Tuple, ast.Set,
@@ -36,7 +38,7 @@ ALLOWED_NODES: set[type] = {
 }
 
 FORBIDDEN_NODES: set[type] = {
-    ast.FunctionDef, ast.AsyncFunctionDef,
+    ast.AsyncFunctionDef,
     ast.ClassDef,
     ast.While,
     ast.Try, ast.ExceptHandler,
