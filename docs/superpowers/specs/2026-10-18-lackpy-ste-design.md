@@ -1033,6 +1033,30 @@ main causes:
   (Plan 3) must therefore find effects nested inside arguments. Apply this as
   the first change of the next plan. Measure the corpus before and after.
 
+- **The `Path` stand-in enforces read-only and read-write permissions**
+  (Teague, 2026-10-18). The rules come mechanically from a configuration, in
+  the style of Claude Code. lackpy reads the same `permissions` rules that
+  Claude Code reads, so one source governs both. Design calls (Claude):
+  - Sources, merged as Claude Code merges them (the lists union, and a deny
+    at any level wins). The sources are `~/.claude/settings.json`,
+    `<workspace>/.claude/settings.json`, `<workspace>/.claude/settings.local.json`
+    and a `[paths]` table in `<workspace>/.lackpy/config.toml`.
+  - Only `Read(pattern)` and `Edit(pattern)` rules count. `Edit` covers every
+    write. A `Read` deny also blocks writes. `ask` counts as deny, because a
+    sandboxed program cannot ask anyone.
+  - Patterns use gitignore syntax with Claude Code's anchors. `//p` is
+    absolute, `~/p` is home, `/p` is relative to the settings file's source,
+    and `p` or `./p` is relative to the workspace.
+  - Order: deny, then allow. With no match, a path inside the workspace or an
+    `additionalDirectories` entry may be read and written. Every other path is
+    refused.
+  - Symlinks: an allow must match both the requested path and its resolved
+    target. A deny matches either.
+- **No attribute stores** (Claude, measured). `safety.attr-store` rejects an
+  assignment to, or a deletion of, any attribute. 65 of 6,984 corpus programs
+  (0.9%) do this, mostly openpyxl and `sys`, both outside v1. The rule closes
+  host-class mutation through any alias, statically.
+
 ### Carried into Plan 2 as gate requirements
 
 Plan 2 must turn each item into a test that passes before `lackpy-ste` merges.
