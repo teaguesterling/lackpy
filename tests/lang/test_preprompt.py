@@ -44,3 +44,9 @@ def test_preprompt_states_the_ruled_nesting_depth():
     text = format_preprompt()
     assert "A call nests at most 3 deep" in text
     assert "an I/O call inside another call" not in text
+
+
+def test_preprompt_does_not_say_an_io_call_needs_its_own_line():
+    text = format_preprompt()
+    assert "gets its own line" not in text
+    assert "In a chain, the I/O call comes first: `Path(p).read_text().strip()`." in text

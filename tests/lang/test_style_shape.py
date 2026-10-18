@@ -32,6 +32,7 @@ def _ids(result):
     # an I/O call may be an argument
     PJ + "p = 'a'\nd = json.loads(Path(p).read_text())",
     P + "p = 'a'\nn = len(Path(p).read_text())",
+    P + "p = 'a'\nn = len(x=Path(p).read_text())",
     PJ + "p = 'a'\nprint(Path(p).exists())",
     PJ + "p = 'a'\nprint(sorted(Path(p).glob('*')))",
     # an I/O call that is not an argument

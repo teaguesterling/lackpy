@@ -168,7 +168,7 @@ These come from ordinary Python. The validator rejects each one.
 _PREPROMPT_SHAPE = """\
 ## Shape
 
-- One effect per statement. An I/O call gets its own line.
+- In a chain, the I/O call comes first: `Path(p).read_text().strip()`.
 - A call nests at most 3 deep: `print(len(sorted(x)))` is fine.
 - A `try` names its error, has at most 3 statements, and its handler ends in
   `continue`, `return`, `pass`, or assignments to every name the body assigns.
