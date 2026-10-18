@@ -12,6 +12,7 @@ from . import rules_style_try  # noqa: F401
 from . import rules_style_shape  # noqa: F401
 from .dictionary import MODULES
 from .registry import RULES, Context, Violation, Waiver
+from .waivers import apply_waivers, scan_waivers
 
 
 @dataclass
@@ -25,8 +26,8 @@ class ValidationResult:
         variables: Variable names assigned in the program.
         violations: The failed checks, each with its rule id.
             ``errors == [v.message for v in violations]``.
-        waivers: The ``# ste:`` waivers found in the program. Nothing parses
-            waivers yet, so this list is empty for now.
+        waivers: The valid ``# ste:`` waivers in the program. ``used`` is True
+            when a waiver removed a style violation, False when it matched none.
     """
 
     valid: bool
@@ -111,6 +112,11 @@ def validate(
     for rule in RULES:
         violations.extend(rule.check(ctx))
 
+    # Waivers: a ``# ste:`` comment removes a style violation on its line.
+    waivers, meta = scan_waivers(program)
+    violations, waivers = apply_waivers(violations, waivers, program)
+    violations.extend(meta)
+
     # Custom rules: callables (ast.Module) -> list[str].
     if extra_rules:
         for extra in extra_rules:
@@ -142,4 +148,5 @@ def validate(
         calls=calls,
         variables=variables,
         violations=violations,
+        waivers=waivers,
     )

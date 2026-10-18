@@ -31,6 +31,7 @@ class Waiver:
     rule_id: str
     line: int
     why: str
+    used: bool = False  # True when the waiver removed a violation
 
 
 @dataclass

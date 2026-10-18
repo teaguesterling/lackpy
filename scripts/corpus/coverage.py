@@ -4,10 +4,11 @@ Usage: python scripts/corpus/coverage.py [--snapshot PATH] [--json]
 Exit 3 on "snapshot mismatch" (default snapshot only).
 Exit 2 with "corpus not found: <path>" on stderr when the snapshot is missing.
 Exit 4 with "unknown rule id" on stderr when a violation names an id that is not
-in the rule registry (and is not "extra"). The figures are not printed then.
+in the rule registry (and is not "extra" or a "meta.*" waiver id). The figures are not printed then.
 
 "admitted" counts programs where ValidationResult.valid is true.
 "by_rule" counts, per Violation.rule_id, the programs with at least one such violation.
+"waivers" counts, per rule id, the ``# ste:`` waivers found: "used" removed a violation, "unused" matched none.
 "structural" counts programs whose every violation is vocabulary: VOCAB_IDS,
 plus ``.format`` (ruled vocabulary: its replacement is an f-string).
 """
@@ -73,13 +74,18 @@ def main() -> int:
     if n == 0:
         print(f"corpus empty: no parsable bodies in {snap}", file=sys.stderr)
         return 2
-    unknown = sorted({v.rule_id for r in results for v in r.violations} - known_ids)
+    unknown = sorted({v.rule_id for r in results for v in r.violations
+                      if not v.rule_id.startswith("meta.")} - known_ids)
     if unknown:
         print(f"unknown rule id: {', '.join(unknown)}", file=sys.stderr)
         return 4
     admitted = sum(1 for r in results if r.valid)
     structural = sum(1 for r in results if all(is_vocabulary(v) for v in r.violations))
     by_rule = collections.Counter(i for r in results for i in {v.rule_id for v in r.violations})
+    waivers = {}
+    for r in results:
+        for w in r.waivers:
+            waivers.setdefault(w.rule_id, {"used": 0, "unused": 0})["used" if w.used else "unused"] += 1
     out = {
         "snapshot_rows": rows,
         "snapshot_sha256": sha,
@@ -89,6 +95,7 @@ def main() -> int:
         "structural": structural,
         "structural_pct": round(100 * structural / n, 1),
         "by_rule": dict(sorted(by_rule.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "waivers": dict(sorted(waivers.items())),
     }
     if args.json:
         print(json.dumps(out, indent=1))
@@ -98,6 +105,8 @@ def main() -> int:
               f"structural {structural} ({out['structural_pct']}%)")
         for k, v in list(out["by_rule"].items())[:20]:
             print(f"  {v:6d}  {k}")
+        for k, c in out["waivers"].items():
+            print(f"  waivers {k}: used {c['used']}, unused {c['unused']}")
     return 0
 
 
