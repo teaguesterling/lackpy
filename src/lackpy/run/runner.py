@@ -84,7 +84,12 @@ class RestrictedRunner:
             )
             ast.fix_missing_locations(tree)
 
-        code = compile(tree, "<lackpy>", "exec")
+        try:
+            code = compile(tree, "<lackpy>", "exec")
+        except SyntaxError as e:
+            # validate() compiles too, but any drift between them must not raise out of run().
+            return ExecutionResult(success=False, error=f"Compile error: {e.msg} (line {e.lineno})",
+                                   trace=trace)
         exec_globals: dict[str, Any] = {"__builtins__": {}}
         exec_globals.update(traced_ns)
 

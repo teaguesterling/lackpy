@@ -140,3 +140,11 @@ class TestBuiltinsAtRuntime:
         result = runner.run("KeyError('k')", mock_namespace)
         assert result.success, result.error
         assert isinstance(result.output, KeyError)
+
+
+class TestCompileFailure:
+    def test_compile_error_is_a_failed_result_not_an_exception(self, runner):
+        # Final review I2(b): any drift between validate() and compile() must not raise out of run().
+        result = runner.run("a, *b, *c = [1, 2, 3]", {})
+        assert not result.success
+        assert "Compile error" in result.error
