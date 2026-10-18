@@ -1022,6 +1022,17 @@ main causes:
 - `tests/lang/test_waive_everything.py` checks that dangerous programs stay
   invalid when every style rule is waived.
 
+### Decisions after Plan 1 (Teague, 2026-10-18)
+
+- **`style.assert-message` stays required.** A bare `assert` fails with an empty
+  `AssertionError`. The message tells the reader which expectation broke. The
+  measured cost is 2,346 corpus programs that need a message added.
+- **Nesting relaxes to depth 3, I/O calls included.** `style.call-nesting`
+  allows a call nested 3 deep. `style.io-position` allows an I/O call as an
+  argument, so `json.loads(Path(p).read_text())` is valid. The derivation
+  (Plan 3) must therefore find effects nested inside arguments. Apply this as
+  the first change of the next plan. Measure the corpus before and after.
+
 ### Carried into Plan 2 as gate requirements
 
 Plan 2 must turn each item into a test that passes before `lackpy-ste` merges.
