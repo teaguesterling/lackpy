@@ -112,9 +112,11 @@ def validate(
     # named (Name-target) calls. Method calls (``data.split(...)``) are left out on
     # purpose: recording ``split``/``items`` there would surface them as ungranted
     # "tools". Calls to import bindings (``Path(...)``) are left out for the same reason.
+    # A call above its import is kept: at run time it reaches something else.
     calls = [node.func.id for node in ast.walk(tree)
              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-             and node.func.id not in member_bindings]
+             and not (node.func.id in member_bindings
+                      and rules_safety.bound_before(tree, node.func.id, node))]
 
     variables: list[str] = []
     for node in ast.walk(tree):

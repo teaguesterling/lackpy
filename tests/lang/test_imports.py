@@ -61,11 +61,59 @@ def test_from_import_binding_is_callable():
     assert "Path" not in result.calls
 
 
-@pytest.mark.xfail(strict=True, reason="runtime proxy, Plan 2")
-def test_alias_gap_is_runtime_work():
-    result = validate("import statistics\ns = statistics\nx = s.sys")
+@pytest.mark.parametrize("program", [
+    "import statistics\ns = statistics\nx = s.sys",
+    "import json\nx = [json][0].codecs",
+    "import json\nd = {'a': json}\nx = d['a'].codecs",
+    "import json\nx = sorted([json], key=lambda m: m.codecs)",
+])
+def test_module_binding_only_as_attribute_base(program):
+    # A module used as a value escapes the safety.module-attr check, so only
+    # ``binding.member`` is allowed.
+    result = validate(program)
+    assert "safety.module-attr" in _ids(result), result.violations
+
+
+def test_member_binding_is_a_value():
+    # Members such as Path and Counter stay usable as values.
+    result = validate("from pathlib import Path\nmake = [Path]\np = Path('a')")
+    assert result.valid, result.errors
+
+
+@pytest.mark.parametrize("program, allowed", [
+    ("x = eval('1')\nfrom json import loads as eval", {"read_file"}),
+    ("x = exec('1')\nfrom json import loads as exec", {"read_file"}),
+    ("x = compile('1')\nfrom json import loads as compile", {"read_file"}),
+    ("x = read_file('secret')\nfrom json import loads as read_file", {"read_file"}),
+    ("import json as len", set()),
+    ("import json as print", set()),
+    ("import json as read_file", {"read_file"}),
+    ("import json as __builtins__", set()),
+    ("from collections import Counter as getattr", set()),
+])
+def test_binding_never_shadows_a_builtin_or_tool(program, allowed):
+    # A binding named after a builtin or a kit tool would make safety.unknown-call
+    # admit the name, and would hide the call from ``calls``.
+    result = validate(program, allowed_names=allowed)
     assert not result.valid
+    assert "safety.import" in _ids(result), result.violations
 
 
 def test_open_hint():
     assert validate("open('f')").violations[0].hint == "use Path(p).read_text() or Path(p).write_text(s)"
+
+
+def test_member_call_above_its_import_is_not_admitted():
+    # At run time the call runs before the import binds the name, so it reaches
+    # whatever the namespace holds. It must stay unknown, and stay in ``calls``.
+    result = validate("x = read_file('secret')\nfrom json import loads as read_file",
+                      allowed_names=set())
+    assert not result.valid
+    assert "safety.unknown-call" in _ids(result), result.violations
+    assert "read_file" in result.calls
+
+
+def test_member_call_after_import_on_same_line():
+    # Order is by source position, not by line: a call after ``;`` follows the import.
+    result = validate("from collections import Counter; c = Counter([1])")
+    assert result.valid, result.errors
