@@ -35,6 +35,8 @@ def main() -> int:
         return 2
     bodies = [r[0] for r in duckdb.connect().execute(
         f"SELECT body FROM read_parquet('{snap}') WHERE body <> ''").fetchall()]
+    if not cov.check_identity(bodies, snap)[2]:
+        return 3
     total = collections.Counter()
     alone = collections.Counter()
     strict = collections.Counter()

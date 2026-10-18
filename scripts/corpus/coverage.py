@@ -39,6 +39,19 @@ def is_vocabulary(v):
     return False
 
 
+def check_identity(bodies, snap):
+    """Return (rows, sha, ok). On the default snapshot, a mismatch prints the message and ok is False."""
+    h = hashlib.sha256()
+    for b in sorted(bodies):
+        h.update(b.encode() + b"\0")
+    rows, sha = len(bodies), h.hexdigest()
+    if snap == DEFAULT and (rows, sha) != (CANON_ROWS, CANON_SHA256):
+        print(f"snapshot mismatch: expected {CANON_ROWS}/{CANON_SHA256[:12]}, got {rows}/{sha[:12]}",
+              file=sys.stderr)
+        return rows, sha, False
+    return rows, sha, True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--snapshot", type=Path, default=DEFAULT)
@@ -55,13 +68,8 @@ def main() -> int:
 
     bodies = [r[0] for r in duckdb.connect().execute(
         f"SELECT body FROM read_parquet('{snap}') WHERE body <> ''").fetchall()]
-    h = hashlib.sha256()
-    for b in sorted(bodies):
-        h.update(b.encode() + b"\0")
-    rows, sha = len(bodies), h.hexdigest()
-    if snap == DEFAULT and (rows, sha) != (CANON_ROWS, CANON_SHA256):
-        print(f"snapshot mismatch: expected {CANON_ROWS}/{CANON_SHA256[:12]}, got {rows}/{sha[:12]}",
-              file=sys.stderr)
+    rows, sha, ok = check_identity(bodies, snap)
+    if not ok:
         return 3
     results = []
     for b in bodies:

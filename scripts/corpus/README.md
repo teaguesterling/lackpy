@@ -50,8 +50,8 @@ Per task, from the commit subjects (last figures of the task):
 
 | Task | Change | Admitted | Structural |
 |---|---|---:|---:|
-| 1 | Harness, baseline | 7 | 2,550 |
-| 2 | Rule registry (no behaviour change) | 7 | 2,550 |
+| 1 | Harness, baseline (derived: subject gave percentages only; figures from `baseline.json`) | 7 | 2,550 |
+| 2 | Rule registry (derived: subject said "unchanged") | 7 | 2,550 |
 | 3 | Classified builtins; `sort_by` removed; `mro` denied | 7 | 2,550 |
 | 4 | Dictionary, imports, module attributes | 516 | 2,550 |
 | 5 | Underscore names, dunder allowlist | 516 | 2,545 |

@@ -953,14 +953,14 @@ uncommon delimiters (5% of calls) are not extracted. Bodies with unexpanded
 ## 8. Changes during Plan 1 implementation
 
 Plan 1 built the static language. The ledger rulings below changed or corrected
-sections 4.3, 4.4 and 5.1. Earlier sections stay as written.
+sections 4.3, 4.4, 4.5 and 5.1. Earlier sections stay as written.
 
 - **Lambda positions (4.3).** A lambda is allowed as any `key=` argument, as the
   factory of `defaultdict`, and as the `repl` argument of `re.sub` and `re.subn`.
   The design allowed it for any argument of `sorted`, `max` and `min`. A
-  positional lambda to those calls is always a `TypeError`. The corpus has no such use.
-- **`style.try-named` removed (4.3, 5.1).** Every check of handler classes is now
-  `safety.except-base`, and no waiver can lift it. The design made `except Exception`
+  positional lambda to those calls always raises `TypeError`. The corpus has no such use.
+- **`style.try-named` removed (4.3, 5.1).** `safety.except-base` now rejects every
+  bad handler class, and no waiver can lift it. The design made `except Exception`
   waivable. `Exception` also catches the limit signals, so it cannot be waivable.
 - **Uncatchable limit signals (4.3).** `RecursionError`, `RuntimeError` and
   `MemoryError` cannot be caught. `RuntimeError` is the base of `RecursionError`.
@@ -969,24 +969,25 @@ sections 4.3, 4.4 and 5.1. Earlier sections stay as written.
   direct calls only. A function passed as `key=` can still recurse. The
   uncatchable `RecursionError` bounds that case.
 - **Return mode on every path (4.3).** A function with a valued `return` must end
-  every path in a valued `return`. The design said this, but the first
-  implementation checked only the last statement.
+  every path in a valued `return`. The design said this. The first implementation
+  checked only the `return` statements, so a path that ended without a `return`
+  passed. Fix commit 197f2b0 closed that gap.
 - **Report-and-fall-through handlers (4.3).** A handler may end without a
   `raise` or `return` when it assigns every name that the `try` body assigns.
   The first implementation rejected all of them, against the design.
   Of 114 such corpus handlers, 28 then pass.
 - **Waiver scope (4.4).** A waiver covers one statement. For a compound
-  statement, it covers the header lines only. A misplaced `# ste:` comment is
+  statement, it covers the header lines only. A misplaced `# ste:` comment draws
   `meta.waiver-unknown`. The design did not define the scope.
 - **Guide names no Python version (4.5).** The guide must read the same on every
   supported Python. Part 2 states the allowed exception classes as a rule. Python
   3.13 added `PythonFinalizationError`, so a list would differ by version.
-- **Use before import, and rebinding (5.1).** A call through an import binding is
-  valid only after the import statement. A name bound by an import cannot be
+- **Use before import, and rebinding (5.1).** A call through an import binding passes
+  only after the import statement. A name bound by an import cannot be
   bound again. Both close ways to hide a tool call behind an imported name.
 - **Module binding only as attribute (5.1).** A module binding may appear only as
-  the object of an attribute load, as in `json.loads`. Assigning it, passing it,
-  or returning it is `safety.module-attr`. This closes aliasing of a module until
+  the object of an attribute load, as in `json.loads`. `safety.module-attr` rejects assigning,
+  passing or returning it. This closes aliasing of a module until
   the Plan 2 proxies exist.
 
 ### Measured gap to the section 4.3 prediction
