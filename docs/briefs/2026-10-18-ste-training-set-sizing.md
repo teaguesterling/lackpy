@@ -207,3 +207,65 @@ Waits for build-order steps 2 to 7:
   - the transforms themselves, which need the final rule set
   - gate 2, behavioural equivalence, which needs the transformed program
   - intent rewriting to the frontmatter format, which needs the parser
+
+---
+
+## 11. Scrubbing, and what it does not buy
+
+`scripts/corpus/scrub.py` replaces private content with stable generic values. Stable means
+one input maps to one output everywhere, so a path used twice in a program stays one path.
+
+**Result: 1,777 of 7,003 programs changed (25%). No program's syntax broke.** The syntax check
+is part of the scrub: a replacement that stops a body parsing has changed the program, not
+redacted it.
+
+| Replacement | Count |
+|---|---|
+| high-entropy token | 1,243 |
+| home path | 985 |
+| private IP | 147 |
+| long hex | 137 |
+| email | 37 |
+
+**The `key-like` flags were noise.** The screen in section 9 flagged 317 programs for words such
+as `token` and `secret`. The scrub matches a key-like name *assigned a string literal*, and it
+replaced **zero**. Those 317 were variable names, dictionary keys and comments.
+
+**The pattern scrub alone was not enough, and a second detector proved it.** After replacing
+every known pattern, a Shannon-entropy scan found **1,066 programs (15.2%) holding a long
+high-entropy token that no pattern had named** — more programs than the scrub had changed. A
+commit SHA, a content hash and an API key are the same thing to an entropy test.
+
+So the scrub also neutralises any token of 32 characters or more whose entropy is 4.2 or
+higher, replacing it with a placeholder of the same length. For training this costs nothing: a
+real hash teaches a model nothing that a fixed one does not, and the same length keeps the
+program's shape and any slicing of the literal.
+
+After that pass the high-entropy residual is **0**. 182 programs (2.6%) still hold a
+base64-shaped run, all of low entropy, which is to say repetitive and structured rather than
+random. They are the remaining read.
+
+**A measurement warning, from making the mistake.** The first residual scan after this pass
+reported 1,213 base64-like programs, up from 180. The placeholder is a run of `X`, which is
+itself base64-shaped, so the detector was counting the scrub's own output. A detector that runs
+after a transform must exclude what the transform writes.
+
+### Sequencing: scrub last
+
+Scrubbing is a semantic transform. A scrubbed program does not read the file the original read.
+Gate 2 of section 4 compares a transformed program against the original on the original inputs,
+so the two steps conflict:
+
+  - Run gate 2 on **unscrubbed** pairs, then scrub. Correct, and it needs the unscrubbed corpus
+    present while the gate runs.
+  - Or scrub first and run gate 2 on scrubbed inputs on both sides. Also correct, and it tests a
+    program nobody wrote.
+
+Prefer the first. It keeps the behavioural check on the program as the author wrote it.
+
+### What scrubbing still does not buy
+
+It does not make the corpus publishable. It removes what two detectors can name, and the second
+one found a population the first missed. A third detector would probably find a smaller one
+again. Decision D4 requires a human read of every committed fixture; about 50 fixtures is a
+tractable read, and the scrub narrows what that read is looking for.
