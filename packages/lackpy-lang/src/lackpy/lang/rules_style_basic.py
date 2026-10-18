@@ -6,7 +6,21 @@ import ast
 
 from .registry import Context, Violation, register
 
-_LAMBDA_FUNCS = {"sorted", "min", "max"}
+
+
+def _lambda_arg_ok(call: ast.Call, index: int) -> bool:
+    """A positional lambda is allowed as defaultdict's factory or the repl of re.sub/subn."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id == "defaultdict" and index == 0
+    if isinstance(func, ast.Attribute):
+        if func.attr == "defaultdict":
+            return index == 0
+        if func.attr in ("sub", "subn"):
+            # re.sub(pattern, repl, s) has repl second; pattern.sub(repl, s) has it first.
+            on_re = isinstance(func.value, ast.Name) and func.value.id == "re"
+            return index == (1 if on_re else 0)
+    return False
 
 
 @register(
@@ -59,10 +73,10 @@ def check_for_iter(ctx: Context) -> list[Violation]:
 
 @register(
     "style.lambda-position", "style",
-    summary="Use lambda only as a key= argument, or as an argument of sorted, min or max.",
+    summary="Use lambda only as a key= value, a defaultdict factory, or the repl of re.sub.",
     rationale="A lambda in a key= argument is short and has one job. "
               "A lambda in other places hides logic.",
-    bad="xs = [1]\nm = min(xs, default=lambda r: r)",
+    bad="xs = [1]\nm = sorted(xs, lambda r: r)",
     good="words = sorted(['b', 'a'], key=lambda w: w)",
 )
 def check_lambda_position(ctx: Context) -> list[Violation]:
@@ -75,8 +89,7 @@ def check_lambda_position(ctx: Context) -> list[Violation]:
             if isinstance(parent, ast.keyword) and parent.arg == "key":
                 continue
             if (isinstance(parent, ast.Call) and node in parent.args
-                    and isinstance(parent.func, ast.Name)
-                    and parent.func.id in _LAMBDA_FUNCS):
+                    and _lambda_arg_ok(parent, parent.args.index(node))):
                 continue
             out.append(Violation(
                 "style.lambda-position", node.lineno,

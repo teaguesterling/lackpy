@@ -229,11 +229,17 @@ class TestLambdaRestriction:
         assert not result.valid
         assert any("key= argument" in e for e in result.errors)
 
-    def test_lambda_positional_arg_only_for_sorted_min_max(self):
-        # Task 6: a positional lambda is allowed for sorted/min/max only.
-        assert validate("sorted([1, 2], lambda x: x)", allowed_names=set()).valid
-        result = validate("list([1, 2], lambda x: x)", allowed_names=set())
-        assert "style.lambda-position" in [v.rule_id for v in result.violations]
+    def test_lambda_positions_are_key_defaultdict_and_re_sub_only(self):
+        def ids(src):
+            return [v.rule_id for v in validate(src, allowed_names=set()).violations]
+        # positional lambda to sorted is a runtime TypeError (key is keyword-only)
+        assert "style.lambda-position" in ids("xs = [1]\nsorted(xs, lambda r: r)")
+        assert "style.lambda-position" in ids("list(lambda: 1)")
+        assert validate("from collections import defaultdict\nd = defaultdict(lambda: 0)").valid
+        assert validate("import collections\nd = collections.defaultdict(lambda: 0)").valid
+        assert validate('import re\ns = re.sub("a", lambda m: m.group(0), "abc")').valid
+        assert validate('import re\np = re.compile("a")\ns = p.sub(lambda m: m.group(0), "abc")').valid
+        assert "style.lambda-position" in ids('import re\ns = re.sub(lambda m: 1, "a", "abc")')
 
     def test_rejects_lambda_in_non_key_kwarg(self):
         result = validate(
