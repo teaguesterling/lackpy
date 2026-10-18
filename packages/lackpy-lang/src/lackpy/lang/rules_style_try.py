@@ -23,7 +23,7 @@ import importlib
 from .builtins_policy import ALLOWED
 from .dictionary import MODULES
 from .registry import Context, Violation, register
-from .rules_safety import BASE_ONLY_EXCEPTIONS, handler_classes
+from .rules_safety import UNCATCHABLE, _bound_names, handler_classes, is_dotted_name
 
 MAX_TRY_BODY = 3
 
@@ -58,19 +58,34 @@ def _tries(ctx: Context):
 )
 def check_try_named(ctx: Context) -> list[Violation]:
     out = []
+    bound = _program_bindings(ctx)
     for node in ast.walk(ctx.tree):
         if not isinstance(node, ast.ExceptHandler):
             continue
         for cls in handler_classes(node):
-            if isinstance(cls, ast.Name) and cls.id in BASE_ONLY_EXCEPTIONS:
+            if not is_dotted_name(cls) or (isinstance(cls, ast.Name) and cls.id in UNCATCHABLE):
                 continue  # safety.except-base owns these
-            if not _named_class(cls, ctx):
+            if not _named_class(cls, ctx) or (isinstance(cls, ast.Name) and cls.id in bound):
                 out.append(Violation(
                     "style.try-named", node.lineno,
                     f"Except at line {node.lineno} must name error classes, not "
                     f"'{ast.unparse(cls)}' (use a builtin error such as KeyError, "
                     f"or json.JSONDecodeError or re.error)"))
     return out
+
+
+def _program_bindings(ctx: Context) -> set[str]:
+    """Every name the program binds, other than a ``from m import x`` member binding.
+
+    Assignment, augmented and for/comprehension targets, parameters, def names,
+    except-as names and import aliases. A handler class name bound anywhere
+    (``KeyError = 3``, ``def f(KeyError)``) is not the builtin class. A member
+    binding is checked against ``EXCEPTION_MEMBERS`` instead.
+    """
+    names = {n.id for n in ast.walk(ctx.tree)
+             if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)}
+    names |= {name for name, _ in _bound_names(ctx.tree)}
+    return names - ctx.member_bindings.keys()
 
 
 def _named_class(cls: ast.expr, ctx: Context) -> bool:
@@ -195,7 +210,8 @@ def _handler_problem(try_node: ast.Try, handler: ast.ExceptHandler,
         if terminal.value is None:
             return "return must give a value"
         return None if _in_def(try_node, ctx) else "return is only allowed in a def"
-    missing = body_names - _assigned_names(lead)
+    # Python deletes the as-name when the handler ends, so it assigns nothing after the try.
+    missing = body_names - (_assigned_names(lead) - {handler.name})
     if missing:
         return (f"it falls through and leaves {', '.join(sorted(missing))} unassigned "
                 f"(assign it, or use continue or return)")

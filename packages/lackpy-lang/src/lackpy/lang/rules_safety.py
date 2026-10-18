@@ -524,14 +524,21 @@ def check_call_target(ctx: Context) -> list[Violation]:
     return out
 
 
-# except — a handler must never catch what is not an Exception.
+# except — a handler must never catch what is not an Exception, or a limit signal.
 #
 # BaseException and its direct subclasses outside Exception (SystemExit,
 # KeyboardInterrupt, GeneratorExit, BaseExceptionGroup) carry interpreter
 # control, and the sandbox's own refusals and limits (Plan 2). A handler that
 # catches them would swallow that control. A bare ``except`` catches them too.
-# None of these names is an allowed builtin, so at run time the name is also
-# unbound; this rule makes the rejection static and unwaivable.
+#
+# RecursionError, MemoryError and RuntimeError are limit signals. A handler
+# that catches RecursionError can retry the recursion, and the program then
+# runs without end (measured: a key= recursion that catches RecursionError
+# ran past 60 s). RuntimeError is RecursionError's base, so it is listed too.
+#
+# The class expression is evaluated when an exception arrives, so it must be a
+# name, a dotted name, or a tuple of them. A call there would run code (a tool)
+# inside the handler search; that is unwaivable here.
 
 BASE_ONLY_EXCEPTIONS = frozenset(
     name for name in dir(builtins)
@@ -539,6 +546,8 @@ BASE_ONLY_EXCEPTIONS = frozenset(
     and issubclass(getattr(builtins, name), BaseException)
     and not issubclass(getattr(builtins, name), Exception)
 )
+LIMIT_SIGNALS = frozenset({"RecursionError", "RuntimeError", "MemoryError"})
+UNCATCHABLE = BASE_ONLY_EXCEPTIONS | LIMIT_SIGNALS
 
 
 def handler_classes(handler: ast.ExceptHandler) -> list[ast.expr]:
@@ -550,11 +559,20 @@ def handler_classes(handler: ast.ExceptHandler) -> list[ast.expr]:
     return [handler.type]
 
 
+def is_dotted_name(node: ast.expr) -> bool:
+    """Whether ``node`` is a Name, or an Attribute chain rooted on a Name."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name)
+
+
 @register(
     "safety.except-base", "safety",
-    summary="Name the error in every except. Do not catch BaseException.",
+    summary="Name the error in every except, as a name, a dotted name or a tuple of them. "
+            "Do not catch BaseException, RecursionError, RuntimeError or MemoryError.",
     rationale="A bare except and except BaseException also catch the signals that stop the "
-              "program, such as a time limit. The program must not hide them.",
+              "program, such as a time limit. A handler of RecursionError or MemoryError can "
+              "retry without end. A call in the except line runs code during the error.",
     bad="d = {}\ntry:\n    x = d['k']\nexcept:\n    x = 0",
     good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0",
 )
@@ -569,9 +587,15 @@ def check_except_base(ctx: Context) -> list[Violation]:
                 f"Bare except at line {node.lineno} (name the error class, for example KeyError)"))
             continue
         for cls in handler_classes(node):
-            if isinstance(cls, ast.Name) and cls.id in BASE_ONLY_EXCEPTIONS:
+            if not is_dotted_name(cls):
+                out.append(Violation(
+                    "safety.except-base", node.lineno,
+                    f"Forbidden except expression '{ast.unparse(cls)}' at line {node.lineno} "
+                    f"(use a class name, a dotted name, or a tuple of them)"))
+            elif isinstance(cls, ast.Name) and cls.id in UNCATCHABLE:
                 out.append(Violation(
                     "safety.except-base", node.lineno,
                     f"Forbidden except of '{cls.id}' at line {node.lineno} "
-                    f"(catch a subclass of Exception, for example KeyError)"))
+                    f"(catch a subclass of Exception that is not a limit signal, "
+                    f"for example KeyError)"))
     return out

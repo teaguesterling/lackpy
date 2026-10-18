@@ -75,7 +75,7 @@ def test_valid(program):
     # try-named: everything that is not a named exception class
     ("try:\n    x = 1\nexcept (KeyError, Exception):\n    x = 0", "style.try-named"),
     ("E = KeyError\ntry:\n    x = 1\nexcept E:\n    x = 0", "style.try-named"),
-    ("try:\n    x = 1\nexcept len([]):\n    x = 0", "style.try-named"),
+    ("try:\n    x = 1\nexcept len([]):\n    x = 0", "safety.except-base"),  # ruling 4: a call
     ("import json\ntry:\n    x = 1\nexcept json.loads:\n    x = 0", "style.try-named"),
     ("from collections import Counter\ntry:\n    x = 1\nexcept Counter:\n    x = 0", "style.try-named"),
     ("try:\n    x = 1\nexcept print:\n    x = 0", "style.try-named"),
@@ -95,6 +95,28 @@ def test_valid(program):
     ("for i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        pass", "style.try-handler"),
     ("try:\n    x = 1\n    y = 2\nexcept KeyError:\n    x = 0", "style.try-handler"),
     ("try:\n    for i in [1]:\n        x = i\nexcept KeyError:\n    pass", "style.try-handler"),
+    # fix round 1, ruling 1: limit signals are never caught
+    ("try:\n    x = 1\nexcept RecursionError:\n    x = 0", "safety.except-base"),
+    ("try:\n    x = 1\nexcept RuntimeError:\n    x = 0", "safety.except-base"),
+    ("try:\n    x = 1\nexcept MemoryError:\n    x = 0", "safety.except-base"),
+    ("try:\n    x = 1\nexcept (KeyError, RecursionError):\n    x = 0", "safety.except-base"),
+    ("def k(x):\n    try:\n        y = sorted([x], key=k)\n    except RecursionError:\n"
+     "        y = sorted([x], key=k)\n    return 0\nprint(sorted([1], key=k))", "safety.except-base"),
+    # fix round 1, ruling 2: an exception class name bound anywhere in the program
+    ("for KeyError in [Exception]:\n    try:\n        x = 1\n    except KeyError:\n        x = 0",
+     "style.try-named"),
+    ("def f(KeyError):\n    try:\n        x = 1\n    except KeyError:\n        x = 0\n    return x\n"
+     "print(f(Exception))", "style.try-named"),
+    ("KeyError = 3\ntry:\n    x = 1\nexcept KeyError:\n    x = 0", "style.try-named"),
+    ("try:\n    x = 1\nexcept KeyError as ValueError:\n    x = 0\n"
+     "try:\n    y = 1\nexcept ValueError:\n    y = 0", "style.try-named"),
+    # fix round 1, ruling 3: the as-name is deleted when the handler ends
+    ("d = {}\ntry:\n    x = d['a']\nexcept KeyError as x:\n    x = 0\nprint(x)", "style.try-handler"),
+    ("d = {}\ntry:\n    e = d['a']\nexcept KeyError as e:\n    e = 0\nprint(e)", "style.try-handler"),
+    # fix round 1, ruling 4: the class expression is a name, a dotted name, or a tuple of them
+    ("try:\n    x = 1\nexcept read_file('x'):\n    x = 0", "safety.except-base"),
+    ("def f():\n    return KeyError\ntry:\n    x = 1\nexcept (KeyError, f()):\n    x = 0",
+     "safety.except-base"),
     # except-as names are bindings (Tasks 4 and 5 rules)
     ("try:\n    x = 1\nexcept KeyError as __x:\n    x = 0", "safety.dunder-name"),
 ])
