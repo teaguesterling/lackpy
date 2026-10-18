@@ -53,7 +53,8 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "getattr", "setattr", "delattr", "hasattr",
     "__builtins__", "__build_class__",
     "breakpoint", "exit", "quit",
-    "type", "super", "classmethod", "staticmethod", "property",
+    # `type` is not here: safety.type-form owns every use of that name.
+    "super", "classmethod", "staticmethod", "property",
     "memoryview", "bytearray", "bytes",
     "map", "filter", "reduce",
     "input",

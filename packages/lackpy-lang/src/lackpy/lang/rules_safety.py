@@ -71,6 +71,96 @@ def check_forbidden_name(ctx: Context) -> list[Violation]:
     return out
 
 
+# Dunder names and `type` — the names that lead to the interpreter's internals.
+#
+# A name that starts with "__" reaches the module namespace (``__builtins__``,
+# ``__spec__``, ``__loader__``) or the import machinery (``__import__``). Only
+# two are data: ``__name__`` and ``__file__``, and only as a load. A program
+# that stores or binds a dunder name can change what the runtime reads.
+#
+# ``type`` returns a class, and a class leads to ``object`` and every subclass.
+# The one use a program needs is the class name, so ``type(<expr>).__name__``
+# is the only form, and the result is a str.
+
+_DUNDER_LOADS = frozenset({"__name__", "__file__"})
+
+
+def _bound_names(tree: ast.Module):
+    """Yield (name, line) for each binding that is not an ``ast.Name``.
+
+    These are parameters, def and class names, except-as names and import
+    aliases. Stores to an ``ast.Name`` are found through its ``ctx``.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            yield node.arg, node.lineno
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield node.name, node.lineno
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            yield node.name, node.lineno
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                if a.name != "*":
+                    yield a.asname or a.name.split(".")[0], node.lineno
+
+
+@register(
+    "safety.dunder-name", "safety",
+    summary="Do not use a name that starts with two underscores. "
+            "You can read __name__ and __file__.",
+    rationale="Dunder names lead to the builtins, the import machinery and the module namespace. "
+              "__name__ and __file__ are only strings.",
+    bad="x = __builtins__",
+    good="if __name__ == '__main__':\n    print(1)",
+)
+def check_dunder_name(ctx: Context) -> list[Violation]:
+    found: list[tuple[str, int]] = []
+    for node in ast.walk(ctx.tree):
+        if (isinstance(node, ast.Name) and node.id.startswith("__")
+                and not (node.id in _DUNDER_LOADS and isinstance(node.ctx, ast.Load))):
+            found.append((node.id, node.lineno))
+    found += [(name, line) for name, line in _bound_names(ctx.tree) if name.startswith("__")]
+    return [Violation("safety.dunder-name", line,
+                      f"Forbidden dunder name: '{name}' at line {line} "
+                      f"(only __name__ and __file__, and only to read)")
+            for name, line in sorted(found, key=lambda f: f[1])]
+
+
+def _is_type_call(node: ast.AST) -> bool:
+    """Whether ``node`` is ``type(<expr>)``: one positional argument, nothing else."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "type" and len(node.args) == 1
+            and not isinstance(node.args[0], ast.Starred) and not node.keywords)
+
+
+def _is_type_name(node: ast.AST) -> bool:
+    """Whether ``node`` is the load ``type(<expr>).__name__``."""
+    return (isinstance(node, ast.Attribute) and node.attr == "__name__"
+            and isinstance(node.ctx, ast.Load) and _is_type_call(node.value))
+
+
+@register(
+    "safety.type-form", "safety",
+    summary="Use type only as type(<expr>).__name__.",
+    rationale="type returns a class. A class leads to object and to every subclass. "
+              "The name of the class is a string, and it is safe.",
+    bad="t = type(3)",
+    good="n = type(3).__name__",
+)
+def check_type_form(ctx: Context) -> list[Violation]:
+    lines: list[int] = []
+    for node in ast.walk(ctx.tree):
+        if isinstance(node, ast.Name) and node.id == "type":
+            call = ctx.parents.get(id(node))
+            if not (isinstance(call, ast.Call) and call.func is node and _is_type_call(call)
+                    and _is_type_name(ctx.parents.get(id(call)))):
+                lines.append(node.lineno)
+    lines += [line for name, line in _bound_names(ctx.tree) if name == "type"]
+    return [Violation("safety.type-form", line,
+                      f"Forbidden use of 'type' at line {line} (use only type(<expr>).__name__)")
+            for line in sorted(lines)]
+
+
 # Attribute check — the sandbox boundary (GHSA-hpcj-3c97-43jm).
 #
 # ast.Attribute is allowed (data objects legitimately expose methods like
@@ -93,8 +183,9 @@ def check_forbidden_name(ctx: Context) -> list[Violation]:
 # contain "__". It existed to stop getattr(obj, "__class__") -> __bases__ ->
 # __subclasses__(). That sink is closed independently and more completely:
 #
-#   - getattr/setattr/delattr/hasattr/vars/globals/locals/dir/type/__import__
-#     are all in FORBIDDEN_NAMES; eval/exec/compile are not in ALLOWED_BUILTINS.
+#   - getattr/setattr/delattr/hasattr/vars/globals/locals/dir/__import__
+#     are all in FORBIDDEN_NAMES; eval/exec/compile are not in ALLOWED_BUILTINS;
+#     safety.type-form admits type only as type(<expr>).__name__.
 #   - direct attribute access (obj.__class__) is rejected by the underscore
 #     prefix rule, independent of any string.
 #   - str.format/format_map DO turn a string into an attribute lookup, and
@@ -128,9 +219,23 @@ def _attribute_violation(rule_id: str, node: ast.Attribute) -> Violation:
     )
 
 
+def _allowed_private(node: ast.Attribute, ctx: Context) -> bool:
+    """The two underscore attributes that a program may read.
+
+    ``<module>.__version__`` on a module binding, and ``type(<expr>).__name__``.
+    Both are strings. Neither leads to a type, a module or a namespace.
+    """
+    if not isinstance(node.ctx, ast.Load):
+        return False
+    if node.attr == "__version__":
+        return isinstance(node.value, ast.Name) and node.value.id in ctx.module_bindings
+    return _is_type_name(node)
+
+
 @register(
     "safety.attr-private", "safety",
-    summary="Do not use an attribute whose name starts with an underscore.",
+    summary="Do not use an attribute whose name starts with an underscore. "
+            "You can read module.__version__ and type(<expr>).__name__.",
     rationale="Underscore attributes lead from a value to its type, its module and its globals. "
               "That chain is the main way out of a Python sandbox.",
     bad="name = 'a'.__class__",
@@ -139,7 +244,8 @@ def _attribute_violation(rule_id: str, node: ast.Attribute) -> Violation:
 def check_attr_private(ctx: Context) -> list[Violation]:
     return [_attribute_violation("safety.attr-private", node)
             for node in ast.walk(ctx.tree)
-            if isinstance(node, ast.Attribute) and node.attr.startswith("_")]
+            if isinstance(node, ast.Attribute) and node.attr.startswith("_")
+            and not _allowed_private(node, ctx)]
 
 
 @register(
@@ -320,7 +426,8 @@ def check_module_attr(ctx: Context) -> list[Violation]:
             continue
         module = ctx.module_bindings[node.value.id]
         subject = f"{module}.{node.attr}"
-        if node.attr not in MODULES[module]:
+        # __version__ is a str; safety.attr-private admits it on a module binding.
+        if node.attr not in MODULES[module] and node.attr != "__version__":
             out.append(Violation(
                 "safety.module-attr", node.lineno,
                 f"Unknown module member: '{subject}' at line {node.lineno} (not in the dictionary)",
@@ -351,6 +458,8 @@ def check_unknown_call(ctx: Context) -> list[Violation]:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             name = node.func.id
             if name in ctx.member_bindings and bound_before(ctx.tree, name, node):
+                continue
+            if name == "type":  # safety.type-form owns every use of `type`
                 continue
             if name not in allowed and name not in FORBIDDEN_NAMES:
                 out.append(Violation(
