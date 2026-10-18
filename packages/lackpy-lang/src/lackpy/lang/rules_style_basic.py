@@ -7,19 +7,27 @@ import ast
 from .registry import Context, Violation, register
 
 
+def _lambda_arg_ok(call: ast.Call, index: int, ctx: Context) -> bool:
+    """A positional lambda is allowed as defaultdict's factory or the repl of re.sub/subn.
 
-def _lambda_arg_ok(call: ast.Call, index: int) -> bool:
-    """A positional lambda is allowed as defaultdict's factory or the repl of re.sub/subn."""
+    Names resolve through the import bindings, so ``import re as regex`` works.
+    """
     func = call.func
     if isinstance(func, ast.Name):
-        return func.id == "defaultdict" and index == 0
-    if isinstance(func, ast.Attribute):
-        if func.attr == "defaultdict":
+        target = ctx.member_bindings.get(func.id)
+        if target == ("collections", "defaultdict"):
             return index == 0
+        if target in (("re", "sub"), ("re", "subn")):
+            return index == 1
+        return False
+    if isinstance(func, ast.Attribute):
+        module = (ctx.module_bindings.get(func.value.id)
+                  if isinstance(func.value, ast.Name) else None)
+        if func.attr == "defaultdict":
+            return module == "collections" and index == 0
         if func.attr in ("sub", "subn"):
             # re.sub(pattern, repl, s) has repl second; pattern.sub(repl, s) has it first.
-            on_re = isinstance(func.value, ast.Name) and func.value.id == "re"
-            return index == (1 if on_re else 0)
+            return index == (1 if module == "re" else 0)
     return False
 
 
@@ -89,12 +97,13 @@ def check_lambda_position(ctx: Context) -> list[Violation]:
             if isinstance(parent, ast.keyword) and parent.arg == "key":
                 continue
             if (isinstance(parent, ast.Call) and node in parent.args
-                    and _lambda_arg_ok(parent, parent.args.index(node))):
+                    and _lambda_arg_ok(parent, parent.args.index(node), ctx)):
                 continue
             out.append(Violation(
                 "style.lambda-position", node.lineno,
-                f"Lambda at line {node.lineno} is only allowed as key= argument "
-                f"(e.g., key=lambda x: x['field'])",
+                f"Lambda at line {node.lineno} is only allowed as a key= argument "
+                f"(e.g., key=lambda x: x['field']), as the factory of "
+                f"defaultdict(...), or as the repl argument of re.sub or re.subn",
             ))
     return out
 
