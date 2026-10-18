@@ -12,7 +12,7 @@ from . import rules_style_try  # noqa: F401
 from . import rules_style_shape  # noqa: F401
 from .dictionary import MODULES
 from .registry import RULES, Context, Violation, Waiver
-from .waivers import apply_waivers, scan_waivers
+from .waivers import apply_waivers
 
 
 @dataclass
@@ -113,8 +113,7 @@ def validate(
         violations.extend(rule.check(ctx))
 
     # Waivers: a ``# ste:`` comment removes a style violation on its line.
-    waivers, meta = scan_waivers(program)
-    violations, waivers = apply_waivers(violations, waivers, program)
+    violations, waivers, meta = apply_waivers(violations, program)
     violations.extend(meta)
 
     # Custom rules: callables (ast.Module) -> list[str].

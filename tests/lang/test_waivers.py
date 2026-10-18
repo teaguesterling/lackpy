@@ -57,10 +57,60 @@ def test_multiline_statement_first_line_waiver_covers():
     assert r.valid and r.waivers[0].used is True
 
 
-def test_multiline_statement_later_line_waiver_does_not_cover():
+def test_multiline_statement_later_line_waiver_is_misplaced():
     r = validate(f"xs = [1]\ng = (x\n     for x in xs)  {WAIVER}")
+    assert _ids(r) == {"style.genexp-consumed", "meta.waiver-unknown"}
+    assert r.waivers == []
+    assert "misplaced" in next(v.message for v in r.violations if v.rule_id == "meta.waiver-unknown")
+
+
+AC = "style.attr-chain"
+
+
+def test_first_line_waiver_covers_violation_on_a_later_line():
+    r = validate(f"x = {{}}\ny = [x.a.b.c,  # ste: {AC}, y\n  x.d.e.f]")
+    assert r.valid and r.waivers[0].used is True
+
+
+def test_waiver_on_later_line_does_not_cover_earlier_line():
+    r = validate(f"x = {{}}\ny = [1,\n  x.a.b.c]  # ste: {AC}, y")
+    assert _ids(r) == {AC, "meta.waiver-unknown"} and r.waivers == []
+
+
+def test_standalone_comment_inside_a_statement_is_misplaced():
+    r = validate(f"x = {{}}\ny = [1,\n  # ste: {AC}, y\n  x.a.b.c]")
+    assert _ids(r) == {AC, "meta.waiver-unknown"}
+
+
+def test_standalone_comment_with_no_statement_below_is_misplaced():
+    r = validate(f"x = 1\n# ste: {AC}, y\n\ny = 2")
+    assert _ids(r) == {"meta.waiver-unknown"}
+    r = validate(f"x = 1\n# ste: {AC}, y")
+    assert _ids(r) == {"meta.waiver-unknown"}
+
+
+def test_compound_waiver_covers_header_not_body():
+    r = validate(f"x = {{}}\nfor i in x.a.b.c:  # ste: {AC}, y\n    z = x.d.e.f\n    print(z)")
+    assert [v.line for v in r.violations] == [3]
+    assert r.waivers[0].used is True
+    assert "style.for-iter" not in _ids(r)
+
+
+def test_two_statements_on_one_line_share_a_trailing_waiver():
+    r = validate(f"x = {{}}\na = x.a.b.c; b = x.d.e.f  # ste: {AC}, y")
+    assert r.valid and len(r.waivers) == 1 and r.waivers[0].used is True
+
+
+def test_separator_character_in_earlier_string_does_not_shift_waivers():
+    src = f"xs = [1]\ns = 'a\x0cb'\nh = 1  {WAIVER}\ng = (x for x in xs)"
+    r = validate(src)
     assert "style.genexp-consumed" in _ids(r)
-    assert r.waivers[0].used is False
+    assert r.waivers[0].line == 3 and r.waivers[0].used is False
+
+
+def test_why_containing_a_second_waiver_is_malformed():
+    r = validate("x = 1  # ste: style.genexp-consumed, why # ste: safety.import, why")
+    assert _ids(r) == {"meta.waiver-unknown"} and r.waivers == []
 
 
 def test_safety_violation_stays_and_waiver_is_rejected():
