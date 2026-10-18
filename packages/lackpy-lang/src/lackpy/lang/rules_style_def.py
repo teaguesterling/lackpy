@@ -47,6 +47,9 @@ def _ends_valued(body: list[ast.stmt]) -> bool:
         return last.value is not None
     if isinstance(last, ast.If):
         return bool(last.orelse) and _ends_valued(last.body) and _ends_valued(last.orelse)
+    if isinstance(last, ast.Try):
+        # style.try-else-finally rejects else and finally, so the paths are the body and each handler.
+        return _ends_valued(last.body) and all(_ends_valued(h.body) for h in last.handlers)
     return False
 
 

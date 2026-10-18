@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from . import rules_safety  # noqa: F401  (registers the rules into RULES)
 from . import rules_style_basic  # noqa: F401
 from . import rules_style_def  # noqa: F401
+from . import rules_style_try  # noqa: F401
 from .dictionary import MODULES
 from .registry import RULES, Context, Violation, Waiver
 

@@ -522,3 +522,56 @@ def check_call_target(ctx: Context) -> list[Violation]:
                 f"{node.lineno}: only named functions and method calls are allowed",
             ))
     return out
+
+
+# except — a handler must never catch what is not an Exception.
+#
+# BaseException and its direct subclasses outside Exception (SystemExit,
+# KeyboardInterrupt, GeneratorExit, BaseExceptionGroup) carry interpreter
+# control, and the sandbox's own refusals and limits (Plan 2). A handler that
+# catches them would swallow that control. A bare ``except`` catches them too.
+# None of these names is an allowed builtin, so at run time the name is also
+# unbound; this rule makes the rejection static and unwaivable.
+
+BASE_ONLY_EXCEPTIONS = frozenset(
+    name for name in dir(builtins)
+    if isinstance(getattr(builtins, name), type)
+    and issubclass(getattr(builtins, name), BaseException)
+    and not issubclass(getattr(builtins, name), Exception)
+)
+
+
+def handler_classes(handler: ast.ExceptHandler) -> list[ast.expr]:
+    """The class expressions that ``handler`` names: one, or each item of a tuple."""
+    if handler.type is None:
+        return []
+    if isinstance(handler.type, ast.Tuple):
+        return list(handler.type.elts)
+    return [handler.type]
+
+
+@register(
+    "safety.except-base", "safety",
+    summary="Name the error in every except. Do not catch BaseException.",
+    rationale="A bare except and except BaseException also catch the signals that stop the "
+              "program, such as a time limit. The program must not hide them.",
+    bad="d = {}\ntry:\n    x = d['k']\nexcept:\n    x = 0",
+    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0",
+)
+def check_except_base(ctx: Context) -> list[Violation]:
+    out = []
+    for node in ast.walk(ctx.tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        if node.type is None:
+            out.append(Violation(
+                "safety.except-base", node.lineno,
+                f"Bare except at line {node.lineno} (name the error class, for example KeyError)"))
+            continue
+        for cls in handler_classes(node):
+            if isinstance(cls, ast.Name) and cls.id in BASE_ONLY_EXCEPTIONS:
+                out.append(Violation(
+                    "safety.except-base", node.lineno,
+                    f"Forbidden except of '{cls.id}' at line {node.lineno} "
+                    f"(catch a subclass of Exception, for example KeyError)"))
+    return out

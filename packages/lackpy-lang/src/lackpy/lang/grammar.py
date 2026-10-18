@@ -11,6 +11,8 @@ ALLOWED_NODES: set[type] = {
     ast.Assert, ast.Continue, ast.Break, ast.Pass,
     # Top-level def, with the style.def-* rules (Yield, Global and Nonlocal stay forbidden)
     ast.FunctionDef, ast.Return,
+    # try with named errors, with the style.try-* rules and safety.except-base (TryStar stays forbidden)
+    ast.Try, ast.ExceptHandler,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
     ast.List, ast.Dict, ast.Tuple, ast.Set,
@@ -41,7 +43,6 @@ FORBIDDEN_NODES: set[type] = {
     ast.AsyncFunctionDef,
     ast.ClassDef,
     ast.While,
-    ast.Try, ast.ExceptHandler,
     ast.Raise,
     ast.Global, ast.Nonlocal,
     ast.Yield, ast.YieldFrom,
@@ -49,6 +50,10 @@ FORBIDDEN_NODES: set[type] = {
     ast.Delete,
     ast.Match,
 }
+
+# except* parses from Python 3.11; this package supports 3.10.
+if hasattr(ast, "TryStar"):
+    FORBIDDEN_NODES.add(ast.TryStar)
 
 FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "__import__", "open",
@@ -74,13 +79,19 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
 #
 # These names have NO leading underscore, so the prefix rule would miss them. They
 # are frame/generator/coroutine/traceback internals that expose a real namespace
-# (``f_globals``/``f_builtins``). They were previously unreachable by construction
-# (no GeneratorExp / Try / Raise / sys => no frame, generator, or traceback object
-# could be built). GeneratorExp is now in the subset, so a generator object CAN be
-# constructed and this list is the live guard rather than defense-in-depth: it is
-# what keeps ``(x for x in y).gi_frame.f_globals`` unreachable. Do not prune it.
-# Try / Raise / sys remain excluded, so frames and tracebacks still cannot be
-# obtained by any other route.
+# (``f_globals``/``f_builtins``). GeneratorExp is in the subset, so a generator
+# object CAN be constructed, and this list is what keeps
+# ``(x for x in y).gi_frame.f_globals`` unreachable. Do not prune it.
+#
+# Try is allowed now (Task 8), so ``except E as e`` gives a program an exception
+# object. The guards on that object are: ``__traceback__`` (and every other
+# underscore attribute) by the prefix rule, ``tb_frame`` and ``tb_next`` here for
+# a traceback reached by any route (``e.with_traceback(None)`` returns the
+# exception, not a traceback), ``mro`` here for the exception class, and ``obj``
+# here because ``AttributeError.obj`` holds the object that lacked the
+# attribute, which can be any object, a module included. ``name``, ``path`` and
+# ``args`` stay allowed: ``ImportError.name``/``.path`` are strings, and ``name``
+# is a ``Path`` member. Raise and sys remain excluded.
 DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     "f_globals", "f_builtins", "f_locals", "f_code", "f_back",
     "gi_frame", "gi_code", "cr_frame", "cr_code",
@@ -98,6 +109,8 @@ DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     "format", "format_map",
     # Class.mro() walks to `object` and from there to every subclass.
     "mro",
+    # AttributeError.obj: the object that lacked the attribute (any object).
+    "obj",
 })
 
 ALLOWED_BUILTINS: frozenset[str] = allowed_builtin_names()

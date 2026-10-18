@@ -43,9 +43,10 @@ class TestForbiddenNodes:
         assert any("While" in e for e in result.errors)
 
     def test_rejects_try(self):
+        # Task 8: Try is an allowed node; a bare except stays rejected by safety.except-base.
         result = validate("try:\n    x = 1\nexcept:\n    pass")
         assert not result.valid
-        assert any("Try" in e for e in result.errors)
+        assert "safety.except-base" in {v.rule_id for v in result.violations}
 
     def test_rejects_raise(self):
         result = validate("raise ValueError('bad')")
