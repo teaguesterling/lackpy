@@ -108,3 +108,38 @@ def test_import_rebinding_by_def_also_fires_safety_import():
 def test_def_returns_lambda_fires_both_rules():
     assert {"style.def-returns-function", "style.lambda-position"} <= _ids(
         validate("def f():\n    return lambda: 1"))
+
+
+# --- fix round 1 ---
+
+def test_duplicate_def_blocks_mutual_recursion():
+    program = "def g():\n    return 1\ndef h():\n    return g()\ndef g():\n    return h()\nx = h()"
+    result = validate(program)
+    assert "style.def-shadow" in _ids(result)
+    msg = next(v.message for v in result.violations if v.rule_id == "style.def-shadow")
+    assert "line 1" in msg and "line 5" in msg
+
+
+@pytest.mark.parametrize("program", [
+    "def f(x):\n    if x:\n        return 1\n    else:\n        return 0",
+    "def f(x):\n    if x:\n        return 1\n    return 0",
+    "def f(x):\n    if x:\n        return 1\n    elif x > 1:\n        return 2\n    else:\n        return 3",
+    "def f(x):\n    x.append(1)",
+])
+def test_return_mode_valid_paths(program):
+    assert validate(program).valid, validate(program).violations
+
+
+@pytest.mark.parametrize("program", [
+    "def f(x):\n    if x:\n        return 1",
+    "def f(x):\n    if x:\n        return 1\n    elif x > 1:\n        return 2",
+    "def f(x):\n    for i in x:\n        return i",
+    "def f(x):\n    if x:\n        return 1\n    else:\n        pass",
+])
+def test_return_mode_fall_through_invalid(program):
+    assert "style.def-return-mode" in _ids(validate(program))
+
+
+def test_def_before_use_rationale_is_accurate():
+    from lackpy.lang.registry import rule_by_id
+    assert "direct call" in rule_by_id("style.def-before-use").rationale

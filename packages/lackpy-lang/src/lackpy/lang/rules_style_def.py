@@ -40,6 +40,16 @@ def _own_returns(fn: ast.FunctionDef):
             stack.extend(ast.iter_child_nodes(node))
 
 
+def _ends_valued(body: list[ast.stmt]) -> bool:
+    """Whether every path through ``body`` ends in ``return <value>``."""
+    last = body[-1] if body else None
+    if isinstance(last, ast.Return):
+        return last.value is not None
+    if isinstance(last, ast.If):
+        return bool(last.orelse) and _ends_valued(last.body) and _ends_valued(last.orelse)
+    return False
+
+
 def _is_constant(node: ast.AST | None) -> bool:
     if isinstance(node, ast.Constant):
         return node.value is None or isinstance(node.value, (bool, int, float, complex, str))
@@ -77,7 +87,7 @@ def check_def_top_level(ctx: Context) -> list[Violation]:
 @register(
     "style.def-before-use", "style",
     summary="Call a program function only after its def ends.",
-    rationale="Order shows the dependencies. It also rules out recursion, "
+    rationale="Order shows the dependencies. It also removes recursion through direct calls, "
               "because a function is not complete inside its own body.",
     bad="def f(n):\n    return f(n)",
     good="def f(n):\n    return n\nx = f(1)",
@@ -125,9 +135,9 @@ def check_def_signature(ctx: Context) -> list[Violation]:
 
 @register(
     "style.def-return-mode", "style",
-    summary="Return a value from every return statement, or from none.",
+    summary="Return a value on every path, or never return a value.",
     rationale="A function that sometimes returns a value and sometimes None makes the caller "
-              "check both.",
+              "check both. A path that ends without a return gives None.",
     bad="def f(x):\n    if x:\n        return 1\n    return",
     good="def f(x):\n    if x:\n        return 1\n    return 0",
 )
@@ -140,6 +150,11 @@ def check_def_return_mode(ctx: Context) -> list[Violation]:
                 "style.def-return-mode", fn.lineno,
                 f"Function '{fn.name}' at line {fn.lineno} mixes return with a value "
                 f"and return without a value"))
+        elif returns and returns[0].value is not None and not _ends_valued(fn.body):
+            out.append(Violation(
+                "style.def-return-mode", fn.lineno,
+                f"Function '{fn.name}' at line {fn.lineno} returns a value on some paths "
+                f"but can end without one"))
     return out
 
 
@@ -184,17 +199,27 @@ def check_def_length(ctx: Context) -> list[Violation]:
 
 @register(
     "style.def-shadow", "style",
-    summary="Do not name a def after a builtin or an import binding.",
+    summary="Do not name a def after a builtin or an import binding. Define a name once.",
     rationale="A def that reuses a builtin name changes what that name means for the rest "
-              "of the program.",
+              "of the program. A second def of one name changes what earlier calls reach.",
     bad="def sorted(x):\n    return x",
     good="def sort_rows(x):\n    return x",
 )
 def check_def_shadow(ctx: Context) -> list[Violation]:
-    return [
+    out = [
         Violation("style.def-shadow", fn.lineno,
                   f"Function name '{fn.name}' at line {fn.lineno} reuses a builtin or imported name")
         for fn in _all_defs(ctx)
         if fn.name in ALLOWED_BUILTINS or fn.name in ctx.member_bindings
         or fn.name in ctx.module_bindings
     ]
+    # The last def is the one bound at run time, so a second def of a name can make
+    # earlier "defined before use" calls reach a different function.
+    first = _top_level_defs(ctx.tree)
+    for stmt in ctx.tree.body:
+        if isinstance(stmt, ast.FunctionDef) and first[stmt.name] is not stmt:
+            out.append(Violation(
+                "style.def-shadow", stmt.lineno,
+                f"Function '{stmt.name}' is defined twice: at line {first[stmt.name].lineno} "
+                f"and at line {stmt.lineno} (define a name once)"))
+    return out
