@@ -8,6 +8,7 @@ ALLOWED_NODES: set[type] = {
     # Structural
     ast.Module, ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign,
     ast.For, ast.If, ast.With, ast.withitem,
+    ast.Assert, ast.Continue, ast.Break, ast.Pass,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
     ast.List, ast.Dict, ast.Tuple, ast.Set,
@@ -28,6 +29,7 @@ ALLOWED_NODES: set[type] = {
     ast.Load, ast.Store, ast.Del,
     # Operators
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.FloorDiv,
+    ast.BitAnd, ast.BitOr, ast.BitXor,
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
     ast.Is, ast.IsNot, ast.In, ast.NotIn,
     ast.And, ast.Or, ast.Not, ast.USub, ast.UAdd,
@@ -42,7 +44,6 @@ FORBIDDEN_NODES: set[type] = {
     ast.Global, ast.Nonlocal,
     ast.Yield, ast.YieldFrom,
     ast.Await, ast.AsyncFor, ast.AsyncWith,
-    ast.Assert,
     ast.Delete,
     ast.Match,
 }

@@ -34,8 +34,10 @@ class TestForbiddenNodes:
         assert any("ClassDef" in e for e in result.errors)
 
     def test_rejects_standalone_lambda(self):
-        """Lambda is only allowed as key= argument, not standalone."""
-        assert not validate("x = lambda: 1", allowed_names=set()).valid
+        """A lambda assigned to a name stays rejected (style.lambda-assign)."""
+        result = validate("x = lambda: 1", allowed_names=set())
+        assert not result.valid
+        assert "style.lambda-assign" in [v.rule_id for v in result.violations]
 
     def test_rejects_while(self):
         result = validate("while True:\n    pass")
@@ -58,9 +60,10 @@ class TestForbiddenNodes:
         assert any("Global" in e for e in result.errors)
 
     def test_rejects_assert(self):
+        """An assert needs a message (style.assert-message)."""
         result = validate("assert True")
         assert not result.valid
-        assert any("Assert" in e for e in result.errors)
+        assert "style.assert-message" in [v.rule_id for v in result.violations]
 
     def test_rejects_delete(self):
         result = validate("del x")
@@ -226,9 +229,11 @@ class TestLambdaRestriction:
         assert not result.valid
         assert any("key= argument" in e for e in result.errors)
 
-    def test_rejects_lambda_as_positional_arg(self):
-        result = validate("sorted([1, 2], lambda x: x)", allowed_names=set())
-        assert not result.valid
+    def test_lambda_positional_arg_only_for_sorted_min_max(self):
+        # Task 6: a positional lambda is allowed for sorted/min/max only.
+        assert validate("sorted([1, 2], lambda x: x)", allowed_names=set()).valid
+        result = validate("list([1, 2], lambda x: x)", allowed_names=set())
+        assert "style.lambda-position" in [v.rule_id for v in result.violations]
 
     def test_rejects_lambda_in_non_key_kwarg(self):
         result = validate(

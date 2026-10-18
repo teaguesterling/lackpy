@@ -29,10 +29,9 @@ def test_allowed_forms_validate(program):
 
 
 def test_single_underscore_loop_target_has_no_safety_violation():
-    # The brief's program, verbatim. style.for-iter rejects a list literal
-    # until Task 6 changes that rule, so only the safety tier is asserted here.
+    # The brief's program, verbatim. Task 6 loosened style.for-iter, so it is fully valid.
     result = validate("for _, v in [(1, 2)]:\n    print(v)")
-    assert not [v for v in result.violations if v.rule_id.startswith("safety.")], result.violations
+    assert result.valid, result.violations
 
 
 @pytest.mark.parametrize("program, rule_id", [

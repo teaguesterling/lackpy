@@ -3,9 +3,6 @@
 Each check keeps the exact message string of the step it came from in
 ``validate()``. ``src/lackpy/infer/distill.py`` and ``tests/test_distill.py``
 match on those strings. Registration order is run order.
-
-``style.for-iter`` and ``style.lambda-position`` live here for now, with their
-old behaviour. A later task changes them.
 """
 
 from __future__ import annotations
@@ -488,45 +485,4 @@ def check_call_target(ctx: Context) -> list[Violation]:
                 f"Unsupported call target ({type(node.func).__name__}) at line "
                 f"{node.lineno}: only named functions and method calls are allowed",
             ))
-    return out
-
-
-@register(
-    "style.for-iter", "style",
-    summary="A for loop iterates over a function call or a variable.",
-    rationale="A named iterable shows what the loop reads.",
-    bad="for c in 'abc':\n    print(c)",
-    good="items = [1, 2]\nfor i in items:\n    print(i)",
-)
-def check_for_iter(ctx: Context) -> list[Violation]:
-    out = []
-    for node in ast.walk(ctx.tree):
-        if isinstance(node, ast.For) and not isinstance(node.iter, (ast.Call, ast.Name)):
-            out.append(Violation(
-                "style.for-iter", node.lineno,
-                f"For-loop at line {node.lineno} must iterate over "
-                f"a function call or variable",
-            ))
-    return out
-
-
-@register(
-    "style.lambda-position", "style",
-    summary="Use lambda only as the value of a key= argument.",
-    rationale="A lambda in a key= argument is short and has one job. "
-              "A lambda in other places hides logic.",
-    bad="f = lambda x: x",
-    good="words = sorted(['b', 'a'], key=lambda w: w)",
-)
-def check_lambda_position(ctx: Context) -> list[Violation]:
-    out = []
-    for node in ast.walk(ctx.tree):
-        if isinstance(node, ast.Lambda):
-            parent = ctx.parents.get(id(node))
-            if not (isinstance(parent, ast.keyword) and parent.arg == "key"):
-                out.append(Violation(
-                    "style.lambda-position", node.lineno,
-                    f"Lambda at line {node.lineno} is only allowed as key= argument "
-                    f"(e.g., key=lambda x: x['field'])",
-                ))
     return out
