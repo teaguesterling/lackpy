@@ -24,7 +24,7 @@ def test_functiondef_hint():
 def test_lambda_hint():
     errors = ["Forbidden AST node: Lambda at line 1"]
     result = enrich_errors(errors, "")
-    assert any("sort_by" in h for h in result)
+    assert not any("sort_by" in h for h in result)
 
 
 def test_import_hint():

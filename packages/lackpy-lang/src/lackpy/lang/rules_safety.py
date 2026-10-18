@@ -100,7 +100,7 @@ def check_forbidden_name(ctx: Context) -> list[Violation]:
 #     "{0.__init__.__globals__[SECRET]}".format(obj) read a module global
 #     through it. Any future builtin that takes an attribute name as DATA
 #     belongs on that deny list too -- that, not the string literal, is the
-#     sink. sort_by is the other one, and rejects underscore keys at runtime.
+#     sink. sort_by was the other one; it has been removed.
 #
 # It was also incomplete on its own terms — "_" + "_class_" + "_" evaluates to
 # the same string and passed — so it never carried the weight it appeared to.

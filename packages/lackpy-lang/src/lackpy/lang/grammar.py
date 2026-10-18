@@ -2,6 +2,8 @@
 
 import ast
 
+from .builtins_policy import allowed_builtin_names
+
 ALLOWED_NODES: set[type] = {
     # Structural
     ast.Module, ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign,
@@ -88,13 +90,8 @@ DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     # reason format is not: their interpolations are real AST expressions and go
     # through the attribute rule like anything else.
     "format", "format_map",
+    # Class.mro() walks to `object` and from there to every subclass.
+    "mro",
 })
 
-ALLOWED_BUILTINS: frozenset[str] = frozenset({
-    "len", "sorted", "reversed", "enumerate", "zip", "range",
-    "min", "max", "sum", "any", "all", "abs", "round",
-    "str", "int", "float", "bool", "list", "dict", "set", "tuple",
-    "isinstance", "print",
-    "next",
-    "sort_by",
-})
+ALLOWED_BUILTINS: frozenset[str] = allowed_builtin_names()

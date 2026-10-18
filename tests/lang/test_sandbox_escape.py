@@ -231,8 +231,9 @@ class TestDunderStringsAreNotASink:
     attributes named by the *format string*, so
     ``"{0.__init__.__globals__[SECRET]}".format(obj)`` validated and returned a
     module global. The rule that actually holds the line is not "reject dunder
-    strings" but "no sink resolves a string as an attribute name" -- format,
-    format_map and sort_by are those sinks, and each is closed by name below.
+    strings" but "no sink resolves a string as an attribute name" -- format
+    and format_map are those sinks (sort_by was a third and has been removed), and
+    each is closed by name below.
     """
 
     @pytest.mark.parametrize("program", [

@@ -190,10 +190,10 @@ class TestValidPrograms:
         assert not result.valid
         assert any("Parse error" in e for e in result.errors)
 
-    def test_sort_by_allowed(self):
+    def test_sort_by_rejected(self):
         result = validate("sort_by([{'a': 1}], 'a')")
-        assert result.valid
-        assert "sort_by" in result.calls
+        assert not result.valid
+        assert any(v.rule_id == "safety.unknown-call" for v in result.violations)
 
 
 class TestLambdaRestriction:
@@ -204,12 +204,13 @@ class TestLambdaRestriction:
         )
         assert result.valid
 
-    def test_allows_lambda_in_sort_by(self):
+    def test_sort_by_with_lambda_rejected(self):
         result = validate(
             "sort_by([{'a': 1}], key=lambda x: x['a'])",
             allowed_names=set(),
         )
-        assert result.valid
+        assert not result.valid
+        assert any(v.rule_id == "safety.unknown-call" for v in result.violations)
 
     def test_allows_lambda_with_min_max(self):
         result = validate(

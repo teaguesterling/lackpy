@@ -56,8 +56,8 @@ def test_key_builtins_present():
     assert "range" in ALLOWED_BUILTINS
 
 
-def test_sort_by_in_builtins():
-    assert "sort_by" in ALLOWED_BUILTINS
+def test_sort_by_not_in_builtins():
+    assert "sort_by" not in ALLOWED_BUILTINS
 
 
 def test_denied_attributes_cover_non_underscore_frame_internals():
