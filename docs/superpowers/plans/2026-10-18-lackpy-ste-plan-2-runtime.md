@@ -154,7 +154,14 @@
   4. Default when no rule matches: read and write are allowed inside `workspace` and `extra_dirs`. Everything else is refused.
   5. Symlinks: an allow must match both the requested path and `resolve()`d target. A deny matches either. A write refuses when the final component is a symlink.
   6. Case sensitivity is not documented upstream. Match case-sensitively and say so in the docstring.
-- `load_policy(workspace: Path, *, home: Path = Path.home()) -> PathPolicy` reads, and unions:
+- `load_policy(workspace: Path, *, home: Path = Path.home(), managed: Path | None = MANAGED_SETTINGS) -> PathPolicy` reads, and unions (Teague's ruling 4, 2026-10-18: managed settings included):
+  - Claude Code's managed settings, from `https://code.claude.com/docs/en/managed-settings` (fetched 2026-10-18). `MANAGED_SETTINGS` is chosen by `sys.platform`:
+    - Linux and WSL: `/etc/claude-code/managed-settings.json`
+    - macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
+    - Windows: `C:\Program Files\ClaudeCode\managed-settings.json`. Do not read the legacy `C:\ProgramData` path.
+  - The `managed-settings.d/` directory beside that file is merged after it: every `*.json` file in alphabetical order. Hidden files are skipped. Permission lists union, with duplicates removed.
+  - When any managed source sets `allowManagedPermissionRulesOnly: true`, only managed rules apply. The user, project and local `allow`, `ask` and `deny` rules, and the `[paths]` table, are ignored for rules. `additionalDirectories` from them still define the default-readable directories. That last part is a design call (Claude); the docs speak of rules only.
+  - Tests use a temporary `managed` path; they never read the real system file.
   - `home/.claude/settings.json`
   - `workspace/.claude/settings.json`
   - `workspace/.claude/settings.local.json`
@@ -234,13 +241,22 @@
 
 **Interfaces:**
 - **Default path:** `run_program(program, *, params=None, profile=None, ...)` with no profile runs in the new namespace (Task 2), with `load_policy(workspace)` as its `PathPolicy`. It validates with `allowed_names=set()`. No kit tools are bound.
-- **Compatibility, a design call (Claude):** a profile that names kit tools still binds them, as extra callables in the new namespace. This keeps literate, plucker and pluckit users working. The MCP and CLI descriptions stop advertising profiles.
-  - The MCP tool signatures keep `profile` and `extra_tools` as optional parameters, so existing callers do not break.
-  - `tests/test_mcp_contract.py` pins the descriptions. Change their text.
+- **The kit is removed from the runtime (Teague's ruling 5, 2026-10-18).**
+  - Delete the four builtin kit tools. That means `read_file`, `find_files`, `write_file` and `edit_file` go from `src/lackpy/sources/builtins.py`, `src/lackpy/tools/providers/builtin.py` and `sources/default_tools.toml`.
+  - `RestrictedRunner`, `LackpyService` and `PythonInterpreter` bind no tool callables. A profile now selects a model, its parameters and rules only. A profile that names tools is an error, with the message `tool kits were removed in lackpy stepy100; use pathlib.Path (docs/concepts/paths.md)`.
+  - Anything that depended on kit binding, such as the literate interpreter's tool layer, plucker or pluckit, breaks until it migrates, as ruled. Do not hide that breakage:
+    - Mark each newly failing test outside the files this task owns `xfail(strict=True, reason="kit removed in stepy100 Plan 2; <interpreter> migration pending")`.
+    - Write `~/.claude/inbox/lackpy-interpreter-migration.md`, listing every xfailed test by interpreter.
+  - The MCP and CLI drop `extra_tools` and the tool half of `profile`.
+  - `tests/test_mcp_contract.py` pins the tool names and descriptions. Change them in this task's Step 1.
 - **`PythonInterpreter`** uses the same namespace and policy (it shares `RestrictedRunner`).
 - **The `os.chdir` model stays** for tools that use relative paths. The `Path` stand-in resolves against the workspace explicitly, whatever the cwd.
 
-- [ ] **Step 1: Flip the expectations.** These are the tests that assert the kit is the default namespace, and the MCP description text. Name each in the commit.
+- [ ] **Step 1: Flip the expectations.**
+  - The tests that assert kit tools exist, or are the default namespace.
+  - The MCP and CLI parameters and description text.
+  - Add `test_profile_naming_tools_is_an_error`.
+  - Name each flipped test in the commit.
 - [ ] **Step 2: Run, and expect failure.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: blq `test-all`.**
