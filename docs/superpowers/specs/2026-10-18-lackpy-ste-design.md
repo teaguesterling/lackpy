@@ -1003,3 +1003,43 @@ main causes:
   before translation to `Path`. In 307 it is the only non-vocabulary violation.
 
 `scripts/corpus/blockers.py` reproduces these figures.
+
+### Changes from the final whole-branch review
+
+- `finally` is now safety tier (`safety.try-finally`). A `return` or `continue`
+  in `finally` discards an in-flight exception. A style waiver therefore let a
+  program swallow RecursionError, and the review measured a hang. `else` stays
+  style (`style.try-else`).
+- Decorators are now safety tier (`safety.node`). A waived decorator ran a tool
+  at def time, and the call was hidden from `calls`.
+- `safety.node` rejects `break` and `continue` outside a `for` body in the same
+  function scope. `validate()` compiles a rule-clean program, and a compile
+  error becomes `safety.parse`.
+- `RestrictedRunner.run` returns a failed result on a compile error. It no
+  longer raises.
+- `ValidationResult.calls` is advisory. It lists named calls on a best-effort
+  basis, and it is not a soundness boundary. Plan 3 derives effects soundly.
+- `tests/lang/test_waive_everything.py` checks that dangerous programs stay
+  invalid when every style rule is waived.
+
+### Carried into Plan 2 as gate requirements
+
+Plan 2 must turn each item into a test that passes before `lackpy-ste` merges.
+
+1. The module proxies close `statistics.sys`, and the `Path` proxy closes
+   `Path('x').parser.os`. On Python 3.13 that attribute is the real `os` module.
+2. The proxies refuse `setattr` on member bindings. Today these validate:
+   `C = Counter; C.most_common = len`, and `[Path][0].read_text = print`.
+3. The trace records a `BaseException` refusal. `src/lackpy/run/trace.py`
+   catches `Exception` only.
+4. `RestrictedRunner.run` never raises. A validated 3,000-deep unary expression
+   raises RecursionError from `ast.fix_missing_locations`. `validate()` raises
+   MemoryError from `ast.parse` at a depth of about 50,000.
+5. Decide if `TimeoutError` from `src/lackpy/run/bridge.py` becomes a refusal.
+   Today a program can catch it and retry a hung tool.
+6. Define `__file__` deliberately. `Path(__file__).read_text()` validates.
+7. Decide if `ExecutionResult.variables` may carry function objects.
+8. `datetime.UTC` exists only on Python 3.11 and later. `lackpy-lang` still
+   claims Python 3.10.
+9. Plan 2 replaces `tests/run/test_import_fail_closed.py`. That test pins the
+   fact that imports fail closed until the proxies exist.
