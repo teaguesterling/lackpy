@@ -40,3 +40,44 @@ Definition: distinct non-empty bodies, sorted, each UTF-8 encoded and followed b
 `coverage.py` checks both on the default snapshot (mismatch: stderr message, exit 3). With
 `--snapshot PATH` it skips the check. Its JSON always carries `snapshot_rows` and `snapshot_sha256`.
 `extract.py` without `--calls` warns on stderr when the count differs from 7,003.
+
+## Plan 1 close-out figures (2026-10-18)
+
+Final run (blq `corpus`, run `corpus:93`): snapshot 7,003 rows, sha `fc7ba975c23d`; 6,984 parsed;
+**608 admitted (8.7%)**; **3,030 structural (43.4%)**. Design section 4.3 predicted 93.9% structural.
+
+Per task, from the commit subjects (last figures of the task):
+
+| Task | Change | Admitted | Structural |
+|---|---|---:|---:|
+| 1 | Harness, baseline | 7 | 2,550 |
+| 2 | Rule registry (no behaviour change) | 7 | 2,550 |
+| 3 | Classified builtins; `sort_by` removed; `mro` denied | 7 | 2,550 |
+| 4 | Dictionary, imports, module attributes | 516 | 2,550 |
+| 5 | Underscore names, dunder allowlist | 516 | 2,545 |
+| 6 | Simple constructs loosened | 640 | 3,444 |
+| 7 | Function rules | 658 | 3,648 |
+| 8 | `try` rules | 658 | 3,654 |
+| 9 | STE shape rules | 608 | 3,030 |
+| 10 | `# ste:` waivers | 608 | 3,030 |
+| 11 | Style guide (docs only, no figure in subject) | 608 | 3,030 |
+
+Task 6 figures come from `f642431`; its later fix `94a399c` carries none. Task 11 figures are
+from the Task 10 commit and the final run.
+
+### Blockers (`blockers.py`)
+
+`blockers.py [--top N] [--json]` ranks non-vocabulary rules. "Alone" means the program's only
+non-vocabulary violation is that rule: loosening the rule moves the program into "structural".
+"Alone (strict)" means no other violation of any kind: loosening admits the program.
+
+| Rule | Programs | Alone | Alone (strict) |
+|---|---:|---:|---:|
+| `style.assert-message` | 2,511 | 2,346 | 799 |
+| `style.call-nesting` | 781 | 307 | 4 |
+| `style.io-position` | 422 | 104 | 32 |
+| `safety.except-base` | 366 | 70 | 0 |
+| `safety.node` | 290 | 51 | 12 |
+
+Dropping all five would give 6,258 structural (89.6%). `safety.except-base` and `safety.node`
+are safety tier, so only the first three are candidates for loosening.
