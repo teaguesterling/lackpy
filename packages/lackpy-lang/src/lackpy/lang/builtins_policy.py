@@ -25,14 +25,22 @@ _ALLOWED_FUNCTIONS: tuple[str, ...] = (
     "frozenset", "hex",
 )
 
-ALLOWED: dict[str, str] = {name: "function" for name in _ALLOWED_FUNCTIONS}
-ALLOWED.update({
-    name: "exception"
-    for name in dir(_builtins)
-    if isinstance(getattr(_builtins, name), type)
-    and issubclass(getattr(_builtins, name), Exception)
-})
-ALLOWED["ExceptionGroup"] = "exception"
+def _build_allowed() -> dict[str, str]:
+    allowed = {name: "function" for name in _ALLOWED_FUNCTIONS}
+    allowed.update({
+        name: "exception"
+        for name in dir(_builtins)
+        if isinstance(getattr(_builtins, name), type)
+        and issubclass(getattr(_builtins, name), Exception)
+    })
+    # ExceptionGroup exists only from Python 3.11; this package supports 3.10.
+    if hasattr(_builtins, "ExceptionGroup"):
+        allowed["ExceptionGroup"] = "exception"
+    return allowed
+
+
+ALLOWED: dict[str, str] = _build_allowed()
+
 
 # name -> reason category. Written out name by name; see the module docstring.
 DENIED: dict[str, str] = {

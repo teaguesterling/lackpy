@@ -47,3 +47,13 @@ def test_sort_by_is_gone():
     result = validate("sort_by([], 'a')")
     assert not result.valid
     assert any(v.rule_id == "safety.unknown-call" for v in result.violations)
+
+
+def test_allowed_construction_survives_missing_exception_group(monkeypatch):
+    # ExceptionGroup exists only from Python 3.11; the lang package supports 3.10.
+    from lackpy.lang.builtins_policy import _build_allowed
+
+    monkeypatch.delattr(builtins, "ExceptionGroup")
+    built = _build_allowed()
+    assert "ExceptionGroup" not in built
+    assert "KeyError" in built

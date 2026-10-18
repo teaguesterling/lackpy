@@ -34,6 +34,10 @@ def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
             "Call find_definitions() to locate functions, edit() to modify them."
         )
 
+    # Lambda usage outside key=
+    if "lambda" in error_text:
+        hints.append("lambda is allowed only as key= for sorted, min or max.")
+
     # Import attempts
     if "import" in error_text:
         hints.append("All needed functions are already available in the namespace.")
