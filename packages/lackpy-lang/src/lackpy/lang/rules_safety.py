@@ -233,7 +233,47 @@ def check_import(ctx: Context) -> list[Violation]:
                     f"Forbidden AST node: {type(node).__name__} at line {node.lineno}",
                     hint=hint_for(*subjects),
                 ))
+    out.extend(_rebindings(ctx.tree))
     return out
+
+
+def _rebindings(tree: ast.Module) -> list[Violation]:
+    """A name bound by an import is never bound again, anywhere in the program.
+
+    A rebinding would hide what a call reaches: after ``Counter = read_file``,
+    ``Counter('x')`` is a tool call that safety.unknown-call admits and ``calls``
+    leaves out. A second import of the same name is a rebinding too.
+    """
+    first: dict[str, int] = {}
+    found: list[tuple[str, int]] = []
+    imports = sorted((n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))),
+                     key=lambda n: (n.lineno, n.col_offset))
+    for stmt in imports:
+        for a in stmt.names:
+            if a.name == "*":
+                continue
+            name = a.asname or a.name.split(".")[0]
+            if name in first:
+                found.append((name, stmt.lineno))
+            else:
+                first[name] = stmt.lineno
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            name = node.id  # assignment, for, comprehension, with-as, starred targets
+        elif isinstance(node, ast.arg):
+            name = node.arg  # def and lambda parameters
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            name = node.name
+        else:
+            continue
+        if name in first:
+            found.append((name, node.lineno))
+    return [Violation("safety.import", line,
+                      f"Rebinding of imported name: '{name}' at line {line} "
+                      f"(imported at line {first[name]})")
+            for name, line in sorted(found, key=lambda f: f[1])]
 
 
 @register(

@@ -117,3 +117,45 @@ def test_member_call_after_import_on_same_line():
     # Order is by source position, not by line: a call after ``;`` follows the import.
     result = validate("from collections import Counter; c = Counter([1])")
     assert result.valid, result.errors
+
+
+@pytest.mark.parametrize("program", [
+    # measured: each validated with calls=[] and ran a hidden tool call
+    "from collections import Counter\nCounter = read_file\nx = Counter('secret')",
+    "from collections import Counter\nCounter, y = read_file, 1\nx = Counter('s')",
+    "from collections import Counter\nx = [Counter('s') for Counter in [read_file]]",
+    "from collections import Counter\nCounter = eval\nCounter('1')",
+    # module binding plus member binding on one name
+    "import collections as Counter\nfrom collections import Counter",
+    # the same import twice: one name has one binding
+    "from collections import Counter\nfrom collections import Counter",
+    "import json\nimport json",
+    # assignment forms
+    "import json\njson += 1",
+    "from collections import Counter\nCounter: int = 1",
+    "from collections import Counter\na, *Counter = [1, 2]",
+    # loop and comprehension targets
+    "from collections import Counter\nfor Counter in [1]:\n    pass",
+    "from collections import Counter\nx = {Counter for Counter in [1]}",
+    "from collections import Counter\nx = sorted(Counter for Counter in [1])",
+    # with ... as
+    "from collections import Counter\nwith open_thing() as Counter:\n    pass",
+    # parameters and def names
+    "from collections import Counter\nx = sorted([1], key=lambda Counter: Counter)",
+    "from collections import Counter\ndef f(Counter):\n    return 1",
+    "from collections import Counter\ndef Counter():\n    return 1",
+    # except ... as (Try is still forbidden; this covers Task 8)
+    "from collections import Counter\ntry:\n    x = 1\nexcept ValueError as Counter:\n    pass",
+])
+def test_imported_name_is_never_rebound(program):
+    result = validate(program)
+    rebinds = [v for v in result.violations
+               if v.rule_id == "safety.import" and "imported at line" in v.message]
+    assert rebinds, result.violations
+    assert "'Counter'" in rebinds[0].message or "'json'" in rebinds[0].message
+
+
+def test_rebind_message_names_the_import():
+    result = validate("from collections import Counter\nCounter = read_file")
+    messages = [v.message for v in result.violations if v.rule_id == "safety.import"]
+    assert messages == ["Rebinding of imported name: 'Counter' at line 2 (imported at line 1)"]
