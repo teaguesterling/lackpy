@@ -148,3 +148,48 @@ class TestCompileFailure:
         result = runner.run("a, *b, *c = [1, 2, 3]", {})
         assert not result.success
         assert "Compile error" in result.error
+
+
+class TestRuntimeNamespace:
+    """stepy100 Task 2: the runner builds the namespace and never raises."""
+
+    def test_runs_without_a_kit_namespace(self, runner):
+        result = runner.run("x = [1, 2]\nlen(x)")
+        assert result.success, result.error
+        assert result.output == 2
+
+    def test_variables_exclude_namespace_names(self, runner):
+        result = runner.run("x = type(3).__name__")
+        assert result.success, result.error
+        assert result.variables == {"x": "int"}
+
+    def test_file_is_the_program_file(self, runner):
+        result = runner.run("__file__", program_file="/w/p.py")
+        assert result.output == "/w/p.py"
+
+    def test_refusal_is_a_failed_result(self, runner):
+        result = runner.run("type(3).mro")
+        assert not result.success
+        assert result.error == "type(...).mro is not allowed in lackpy"
+
+    def test_refusal_escapes_except_exception(self, runner):
+        result = runner.run("try:\n    type(3).mro\nexcept Exception:\n    pass")
+        assert not result.success
+        assert "not allowed in lackpy" in result.error
+
+    def test_deep_unary_expression_does_not_raise(self, runner):
+        # Design §8, gate 4: a 3,000-deep expression is a failed result.
+        result = runner.run("-" * 3000 + "1")
+        assert not result.success
+        assert result.error
+
+    def test_kit_namespace_tools_run_inside_the_new_builtins(self, runner, mock_namespace):
+        result = runner.run("open('x')", mock_namespace)
+        assert not result.success
+
+    def test_params_cannot_replace_the_builtins(self, runner):
+        # A param or kit tool named like a namespace global must not replace it.
+        import builtins
+        result = runner.run("open", params={"__builtins__": vars(builtins)})
+        assert not result.success
+        assert "open" in result.error

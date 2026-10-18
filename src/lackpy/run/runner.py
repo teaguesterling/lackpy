@@ -1,27 +1,30 @@
-"""v1 restricted runner: AST compile + restricted exec with traced namespace."""
+"""Restricted runner: AST compile, then exec in the runtime namespace."""
 
 from __future__ import annotations
 
 import ast
-import builtins as _builtins_mod
 from typing import Any, Callable
 
-from ..lang.grammar import ALLOWED_BUILTINS
 from .base import ExecutionResult
+from .namespace import build_namespace
+from .refusal import LackpyRefusal
 from .trace import Trace, make_traced
 
 
 class RestrictedRunner:
     """Execute validated lackpy programs via AST compilation.
 
-    Programs are compiled from validated ASTs and run with empty
-    ``__builtins__`` and a controlled namespace. Each tool call is
-    wrapped to record timing and results in the trace.
+    Programs run in the namespace that :func:`build_namespace` builds: the
+    ``builtins_policy.ALLOWED`` builtins and nothing else. Kit tools, when a
+    kit namespace is given, are wrapped to record timing and results in the
+    trace. The runner never raises for anything a program does.
     """
 
-    def run(self, program: str, namespace: dict[str, Callable],
+    def run(self, program: str, namespace: dict[str, Callable] | None = None,
             params: dict[str, Any] | None = None,
-            kibitzer_session: Any = None) -> ExecutionResult:
+            kibitzer_session: Any = None, *,
+            program_file: str | None = None,
+            path_policy: "PathPolicy | None" = None) -> ExecutionResult:
         """Compile and execute a lackpy program in a restricted namespace.
 
         The program's last expression (if any) is captured as the output.
@@ -29,18 +32,20 @@ class RestrictedRunner:
 
         Args:
             program: The lackpy program source to execute.
-            namespace: Mapping of tool names to callables, injected into the
-                execution globals alongside allowed builtins.
+            namespace: Optional kit tools (name -> callable), bound as traced
+                globals. Kept for backward compatibility until stepy100 Task 7.
             params: Named parameter values to inject into the namespace.
             kibitzer_session: Optional KibitzerSession for per-call tracking.
+            program_file: The program's path, for ``__file__``.
+            path_policy: Passed to :func:`build_namespace` (unused until Task 4).
 
         Returns:
             An ExecutionResult with success, output, trace, and variables.
-            Returns a failed result on parse errors or runtime exceptions.
+            A parse, compile or runtime failure, a ``LackpyRefusal``, a
+            ``RecursionError`` or a ``MemoryError`` gives a failed result.
+            ``KeyboardInterrupt`` and ``SystemExit`` propagate: the host owns them.
         """
         trace = Trace()
-        param_names = set(params.keys()) if params else set()
-
         # Capture print() into a per-run buffer rather than letting it escape to
         # the process stdout. Binding the buffer here (not redirecting the global
         # sys.stdout) keeps capture thread-safe under the threaded execution path
@@ -52,20 +57,18 @@ class RestrictedRunner:
                              file: Any = None, flush: bool = False) -> None:
             captured.append(sep.join(str(a) for a in args) + end)
 
-        traced_ns: dict[str, Any] = {}
-        for name, fn in namespace.items():
-            traced_ns[name] = make_traced(name, fn, trace, kibitzer_session=kibitzer_session)
+        try:
+            return self._run(program, namespace or {}, params or {}, kibitzer_session,
+                             program_file, path_policy, trace, captured, _capturing_print)
+        except (Exception, LackpyRefusal) as e:
+            # Exception covers RecursionError and MemoryError (design §8, gate 4).
+            return ExecutionResult(success=False, error=str(e),
+                                   trace=trace, stdout="".join(captured))
 
-        for name in ALLOWED_BUILTINS:
-            if name == "print":
-                traced_ns[name] = _capturing_print
-            else:
-                traced_ns[name] = getattr(_builtins_mod, name)
-
-        if params:
-            for name, value in params.items():
-                traced_ns[name] = value
-
+    def _run(self, program: str, namespace: dict[str, Callable], params: dict[str, Any],
+             kibitzer_session: Any, program_file: str | None, path_policy: Any,
+             trace: Trace, captured: list[str],
+             print_fn: Callable[..., None]) -> ExecutionResult:
         try:
             tree = ast.parse(program)
         except SyntaxError as e:
@@ -90,19 +93,24 @@ class RestrictedRunner:
             # validate() compiles too, but any drift between them must not raise out of run().
             return ExecutionResult(success=False, error=f"Compile error: {e.msg} (line {e.lineno})",
                                    trace=trace)
-        exec_globals: dict[str, Any] = {"__builtins__": {}}
-        exec_globals.update(traced_ns)
 
-        try:
-            _run_validated_code(code, exec_globals)
-        except Exception as e:
-            return ExecutionResult(success=False, error=str(e), trace=trace,
-                                   stdout="".join(captured))
+        exec_globals: dict[str, Any] = {
+            name: make_traced(name, fn, trace, kibitzer_session=kibitzer_session)
+            for name, fn in namespace.items()
+        }
+        exec_globals.update(params)
+        # The namespace goes on last: no tool or param can replace __builtins__,
+        # __name__, __file__, type or print.
+        exec_globals.update(build_namespace(program_file=program_file,
+                                            path_policy=path_policy, print_fn=print_fn))
+        bound = set(exec_globals)
+
+        _run_validated_code(code, exec_globals)
 
         output = exec_globals.get("__result__")
         variables = {
             k: v for k, v in exec_globals.items()
-            if k not in traced_ns and not k.startswith("_") and k not in param_names
+            if k not in bound and not k.startswith("_")
         }
 
         return ExecutionResult(success=True, output=output, trace=trace,
