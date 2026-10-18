@@ -40,7 +40,7 @@ fledgling = ["fledgling"]
 blq = ["blq-cli"]
 kibitzer = ["kibitzer>=0.3"]
 full = ["lackpy[sandbox,mcp,fledgling,blq,kibitzer]"]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "duckdb>=1.1"]
 docs = [
     "mkdocs-material>=9",
     "mkdocstrings[python]>=0.24",
