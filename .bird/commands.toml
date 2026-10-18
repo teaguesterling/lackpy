@@ -10,3 +10,18 @@ cmd = "ruff check src tests"
 description = "Lint source and tests with ruff"
 format = "generic_lint"
 sandbox = "none"
+
+[commands.test-lang]
+cmd = ".venv/bin/python -m pytest tests/lang -q"
+description = "Run the lackpy-lang tests in the repo venv"
+format = "pytest_text"
+
+[commands.test-all]
+cmd = ".venv/bin/python -m pytest tests/ -q"
+description = "Run the full pytest suite in the repo venv"
+format = "pytest_text"
+
+[commands.corpus]
+cmd = ".venv/bin/python scripts/corpus/coverage.py --json"
+description = "Measure validator coverage over the frozen heredoc corpus"
+format = "auto"
