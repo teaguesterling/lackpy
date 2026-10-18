@@ -38,6 +38,13 @@ def _ids(result):
     "import re\ntry:\n    p = re.compile('(')\nexcept re.error:\n    p = None",
     "import re as regex\ntry:\n    p = regex.compile('(')\nexcept regex.error:\n    p = None",
     "from pathlib import Path\ntry:\n    t = Path('x').read_text()\nexcept (FileNotFoundError, UnicodeDecodeError):\n    t = ''",
+    # report, then fall through (amendment ruling: design 4.3 definite assignment)
+    'd = {}\nk = 1\ntry:\n    d.pop(k)\nexcept KeyError:\n    print("missing")',
+    'd = {}\nk = 1\ntry:\n    x = d[k]\nexcept KeyError:\n    print("missing")\n    x = 0',
+    "try:\n    print(1)\nexcept KeyError:\n    print(2)",
+    "try:\n    x = 1\nexcept KeyError:\n    x = 0\n    print(x)",
+    # assignments may also come before continue or return
+    "for i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        y = 2\n        continue",
 ])
 def test_valid(program):
     result = validate(program)
@@ -80,13 +87,13 @@ def test_valid(program):
      "style.try-handler"),
     # try-handler: the shapes themselves
     ("def f():\n    try:\n        x = 1\n    except KeyError:\n        return\n    print(x)", "style.try-handler"),
-    ("try:\n    print(1)\nexcept KeyError:\n    print(2)", "style.try-handler"),
-    ("for i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        y = 2\n        continue",
-     "style.try-handler"),
     ("for i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        break", "style.try-handler"),
+    ('d = {}\nk = 1\ntry:\n    x = d[k]\nexcept KeyError:\n    print("missing")\nprint(x)',
+     "style.try-handler"),
+    ("d = {}\nfor i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        d.clear()\n        continue",
+     "style.try-handler"),
     ("for i in [1]:\n    try:\n        x = 1\n    except KeyError:\n        pass", "style.try-handler"),
     ("try:\n    x = 1\n    y = 2\nexcept KeyError:\n    x = 0", "style.try-handler"),
-    ("try:\n    x = 1\nexcept KeyError:\n    x = 0\n    print(x)", "style.try-handler"),
     ("try:\n    for i in [1]:\n        x = i\nexcept KeyError:\n    pass", "style.try-handler"),
     # except-as names are bindings (Tasks 4 and 5 rules)
     ("try:\n    x = 1\nexcept KeyError as __x:\n    x = 0", "safety.dunder-name"),

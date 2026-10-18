@@ -144,7 +144,7 @@ def test_member_call_after_import_on_same_line():
     "from collections import Counter\nx = sorted([1], key=lambda Counter: Counter)",
     "from collections import Counter\ndef f(Counter):\n    return 1",
     "from collections import Counter\ndef Counter():\n    return 1",
-    # except ... as (Try is still forbidden; this covers Task 8)
+    # except ... as (Try is allowed since Task 8)
     "from collections import Counter\ntry:\n    x = 1\nexcept ValueError as Counter:\n    pass",
 ])
 def test_imported_name_is_never_rebound(program):

@@ -7,9 +7,11 @@ The design (section 4.3, "Rules for try") gives four handler shapes:
   - ignore:  ``except E: pass``, when the try body assigns no name
   - default: ``except E: x = <value>``, assigning every name the body assigns
 
-Print calls may come before the shape. One idea covers all four: after a try,
-every name that the body assigns is assigned in each handler, or the handler
-leaves the flow (definite assignment). ``safety.except-base`` owns the bare
+Print calls and assignments may come before the shape, and a handler may
+also end with no shape and fall through (design 4.3: handlers that report and
+fall through conform when they satisfy the same rule). One idea covers all of
+them: after a try, every name that the body assigns is assigned in each
+handler, or the handler leaves the flow (definite assignment). ``safety.except-base`` owns the bare
 ``except`` and the non-Exception classes.
 """
 
@@ -167,47 +169,49 @@ def _is_print(stmt: ast.stmt) -> bool:
             and isinstance(stmt.value.func, ast.Name) and stmt.value.func.id == "print")
 
 
+def _is_assign(stmt: ast.stmt) -> bool:
+    return isinstance(stmt, ast.Assign) or (isinstance(stmt, ast.AnnAssign) and stmt.value is not None)
+
+
 def _handler_problem(try_node: ast.Try, handler: ast.ExceptHandler,
                      body_names: set[str], ctx: Context) -> str | None:
-    """Why ``handler`` has no approved shape, or None when it has one."""
+    """Why ``handler`` has no approved shape, or None when it has one.
+
+    The handler is print calls and assignments, then optionally one of
+    ``continue``, ``return <value>`` or ``pass``. A handler that does not
+    leave the flow (no ``continue`` or ``return``) falls through, so it must
+    assign every name that the try body assigns (definite assignment).
+    """
     stmts = handler.body
-    i = 0
-    while i < len(stmts) and _is_print(stmts[i]):
-        i += 1
-    tail = stmts[i:]
-    if not tail:
-        return "it ends in print (end in continue, return <value>, pass or assignments)"
-    if len(tail) == 1 and isinstance(tail[0], ast.Continue):
+    last = stmts[-1]
+    terminal = last if isinstance(last, (ast.Continue, ast.Return, ast.Pass)) else None
+    lead = stmts[:-1] if terminal is not None else stmts
+    if not all(_is_print(s) or _is_assign(s) for s in lead):
+        return ("only print calls and assignments may come before the end "
+                "(continue, return <value>, pass, or nothing)")
+    if isinstance(terminal, ast.Continue):
         return None if _in_for_body(try_node, ctx) else "continue is only allowed in a for body"
-    if len(tail) == 1 and isinstance(tail[0], ast.Return):
-        if tail[0].value is None:
+    if isinstance(terminal, ast.Return):
+        if terminal.value is None:
             return "return must give a value"
         return None if _in_def(try_node, ctx) else "return is only allowed in a def"
-    if len(tail) == 1 and isinstance(tail[0], ast.Pass):
-        if body_names:
-            return (f"pass leaves {', '.join(sorted(body_names))} unassigned "
-                    f"(assign it, or use continue or return)")
-        return None
-    if all(isinstance(s, ast.Assign) or (isinstance(s, ast.AnnAssign) and s.value is not None)
-           for s in tail):
-        missing = body_names - _assigned_names(tail)
-        if missing:
-            return f"it does not assign {', '.join(sorted(missing))}"
-        return None
-    return ("only print calls may come before the last statement "
-            "(continue, return <value>, pass or assignments)")
+    missing = body_names - _assigned_names(lead)
+    if missing:
+        return (f"it falls through and leaves {', '.join(sorted(missing))} unassigned "
+                f"(assign it, or use continue or return)")
+    return None
 
 
 @register(
     "style.try-handler", "style",
-    summary="End each except in continue (in a for body), return <value> (in a def), "
-            "pass (when the try body assigns no name), or assignments to every name "
-            "that the try body assigns. Only print calls may come before it.",
+    summary="In each except, use only print calls and assignments, then optionally continue "
+            "(in a for body), return <value> (in a def) or pass. An except that does not "
+            "continue or return must assign every name that the try body assigns.",
     rationale="After a try, every name that the body assigns must have a value, or the "
               "handler must leave the flow. Each shape gives one sentence in the procedure, "
               "for example 'If d[k] raises KeyError, use 0 for x.'",
-    bad="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    pass\nprint(x)",
-    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    x = 0\nprint(x)",
+    bad="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    print('missing')\nprint(x)",
+    good="d = {}\ntry:\n    x = d['k']\nexcept KeyError:\n    print('missing')\n    x = 0\nprint(x)",
 )
 def check_try_handler(ctx: Context) -> list[Violation]:
     out = []
