@@ -1,8 +1,9 @@
 """The exec globals for a lackpy program (stepy100 Plan 2, Task 2).
 
 This module is part of the sandbox boundary. A program's ``__builtins__`` holds
-exactly the names in ``builtins_policy.ALLOWED``. Everything else is absent:
-``__import__`` (Task 3 adds a restricted one), ``__build_class__``, ``open``,
+the names in ``builtins_policy.ALLOWED`` and a restricted ``__import__``
+(``modules.make_restricted_import``, one per run). Everything else is absent:
+the real ``__import__``, ``__build_class__``, ``open``,
 ``eval``, ``exec``, ``compile`` and the reflection builtins. The globals add
 ``__name__``, ``__file__``, ``print`` and a ``type`` stand-in.
 """
@@ -13,6 +14,7 @@ import builtins as _builtins
 from typing import Any, Callable
 
 from ..lang import builtins_policy
+from .modules import make_restricted_import
 from .refusal import refuse
 
 
@@ -108,6 +110,7 @@ def build_namespace(*, program_file: str | None, path_policy: "PathPolicy | None
         name: getattr(_builtins, name) for name in builtins_policy.ALLOWED
     }
     program_builtins["print"] = print_fn
+    program_builtins["__import__"] = make_restricted_import()
     return {
         "__builtins__": program_builtins,
         "__name__": "__main__",

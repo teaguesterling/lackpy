@@ -53,10 +53,11 @@ class TestRefusal:
 
 class TestBuiltins:
     def test_builtins_hold_exactly_the_allowed_names(self):
-        assert set(_ns()["__builtins__"]) == set(builtins_policy.ALLOWED)
+        # Task 3 adds the restricted __import__ (ruling A).
+        assert set(_ns()["__builtins__"]) == set(builtins_policy.ALLOWED) | {"__import__"}
 
     @pytest.mark.parametrize("name", [
-        "__import__", "__build_class__", "open", "eval", "exec", "compile",
+        "__build_class__", "open", "eval", "exec", "compile",
         "getattr", "type", "object", "BaseException", "SystemExit",
     ])
     def test_denied_name_is_absent(self, name):
@@ -72,10 +73,10 @@ class TestBuiltins:
         with pytest.raises(NameError):
             _exec("class A:\n    pass")
 
-    def test_import_fails_closed(self):
-        # Ruling A: no __import__ until Task 3.
-        with pytest.raises(ImportError, match="__import__ not found"):
-            _exec("import json")
+    def test_import_is_the_restricted_one(self):
+        # Task 3: the real __import__ never reaches a program.
+        with pytest.raises(LackpyRefusal):
+            _exec("import os")
 
 
 class TestModuleNames:
