@@ -116,6 +116,12 @@ class TestPrintCapture:
         assert result.success
         assert result.stdout == "a b\nc\n"
 
+    def test_sep_and_end_none_mean_the_defaults(self, runner):
+        # Review M2: python3 prints "1 2\n" for sep=None and end=None.
+        result = runner.run("print(1, 2, sep=None)\nprint(3, end=None)\nprint(4, 5, sep=None, end=None)")
+        assert result.success, result.error
+        assert result.stdout == "1 2\n3\n4 5\n"
+
     def test_no_print_means_empty_stdout(self, runner):
         result = runner.run("files = [1, 2]\nlen(files)")
         assert result.success

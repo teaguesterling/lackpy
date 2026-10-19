@@ -227,3 +227,27 @@ def test_variables_walk_of_shared_structure_is_linear(ws):
     assert result.success, result.error
     assert "x" in result.variables
     assert elapsed < 1.0, elapsed
+
+
+def test_bytes_result_is_recorded_as_bounded_text():
+    # Review I2: raw bytes in a trace entry broke the MCP JSON serializer, and a
+    # read_bytes result went into the trace whole.
+    trace = Trace()
+    data = bytes(range(256)) * 4  # 1,024 bytes, not UTF-8
+    assert record_call(trace, "Path.read_bytes", ["img.bin"], lambda: data) is data
+    summary = trace.entries[0].result
+    assert isinstance(summary, str)
+    assert summary.startswith(repr(data[:500]))
+    assert summary.endswith("... (1024 bytes)")
+
+
+def test_short_bytes_result_is_its_repr():
+    trace = Trace()
+    record_call(trace, "Path.read_bytes", ["a"], lambda: b"\xff\x00")
+    assert trace.entries[0].result == repr(b"\xff\x00")
+
+
+def test_long_str_result_is_truncated_at_500_chars():
+    trace = Trace()
+    record_call(trace, "Path.read_text", ["a"], lambda: "x" * 1000)
+    assert trace.entries[0].result == "x" * 500 + "... (1000 chars)"

@@ -103,6 +103,15 @@ def error_text(e: BaseException) -> str:
 
 
 def _summarize(value: Any, max_len: int = 500) -> Any:
+    """A trace entry's result: a str over ``max_len`` chars is cut to ``max_len``.
+
+    Bytes are recorded as ``repr`` text, cut to the first ``max_len`` bytes
+    (review I2): raw bytes are not JSON, and a ``read_bytes`` result must not
+    put the whole file in the trace.
+    """
     if isinstance(value, str) and len(value) > max_len:
         return value[:max_len] + f"... ({len(value)} chars)"
+    if isinstance(value, (bytes, bytearray)):
+        text = repr(bytes(value[:max_len]))
+        return text + f"... ({len(value)} bytes)" if len(value) > max_len else text
     return value

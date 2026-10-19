@@ -15,6 +15,7 @@ internal toolbox views.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,33 @@ def _get_service() -> LackpyService:
     return _service
 
 
+def _json_safe(value: Any) -> Any:
+    """``value`` as strict JSON data, for a run result at the MCP boundary (review I2, M9).
+
+    A program's output and trace may hold any data value (``runner._is_data``),
+    and FastMCP's serializer fails on bytes that are not UTF-8 and writes nan
+    and infinity as the non-standard ``NaN`` and ``Infinity``. So:
+
+    - bytes become their ``repr`` text (``b'\\xff'``), as a non-data output
+      already does;
+    - a float nan or infinity becomes the text ``"nan"``, ``"inf"`` or
+      ``"-inf"`` (Python's ``repr``); a finite float stays a number;
+    - a tuple or set becomes a list (as FastMCP already does);
+    - a dict key that is not a str becomes its ``repr`` text (``(1, 2)`` gives
+      ``"(1, 2)"``, ``None`` gives ``"None"``, ``1`` gives ``"1"``).
+    """
+    kind = type(value)
+    if kind is bytes or kind is bytearray:
+        return repr(bytes(value))
+    if kind is float and not math.isfinite(value):
+        return repr(value)
+    if kind is dict:
+        return {k if type(k) is str else repr(k): _json_safe(v) for k, v in value.items()}
+    if kind in (list, tuple, set, frozenset):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 # --- Tools: actions -----------------------------------------------------------
 #
 # No kit in the agent's view (stepy100 Plan 2, Task 7): no tool takes
@@ -70,7 +98,7 @@ async def delegate(intent: str, profile: str | None = None,
     `run_program` with the program if you need the full step trace.
     """
     r = await _get_service().delegate(intent, profile=profile, params=params, rules=rules)
-    return {
+    return _json_safe({
         "success": r.get("success"),
         "output": r.get("output"),
         "error": r.get("error"),
@@ -79,7 +107,7 @@ async def delegate(intent: str, profile: str | None = None,
         "generation_tier": r.get("generation_tier"),
         "total_time_ms": r.get("total_time_ms"),
         "tools_called": [s.get("tool") for s in r.get("trace", [])],
-    }
+    })
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -98,12 +126,15 @@ async def run_program(program: str, profile: str | None = None,
                       rules: list[str] | None = None) -> dict:
     """Validate and run a program you already have (skips generation). The program
     is plain Python that the lackpy validator checks; it reads and writes files
-    only through pathlib.Path, under the workspace's permission rules."""
+    only through pathlib.Path, under the workspace's permission rules. `rules` names
+    extra checks: no_loops, no_nested_calls, max_depth(N), max_calls(N). Bytes, nan
+    and infinity come back as their Python repr text."""
     result = await _get_service().run_program(program, profile=profile, params=params, rules=rules)
-    return {"success": result.success, "output": result.output, "error": result.error,
-            "stdout": result.stdout,
-            "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
-                        "success": e.success, "error": e.error} for e in result.trace.entries]}
+    return _json_safe({
+        "success": result.success, "output": result.output, "error": result.error,
+        "stdout": result.stdout,
+        "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
+                   "success": e.success, "error": e.error} for e in result.trace.entries]})
 
 
 @mcp.tool(annotations=_WRITES_FILE)
@@ -116,10 +147,15 @@ async def create(program: str, profile: str | None = None,
 @mcp.tool(annotations=_READ_ONLY)
 def validate(program: str, profile: str | None = None,
              rules: list[str] | None = None) -> dict:
-    """Check a program against the lackpy validator and any extra rules, without running it."""
+    """Check a program against the lackpy validator and any extra rules, without running it.
+    Each entry of `violations` has the rule id, line, message and the hint that names
+    the approved alternative."""
     result = _get_service().validate(program, profile=profile, rules=rules)
+    # Review I3 (spec D17): each violation's hint names the approved alternative.
     return {"valid": result.valid, "errors": result.errors, "calls": result.calls,
-            "variables": result.variables}
+            "variables": result.variables,
+            "violations": [{"rule": v.rule_id, "line": v.line, "message": v.message,
+                            "hint": v.hint} for v in result.violations]}
 
 
 # --- Resources: read-only data (addressed by lackpy:// URIs) -------------------

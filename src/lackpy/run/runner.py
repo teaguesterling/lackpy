@@ -74,8 +74,11 @@ class RestrictedRunner:
         # ``print(x)`` instead of a bare last expression.
         captured: list[str] = []
 
-        def _capturing_print(*args: Any, sep: str = " ", end: str = "\n",
+        def _capturing_print(*args: Any, sep: str | None = " ", end: str | None = "\n",
                              file: Any = None, flush: bool = False) -> None:
+            # None means the default, as in python3 (review M2).
+            sep = " " if sep is None else sep
+            end = "\n" if end is None else end
             captured.append(sep.join(str(a) for a in args) + end)
 
         try:
