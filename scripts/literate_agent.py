@@ -151,9 +151,13 @@ async def run_literate_agent(
     # model-call loop and feeds the next round.
     # max_rounds surfaces THIS loop's real budget (max_iterations) to the
     # writer via the L4 per-splice manifest; the loop below still enforces it.
-    session = LiterateSession(
-        context, interpreter=interpreter, max_rounds=max_iterations
-    )
+    def new_session() -> LiterateSession:
+        return LiterateSession(context, interpreter=interpreter, max_rounds=max_iterations)
+
+    session = new_session()
+    # The raw responses of the rounds the session accepted (Right), in order: a
+    # full resubmission after a Left replays them into a fresh session.
+    accepted: list[str] = []
 
     if verbose:
         print(f"Persona: {persona}", file=sys.stderr)
@@ -202,7 +206,17 @@ async def run_literate_agent(
 
         if not result.ok:
             # Left: hand the errors + the raw un-interpreted document back so the
-            # model corrects its own work. State is NOT advanced; retry this round.
+            # model corrects its own work. The session KEPT this round's partial
+            # state (its imports, its bindings), and a session's program only
+            # grows, so the full resubmission could never join it ("Rebinding of
+            # imported name"). Final review I1, per the edit ruling: an edited
+            # round means a new session and a replay of the rounds accepted
+            # before it. (A replayed round runs its cells again, so its file
+            # writes happen again.) The refusal check above stays first: a
+            # refusal is never retried in a fresh session (D4).
+            session = new_session()
+            for raw in accepted:
+                await session.step(raw)
             errors = "\n".join(result.errors)
             full_prompt = (
                 f"Your previous document failed:\n{errors}\n\n"
@@ -211,6 +225,7 @@ async def run_literate_agent(
             )
             continue
 
+        accepted.append(response)
         if not result.continue_requested:
             # The executed document (values, not `{t}`); the source render is
             # what goes back to the model below, never what a reader sees.

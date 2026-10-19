@@ -101,3 +101,43 @@ async def test_the_cli_shows_the_executed_document(agent, loader, tmp_path):
     out = await agent.run_literate_agent("read it", base_dir=str(ws), generate=gen, policy_loader=loader)
     assert "Got forty-two." in out
     assert "{t}" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_corrected_resubmission_runs_in_a_fresh_session(agent, loader, tmp_path):
+    """Final review I1, the reviewer's reproduction: round 1 imports, then raises.
+    The kept state made the full resubmission fail with "Rebinding of imported
+    name" until max_iterations. A full resubmission now starts a new session."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    gen = _stub(
+        "<compute>\nimport json\nfrom pathlib import Path\nx = 1 // 0\n</compute>\n",
+        "<compute>\nimport json\nfrom pathlib import Path\nx = json.dumps([1])\n"
+        "Path('out.txt').write_text(x)\n</compute>\n\nGot {x}.\n",
+        "never asked",
+    )
+    out = await agent.run_literate_agent("x", base_dir=str(ws), generate=gen, policy_loader=loader,
+                                         max_iterations=3)
+    assert len(gen.calls) == 2
+    assert "Rebinding" not in gen.calls[1][0]
+    assert "ZeroDivisionError" in gen.calls[1][0]
+    assert (ws / "out.txt").read_text() == "[1]"
+    assert "Got [1]." in out
+
+
+@pytest.mark.asyncio
+async def test_a_resubmission_after_a_continue_round_replays_that_round(agent, loader, tmp_path):
+    """The fresh session replays the rounds accepted before the failed one, so a
+    corrected round still reads the names an earlier round bound."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    gen = _stub(
+        "<compute>\nimport json\na = 2\n</compute>\n\n<compute continue>",
+        "<compute>\nimport math\nb = a + 1\nc = 1 // 0\n</compute>\n",
+        "<compute>\nimport math\nb = a + 1\n</compute>\n\nB={b}.\n",
+        "never asked",
+    )
+    out = await agent.run_literate_agent("x", base_dir=str(ws), generate=gen, policy_loader=loader,
+                                         max_iterations=4)
+    assert len(gen.calls) == 3
+    assert "B=3." in out
