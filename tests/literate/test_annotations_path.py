@@ -512,6 +512,74 @@ class TestPatcherVerifies:
     def test_a_matching_diff_applies(self):
         assert apply_patch("a\nb\nc\n", "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n") == "a\nB\nc\n"
 
+
+class TestBlankContextLine:
+    """Final review I2: models, editors and markdown strip the space of a context
+    line for an empty file line. The empty line is context (as GNU patch reads it),
+    never the end of the hunk; the header counts bound the hunk, and a hunk that
+    does not match its counts fails the cell (nothing is written)."""
+
+    def test_a_blank_line_inside_a_hunk_is_an_empty_context_line(self):
+        # The reviewer's first reproduction: the change after the blank line was dropped.
+        diff = "@@ -1,3 +1,3 @@\n-A = 1\n+A = 10\n\n-B = 2\n+B = 20\n"
+        assert apply_patch("A = 1\n\nB = 2\n", diff) == "A = 10\n\nB = 20\n"
+
+    def test_every_change_after_a_blank_line_applies(self):
+        # The second reproduction: all changes after the blank line (was a no-op).
+        text = "def f():\n    return 1\n\ndef g():\n    return 2\n"
+        diff = ("@@ -1,5 +1,5 @@\n def f():\n     return 1\n\n def g():\n"
+                "-    return 2\n+    return 3\n")
+        assert apply_patch(text, diff) == "def f():\n    return 1\n\ndef g():\n    return 3\n"
+
+    def test_a_hunk_shorter_than_its_header_fails(self):
+        with pytest.raises(ValueError, match="does not apply.*header"):
+            apply_patch("a\nb\nc\n", "@@ -1,3 +1,4 @@\n a\n-b\n+B\n")
+
+    def test_a_hunk_cut_before_the_next_header_fails(self):
+        with pytest.raises(ValueError, match="does not apply.*header"):
+            apply_patch("a\nb\nc\nd\n", "@@ -1,3 +1,3 @@\n a\n-b\n+B\n@@ -4 +4 @@\n-d\n+D\n")
+
+    def test_empty_context_lines_a_fence_stripped_are_restored_and_verified(self):
+        # A markdown fence drops the trailing empty lines of its body.
+        assert apply_patch("a\nb\n\n", "@@ -1,3 +1,3 @@\n a\n-b\n+B") == "a\nB\n\n"
+        with pytest.raises(ValueError, match="line 3 is 'c'"):
+            apply_patch("a\nb\nc\n", "@@ -1,3 +1,3 @@\n a\n-b\n+B")
+
+    def test_lines_past_the_header_counts_fail(self):
+        # A wrong count must not drop the changes it leaves out of the hunk.
+        with pytest.raises(ValueError, match="does not apply.*header"):
+            apply_patch("a\nb\nc\n", "@@ -1,1 +1,1 @@\n-a\n+A\n-b\n+B\n")
+
+    def test_a_line_that_is_not_a_diff_line_fails(self):
+        with pytest.raises(ValueError, match="does not apply"):
+            apply_patch("a\nb\n", "@@ -1,2 +1,2 @@\n a\nb is next\n-b\n+B\n")
+
+    def test_trailing_blank_lines_after_the_last_hunk_are_ignored(self):
+        assert apply_patch("a\n", "@@ -1 +1 @@\n-a\n+b\n\n\n") == "b\n"
+
+    def test_two_hunks_with_a_blank_context_line_each(self):
+        text = "a\n\nb\nc\nd\ne\n\nf\n"
+        diff = ("@@ -1,3 +1,3 @@\n a\n\n-b\n+B\n"
+                "@@ -6,3 +6,3 @@\n e\n\n-f\n+F\n")
+        assert apply_patch(text, diff) == "a\n\nB\nc\nd\ne\n\nF\n"
+
+    @pytest.mark.asyncio
+    async def test_a_partial_hunk_fails_the_cell_and_writes_nothing(self, ws, policy):
+        (ws / "c.py").write_text("A = 1\n\nB = 2\n")
+        doc = "```lackpy @diff(c.py)\n@@ -1,3 +1,3 @@\n-A = 1\n+A = 10\n\n-B = 2\n```\n"
+        result = await _run(_ctx(ws, policy), doc)
+        assert not result.success
+        assert "does not apply" in result.error
+        assert (ws / "c.py").read_text() == "A = 1\n\nB = 2\n"
+
+    @pytest.mark.asyncio
+    async def test_the_document_applies_a_diff_with_a_blank_context_line(self, ws, policy):
+        (ws / "c.py").write_text("A = 1\n\nB = 2\n")
+        doc = "```lackpy @diff(c.py)\n@@ -1,3 +1,3 @@\n-A = 1\n+A = 10\n\n-B = 2\n+B = 20\n```\n"
+        result = await _run(_ctx(ws, policy), doc)
+        assert result.success, result.error
+        assert (ws / "c.py").read_text() == "A = 10\n\nB = 20\n"
+
     @pytest.mark.asyncio
     async def test_a_removed_line_mismatch_writes_nothing(self, ws, policy):
         (ws / "hello.txt").write_text("Something else\n")

@@ -58,36 +58,82 @@ def _expect(lines: list[str], index: int, text: str, line: int, total: int) -> N
 
 
 def _parse_hunks(diff_text: str):
-    """Yield (old_start, hunk_lines) from unified diff.
+    """Yield (old_start, hunk_lines) from a unified diff; ``ValueError`` on a bad hunk.
 
     hunk_lines is a list of (op, text) tuples where op is ' ', '-', or '+'.
+
+    The header counts (``@@ -a,b +c,d @@``; a missing count is 1) bound each
+    hunk (final review I2). Inside a hunk an empty line is an empty context
+    line, as GNU patch reads it: models, editors and markdown strip the space
+    of a context line for an empty file line. A hunk that ends before its
+    counts, a line in a hunk that is not a diff line, and a diff line after a
+    hunk's counts are used up each raise, so a diff never applies in part.
+    Text outside the hunks (``---``/``+++`` headers, blank lines) is skipped.
+    At the end of the diff text, missing lines that can only be context
+    (equal old and new counts left) are taken as empty context lines: a
+    markdown fence strips trailing empty lines. They are still verified
+    against the file.
     """
     lines = diff_text.splitlines()
     i = 0
     while i < len(lines):
         line = lines[i]
-        if line.startswith("@@"):
-            parts = line.split()
-            old_range = parts[1]
-            old_start = int(old_range.split(",")[0].lstrip("-"))
-
-            hunk_lines: list[tuple[str, str]] = []
+        if not line.startswith("@@"):
+            if line.startswith((" ", "+", "-")) and not line.startswith(("--- ", "+++ ")) \
+                    and _after_a_hunk(lines, i):
+                raise ValueError(
+                    f"the diff does not apply: {line!r} is past the end of the hunk "
+                    "its header counts describe")
             i += 1
-            while i < len(lines) and not lines[i].startswith("@@"):
-                dl = lines[i]
-                if dl.startswith("-"):
-                    hunk_lines.append(("-", dl[1:]))
-                elif dl.startswith("+"):
-                    hunk_lines.append(("+", dl[1:]))
-                elif dl.startswith(" "):
-                    hunk_lines.append((" ", dl[1:]))
-                elif dl.startswith("\\"):
-                    i += 1
-                    continue
-                else:
-                    break
-                i += 1
-
-            yield (old_start, hunk_lines)
-        else:
+            continue
+        old_start, old_left, new_left = _hunk_header(line)
+        header = line
+        hunk_lines: list[tuple[str, str]] = []
+        i += 1
+        while (old_left or new_left) and i < len(lines) and not lines[i].startswith("@@"):
+            dl = lines[i]
             i += 1
+            if dl.startswith("\\"):
+                continue  # "\ No newline at end of file"
+            op, text = (dl[:1], dl[1:]) if dl else (" ", "")
+            if op not in (" ", "-", "+"):
+                raise ValueError(
+                    f"the diff does not apply: {dl!r} in the hunk {header!r} is not a "
+                    "context (' '), removed ('-') or added ('+') line")
+            if op in (" ", "-"):
+                old_left -= 1
+            if op in (" ", "+"):
+                new_left -= 1
+            if old_left < 0 or new_left < 0:
+                raise ValueError(
+                    f"the diff does not apply: the hunk {header!r} has more lines than "
+                    "its header counts")
+            hunk_lines.append((op, text))
+        if old_left or new_left:
+            if i >= len(lines) and old_left == new_left:
+                hunk_lines.extend([(" ", "")] * old_left)  # stripped empty context lines
+            else:
+                raise ValueError(
+                    f"the diff does not apply: the hunk {header!r} ends before the "
+                    f"lines its header counts ({old_left} old, {new_left} new missing)")
+        yield (old_start, hunk_lines)
+
+
+def _hunk_header(line: str) -> tuple[int, int, int]:
+    """``(old_start, old_count, new_count)`` of an ``@@ -a,b +c,d @@`` line."""
+    parts = line.split()
+    try:
+        old, new = parts[1], parts[2]
+        if not (old.startswith("-") and new.startswith("+")):
+            raise ValueError
+        old_start, _, old_count = old[1:].partition(",")
+        _, _, new_count = new[1:].partition(",")
+        return int(old_start), int(old_count or 1), int(new_count or 1)
+    except (IndexError, ValueError):
+        raise ValueError(f"the diff does not apply: {line!r} is not a hunk header "
+                         "such as '@@ -1,3 +1,3 @@'") from None
+
+
+def _after_a_hunk(lines: list[str], index: int) -> bool:
+    """Whether a hunk header comes before ``lines[index]``."""
+    return any(line.startswith("@@") for line in lines[:index])
