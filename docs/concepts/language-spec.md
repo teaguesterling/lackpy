@@ -74,7 +74,7 @@ print(data)
 ```
 
 ```text
-Forbidden except of 'Exception' at line 4 (catch a subclass of Exception that is not a limit signal, for example KeyError)
+Forbidden except of 'Exception' at line 5 (catch a subclass of Exception that is not a limit signal, for example KeyError)
 ```
 
 ---

@@ -61,15 +61,18 @@ Sources are registered with a priority. The chain runs lowest-priority-first, th
 Each source receives the current result and the context, and returns a new `PolicyResult`. If a source sets `resolved=True`, the chain stops early.
 
 ```python title="Python API: resolve a policy"
-from lackpy.policy import PolicyLayer, PolicyResult
+from lackpy.policy import PolicyLayer
+from lackpy.policy.sources.tools import ToolsPolicySource
+from lackpy.service import LackpyService
+from lackpy.tools.registry import ResolvedTools
 
+svc = LackpyService()
 layer = PolicyLayer()
-layer.add_source(kit_source)      # priority 0
-layer.add_source(kibitzer_source)  # priority 50
+layer.add_source(ToolsPolicySource(svc.toolbox))  # priority 0
 
-result = layer.resolve({"tools": resolved_kit})
-# result.allowed_tools → frozenset({"read_file", "find_files"})
-# result.prompt_hints → ("Use read_file() instead of open()",)
+no_tools = ResolvedTools(tools={}, callables={}, grade=None, description="")
+result = layer.resolve({"tools": no_tools})
+print(result.allowed_tools)  # frozenset(): every request has an empty tool set
 ```
 
 ---

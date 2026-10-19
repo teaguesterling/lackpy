@@ -7,8 +7,10 @@ fence's ``title`` attribute (pymdownx.highlight renders it as a caption):
   return valid, as ``LackpyService.run_program`` does before it runs.
 - ``title="Refused..."``: a program that the docs show *because* lackpy
   refuses it (the validator rejects it, or the PathPolicy refuses its I/O at
-  run time). It is skipped by the validator check. Use it sparingly: one fence
-  per refusal that a page explains.
+  run time). It is skipped by the validator check. Instead, it must fail
+  ``validate``, or fail at run time with a refusal ("... is not allowed in
+  lackpy") in a workspace that has ``REFUSAL_CONFIG``, a ``.env`` and a
+  ``notes.md``. Use it sparingly: one fence per refusal that a page explains.
 - ``title="Python API..."``: host code that calls the ``lackpy`` library
   (``LackpyService``, ``asyncio``). It is not a lackpy program, so it is
   skipped by the validator check.
@@ -87,6 +89,28 @@ def test_fence_parses(where, kind, src):
 def test_program_fence_validates(where, src):
     result = validate(src, allowed_names=set())
     assert result.valid, f"{where}: {result.errors}"
+
+
+REFUSAL_CONFIG = '[paths]\ndeny = ["Read(.env)"]\n'  # the configuration paths.md shows
+
+
+@pytest.mark.parametrize("where,src", [(w, s) for w, k, s in FENCES if k == "refused"],
+                         ids=[w for w, k, _ in FENCES if k == "refused"])
+def test_refused_fence_is_refused(where, src, tmp_path):
+    # A stale "Refused" marker must not hide a program that lackpy now accepts.
+    if not validate(src, allowed_names=set()).valid:
+        return
+    import asyncio
+
+    from lackpy.service import LackpyService
+
+    (tmp_path / ".lackpy").mkdir()
+    (tmp_path / ".lackpy" / "config.toml").write_text(REFUSAL_CONFIG)
+    (tmp_path / ".env").write_text("SECRET=1\n")
+    (tmp_path / "notes.md").write_text("Status: draft\n")
+    result = asyncio.run(LackpyService(workspace=tmp_path).run_program(src))
+    assert not result.success, f"{where}: marked Refused, but it ran"
+    assert "is not allowed in lackpy" in (result.error or ""), f"{where}: failed, not refused: {result.error}"
 
 
 @pytest.mark.parametrize("title,program", PREPROMPT_EXAMPLES, ids=[t for t, _ in PREPROMPT_EXAMPLES])

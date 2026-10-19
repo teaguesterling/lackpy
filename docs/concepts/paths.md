@@ -59,7 +59,8 @@ The path policy loads its rules on each run, from these files. It joins the
 rules from all of them.
 
 1. The Claude Code managed settings file, then each `*.json` file in the
-   `managed-settings.d/` directory beside it, in alphabetical order. On Linux,
+   `managed-settings.d/` directory beside it, in alphabetical order. Hidden
+   files (`.*.json`) are skipped. On Linux,
    the file is `/etc/claude-code/managed-settings.json`. On macOS, it is
    `/Library/Application Support/ClaudeCode/managed-settings.json`.
 2. `~/.claude/settings.json`.
@@ -215,9 +216,14 @@ lackpy resolves the literal start of each deny pattern, such as `~/.ssh` in
 - **A malformed rule fails every run.** The error names the rule and the file.
   A dropped deny would loosen the path policy, so lackpy does not skip it. An
   unknown key in `[paths]` fails the same way.
-- **A deny with no literal start is not resolved through symlinks.** For
-  example, `Read(*.key)` has no literal directory to resolve. A symlink to a
-  `.key` file, read through its target under a broad allow, avoids that deny.
+- **A deny with no literal start is not resolved through symlinks.** Such a
+  deny matches the path as written and its resolved target. It does not
+  follow a symlinked directory back to the directory it names. For example,
+  `Read(**/vault/**)` with `vault` a symlink to `data/` refuses
+  `vault/f.txt`, but it allows `data/f.txt`. The target is not denied. A
+  one-segment pattern, such as `Read(vault/**)`, floats in the same way. An
+  anchored deny, such as `Read(./vault/**)`, resolves `vault`, so it refuses
+  both paths (measured 2026-10-18).
 - **The check and the I/O are two system calls.** A process that swaps a
   symlink between them is not stopped. lackpy assumes one user per workspace.
 - **Listings omit refused entries.** `glob`, `rglob` and `iterdir` leave out
@@ -249,10 +255,11 @@ is the generated list.
 ## The trace
 
 Each I/O call adds one trace entry. The tool name is `Path.<member>`, and the
-arguments hold the path as the program wrote it:
+arguments hold the path as the program wrote it. This entry is measured, for the
+`notes.md` of the [tutorial](../tutorial.md) (`Status: draft` and a newline):
 
 ```text
-TraceEntry(step=0, tool='Path.read_text', args=['notes.md'], result='Status: draft\n', success=True, error=None)
+TraceEntry(step=0, tool='Path.read_text', args=['notes.md'], result='Status: draft\n', duration_ms=0.12043211609125137, success=True, error=None)
 ```
 
 A refused call adds a failed entry, then the refusal stops the program.
