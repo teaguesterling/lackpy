@@ -145,7 +145,7 @@ class TestCollectionsClasses:
     @pytest.mark.parametrize("expression", COLLECTIONS_EXPRESSIONS)
     def test_matches_plain_python(self, expression):
         program = f"from collections import Counter, defaultdict, deque, OrderedDict\n{expression}"
-        result = RestrictedRunner().run(program, namespace={})
+        result = RestrictedRunner().run(program)
         assert result.success, result.error
         plain = eval(expression, {  # noqa: S307
             "Counter": collections.Counter, "defaultdict": collections.defaultdict,
@@ -184,7 +184,7 @@ class TestNoRouteToTheRealModule:
 
     @pytest.mark.parametrize("name", ["_lackpy_module", "_lackpy_name", "_lackpy_members"])
     def test_from_import_of_an_internal_name_fails(self, name):
-        result = RestrictedRunner().run(f"from json import {name}\nrepr({name})", namespace={})
+        result = RestrictedRunner().run(f"from json import {name}\nrepr({name})")
         assert not result.success
         assert "<module" not in str(result.output)
 

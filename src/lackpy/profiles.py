@@ -24,6 +24,17 @@ from .tools.registry import ResolvedTools, resolve_tools
 from .tools.toolbox import Toolbox
 from .lang.grader import Grade
 
+# Teague's ruling 5 (stepy100 Plan 2, 2026-10-18): the kit is removed from the
+# runtime. A profile selects a model, its parameters and rules only; the
+# service refuses a profile that names tools with this message.
+KIT_REMOVED = ("tool kits were removed in lackpy stepy100; "
+               "use pathlib.Path (docs/concepts/paths.md)")
+
+
+class ProfileError(ValueError):
+    """A profile lackpy cannot use: it names tools, or no such profile is configured."""
+
+
 DEFAULT_LANGUAGE = "restricted-python"
 DEFAULT_EXECUTION = "one-shot"
 

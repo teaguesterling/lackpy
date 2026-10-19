@@ -1,8 +1,7 @@
-"""Trace data structures and callable wrapping for execution recording."""
+"""Trace data structures, and the recording of one call (``record_call``)."""
 
 from __future__ import annotations
 
-import inspect
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -48,45 +47,6 @@ class Trace:
     entries: list[TraceEntry] = field(default_factory=list)
     files_read: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
-
-
-def make_traced(name: str, fn: Callable, trace: Trace,
-                kibitzer_session: Any = None) -> Callable:
-    """Wrap a callable to record each invocation in a Trace.
-
-    The wrapper captures positional and keyword arguments, measures wall-clock
-    duration, appends a TraceEntry to ``trace``, and re-raises any exception
-    or ``LackpyRefusal`` after recording it (design §8, gate 3).
-
-    If a kibitzer_session is provided, each call is also reported to Kibitzer
-    via after_call() for mode tracking and coaching.
-
-    Args:
-        name: Tool name to record in each TraceEntry.
-        fn: The callable to wrap.
-        trace: The Trace instance to append entries to.
-        kibitzer_session: Optional KibitzerSession for per-call tracking.
-
-    Returns:
-        A wrapper callable with the same signature as ``fn``.
-    """
-    sig = inspect.signature(fn)
-    param_names = list(sig.parameters.keys())
-
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        call_args: dict[str, Any] = {}
-        for i, val in enumerate(args):
-            key = param_names[i] if i < len(param_names) else f"arg{i}"
-            call_args[key] = val
-        call_args.update(kwargs)
-
-        def report(success: bool) -> None:
-            if kibitzer_session:
-                kibitzer_session.after_call(name, call_args, success=success)
-
-        return record_call(trace, name, call_args, lambda: fn(*args, **kwargs), report)
-
-    return wrapper
 
 
 def record_call(trace: Trace, tool: str,

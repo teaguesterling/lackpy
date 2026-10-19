@@ -1,5 +1,6 @@
 """Shipped default tools: load as data, populate the service, override, no hardcode."""
 
+import pytest
 import lackpy.service as service_module
 from lackpy.config import LackpyConfig
 from lackpy.service import LackpyService
@@ -11,11 +12,13 @@ def test_no_hardcoded_builtin_tools_list():
     assert not hasattr(service_module, "_BUILTIN_TOOLS")
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool sources migration pending", strict=True)
 def test_default_defs_load_from_packaged_toml():
     names = {d["name"] for d in load_default_tool_defs()}
     assert {"read_file", "find_files", "write_file", "edit_file"} <= names
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool sources migration pending", strict=True)
 def test_service_has_builtins_by_default(tmp_path):
     svc = LackpyService(workspace=tmp_path)
     names = {t["name"] for t in svc.toolbox_list()}
@@ -24,6 +27,7 @@ def test_service_has_builtins_by_default(tmp_path):
     assert svc.toolbox.resolve("read_file").__module__ == "lackpy.sources.builtins"
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool sources migration pending", strict=True)
 async def test_default_read_file_runs_end_to_end(tmp_path):
     (tmp_path / "hello.txt").write_text("world")
     svc = LackpyService(workspace=tmp_path)
@@ -32,6 +36,7 @@ async def test_default_read_file_runs_end_to_end(tmp_path):
     assert res.output == "world"
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool sources migration pending", strict=True)
 def test_load_config_parses_user_tools_and_service_picks_them_up(tmp_path):
     # Exercises config.load_config's [[tools]] parse (not bypassed via LackpyConfig)
     # and the service auto-loading it from a real .lackpy/config.toml.
@@ -59,6 +64,7 @@ def test_load_config_parses_user_tools_and_service_picks_them_up(tmp_path):
     assert svc.toolbox.resolve("list_glob").__name__ == "find_files"
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool sources migration pending", strict=True)
 def test_user_tool_overrides_default(tmp_path):
     # A user [[tools]] entry with a default's name wins (source order: default then config).
     cfg = LackpyConfig(

@@ -7,6 +7,8 @@ is tested deterministically.
 
 import asyncio
 
+import pytest
+
 from lackpy.tools.toolbox import ArgSpec, ToolSpec
 from lackpy.run.bridge import mark_async
 from lackpy.service import LackpyService
@@ -33,11 +35,19 @@ class _FuncSource:
         return self._fn
 
 
+# The service's threaded path for loop-bound tools went with the kit (stepy100
+# Task 7): no run binds a tool, so no run needs the event loop. MCP tool sources
+# (src/lackpy/sources/mcp) still bridge on their own client loop.
+_KIT = pytest.mark.xfail(
+    reason="kit removed in stepy100 Plan 2; MCP tool sources migration pending", strict=True)
+
+
 def _spec(name: str, arg: str, arg_type: str = "int", returns: str = "int") -> ToolSpec:
     return ToolSpec(name=name, provider="test",
                     args=[ArgSpec(name=arg, type=arg_type)], returns=returns)
 
 
+@_KIT
 async def test_async_tool_runs_through_bridge(tmp_path):
     svc = LackpyService(workspace=tmp_path)
     bridge = svc._bridge
@@ -59,6 +69,7 @@ async def test_async_tool_runs_through_bridge(tmp_path):
     assert res.trace.entries[0].success
 
 
+@_KIT
 async def test_async_tool_timeout_yields_failed_result(tmp_path):
     svc = LackpyService(workspace=tmp_path)
     bridge = svc._bridge
@@ -80,6 +91,7 @@ async def test_async_tool_timeout_yields_failed_result(tmp_path):
     assert res.trace.entries and res.trace.entries[0].success is False
 
 
+@_KIT
 async def test_async_tool_timeout_cannot_be_caught(tmp_path):
     # Gate 5 (design call): a program must not catch and retry a hung tool.
     svc = LackpyService(workspace=tmp_path)
@@ -104,6 +116,7 @@ async def test_async_tool_timeout_cannot_be_caught(tmp_path):
     assert [e.success for e in res.trace.entries] == [False]
 
 
+@_KIT
 async def test_exec_lock_serializes_concurrent_executions(tmp_path):
     # Proves the single-flight lock: once execution runs off the loop thread, two
     # overlapping delegations must NOT interleave (which would race the global cwd).
@@ -135,6 +148,7 @@ async def test_exec_lock_serializes_concurrent_executions(tmp_path):
     ), f"interleaved -> lock not holding: {events}"
 
 
+@_KIT
 async def test_inline_path_still_used_without_async_tools(tmp_path):
     # No loop-bound tool -> inline (non-threaded) path; bridge loop never set.
     (tmp_path / "f.txt").write_text("data")

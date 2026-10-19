@@ -55,6 +55,7 @@ class TestKibitzerAvailable:
 
 
 class TestKibitzerGracefulDegradation:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; kibitzer integration migration pending", strict=True)
     def test_service_works_without_kibitzer_config(self, tmp_path):
         """Service should work even if .kibitzer/ doesn't exist."""
         (tmp_path / "test.txt").write_text("hello")

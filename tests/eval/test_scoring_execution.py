@@ -1,5 +1,6 @@
 """Tests for stage 2 execution scoring."""
 
+import pytest
 from pathlib import Path
 
 from scripts.prompt_eval.intents import GateResult, Intent
@@ -19,6 +20,7 @@ def _assert_contains(needle):
     return check
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; prompt-eval harness migration pending", strict=True)
 def test_python_execution_passes_assertion():
     """A known-good python program should run, return files, and pass a contains-assertion."""
     intent = Intent(
@@ -68,6 +70,7 @@ def test_score_cell_returns_1_when_assertion_fails():
     assert not score.assertion_passed
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; prompt-eval harness migration pending", strict=True)
 def test_score_cell_returns_2_on_full_pass():
     intent = Intent(
         id="pyexec.04",
@@ -84,6 +87,7 @@ def test_score_cell_returns_2_on_full_pass():
     assert score.score == 2
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; prompt-eval harness migration pending", strict=True)
 def test_score_cell_catches_assertion_exception():
     """If the assertion callable raises, score_cell should treat it as a score-1 failure, not propagate."""
     intent = Intent(

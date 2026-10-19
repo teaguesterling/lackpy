@@ -10,6 +10,8 @@ programs, so the full validated path cannot run them; the last class proves
 that rejection, and runs the programs it does admit through the service.
 """
 
+import pathlib
+
 import pytest
 
 from lackpy.lang import validate
@@ -18,7 +20,7 @@ from lackpy.service import LackpyService
 
 
 def _run(program):
-    return RestrictedRunner().run(program, namespace={})
+    return RestrictedRunner().run(program)
 
 
 # Each escape: (module, the non-member attribute that names another module).
@@ -134,26 +136,28 @@ class TestValidatedPath:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("program", ESCAPE_PROGRAMS)
     async def test_service_does_not_run_an_escape(self, service, program):
-        result = await service.run_program(program, profile=[])
+        result = await service.run_program(program)
         assert not result.success
 
     @pytest.mark.asyncio
     async def test_service_runs_json_loads(self, service):
-        result = await service.run_program("import json\njson.loads('[1]') == [1]", profile=[])
+        result = await service.run_program("import json\njson.loads('[1]') == [1]")
         assert result.success, result.error
         assert result.output is True
 
     @pytest.mark.asyncio
     async def test_service_runs_from_collections_import(self, service):
         result = await service.run_program(
-            "from collections import Counter\nCounter('abca')['a']", profile=[])
+            "from collections import Counter\nCounter('abca')['a']")
         assert result.success, result.error
         assert result.output == 2
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("program", ["import pathlib\npathlib.Path('x')", "from pathlib import Path\nPath('x')"])
-    async def test_service_refuses_pathlib(self, service, program):
-        assert validate(program).valid  # the validator admits it; the runtime refuses
-        result = await service.run_program(program, profile=[])
-        assert not result.success
-        assert "Path arrives with the PathPolicy" in (result.error or ""), result.error
+    async def test_service_serves_the_path_stand_in(self, service, program):
+        # Retired (ruling C, until Task 7): the service had no PathPolicy, so pathlib
+        # refused with "Path arrives with the PathPolicy". Task 7 wires load_policy.
+        assert validate(program).valid
+        result = await service.run_program(program)
+        assert result.success, result.error
+        assert result.output == repr(pathlib.Path("x"))

@@ -22,17 +22,19 @@ def service(workspace):
 class TestFullRoundtrip:
     @pytest.mark.asyncio
     @pytest.mark.xfail(
-        reason="stepy100 Task 5: run_lackey passes Lackey params, and the run body reads them as bare names, which the runner no longer binds; needs a controller decision", strict=True)
+        reason="stepy100 Task 8 rewrites generation", strict=True)
     async def test_generate_create_parse_run(self, service, workspace):
         # 1. Generate a program via rules
-        gen = await service.generate("read file hello.txt", profile=["read_file"])
-        assert "read_file(" in gen.program
+        # Retired kit model: generated with profile=["read_file"] and asserted
+        # "read_file(" in the program; Lackeys took tools=["read_file"].
+        gen = await service.generate("read file hello.txt")
+        assert "read_file" not in gen.program
 
         # 2. Create a Lackey file from it
         path = await service.create_lackey(
             program=gen.program,
             name="ReadHello",
-            tools=["read_file"],
+            tools=[],
             params={"target": {"type": "str", "default": "hello.txt"}},
             returns="str",
             creation_log=[
@@ -46,7 +48,7 @@ class TestFullRoundtrip:
         # 3. Parse it back
         info = service.parse_lackey(path)
         assert info.class_name == "ReadHello"
-        assert "read_file" in info.tools
+        assert info.tools == []
         assert info.has_creation_log is True
 
         # 4. Run it

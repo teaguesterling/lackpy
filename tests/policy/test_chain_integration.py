@@ -13,7 +13,10 @@ from lackpy.policy.sources.kibitzer import KibitzerPolicySource
 from lackpy.policy.sources.umwelt import UmweltPolicySource
 from lackpy.tools.registry import ResolvedTools, resolve_tools
 from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
-from lackpy.tools.providers.builtin import BuiltinProvider
+try:
+    from lackpy.tools.providers.builtin import BuiltinProvider
+except ImportError:  # removed with the kit in stepy100 Plan 2, Task 7
+    BuiltinProvider = None
 from lackpy.lang.grader import Grade
 from lackpy.infer.context import StepContext, ProgramState, StepTrace
 
@@ -75,6 +78,7 @@ def _make_step_trace():
 class TestStandaloneConfig:
     """Kit source only — no Kibitzer, no umwelt."""
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_kit_only(self, toolbox):
         tools = resolve_tools(["read_file", "find_files"], toolbox)
         layer = PolicyLayer()
@@ -91,6 +95,7 @@ class TestStandaloneConfig:
 class TestKitPlusKibitzer:
     """Kit + Kibitzer coaching."""
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_kibitzer_enriches_without_changing_tools(self, toolbox):
         tools = resolve_tools(["read_file", "find_files"], toolbox)
         layer = PolicyLayer()
@@ -103,6 +108,7 @@ class TestKitPlusKibitzer:
         assert result.allowed_tools == frozenset({"read_file", "find_files"})
         assert "Always use find_files before read_file" in result.namespace_desc
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_kibitzer_adds_hints_on_failure(self, toolbox):
         tools = resolve_tools(["read_file"], toolbox)
         history = StepContext(intent="read a file", tools=tools)
@@ -126,6 +132,7 @@ class TestKitPlusKibitzer:
 class TestFullStack:
     """Kit + Kibitzer + umwelt."""
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_umwelt_restricts_after_kibitzer_enriches(self, toolbox):
         tools = resolve_tools(["read_file", "find_files", "edit_file"], toolbox)
 
@@ -146,6 +153,7 @@ class TestFullStack:
         assert "Be careful with edit_file" in result.namespace_desc
         assert result.grade.w == 3
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_umwelt_cannot_add_tools_beyond_kit(self, toolbox):
         tools = resolve_tools(["read_file"], toolbox)
 
@@ -164,6 +172,7 @@ class TestFullStack:
 class TestKitPlusUmwelt:
     """Kit + umwelt, no Kibitzer."""
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_umwelt_restricts_kit(self, toolbox):
         tools = resolve_tools(["read_file", "edit_file"], toolbox)
 

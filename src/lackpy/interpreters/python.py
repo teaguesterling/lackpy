@@ -1,22 +1,22 @@
 """Restricted Python interpreter plugin.
 
-Wraps the original lackpy execution path — AST validation against the
-allowed grammar, then restricted exec via :class:`RestrictedRunner`.
-This is the first concrete ``Interpreter`` implementation and the one
-lackpy has been built around since the beginning.
-
-The validation and execution logic is unchanged from
-:meth:`LackpyService.run_program`; this plugin just adapts that path
-into the new plugin protocol so other interpreters can sit alongside it.
+Wraps the lackpy execution path — AST validation against the allowed
+grammar, then restricted exec via :class:`RestrictedRunner`, with the
+``PathPolicy`` of ``context.base_dir``. This is the same path as
+:meth:`LackpyService.run_program`, adapted to the plugin protocol. No tool
+callables are bound: the kit was removed in stepy100 Plan 2, Task 7.
 """
 
 from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from ..lang.validator import validate
+from ..profiles import KIT_REMOVED
+from ..run.paths import PathPolicy, load_policy
 from ..run.runner import RestrictedRunner
 from .base import (
     ExecutionContext,
@@ -29,10 +29,11 @@ from .base import (
 class PythonInterpreter:
     """Restricted-Python interpreter.
 
-    The program is a lackpy program — a subset of Python 3 with imports,
-    function definitions, and dangerous builtins removed. It is validated
-    against the tools's allowed names and then executed with tool callables
-    injected into the namespace.
+    The program is a lackpy program: plain Python that the validator has
+    checked. It is validated with no allowed names and runs in the runtime
+    namespace, with file access through the ``Path`` stand-in under the
+    ``PathPolicy`` of ``context.base_dir``. A context whose ``tools`` names
+    any tool is an error carrying ``KIT_REMOVED``.
 
     Output shape: whatever the program's last expression evaluated to.
     The ``output_format`` is ``"python"`` because the value may be any
@@ -41,10 +42,13 @@ class PythonInterpreter:
     """
 
     name = "python"
-    description = "Restricted Python with tool callables from the tools"
+    description = "Plain Python checked by the lackpy validator; files through pathlib.Path"
 
-    def __init__(self) -> None:
+    def __init__(self, *, path_policy_loader: Callable[[Path], PathPolicy] | None = None) -> None:
+        """``path_policy_loader`` builds the policy from ``base_dir`` once per
+        run; it defaults to ``load_policy``. Tests pass a temporary home."""
         self._runner = RestrictedRunner()
+        self._path_policy_loader = path_policy_loader
 
     def system_prompt_hint(self) -> str:
         """Interpreter-specialized prompt fragment for the python interpreter.
@@ -84,21 +88,14 @@ class PythonInterpreter:
         program: str,
         context: ExecutionContext,
     ) -> InterpreterValidationResult:
-        """Validate against the tools's allowed names and any extra rules.
+        """Validate with no allowed names and any extra rules.
 
-        Allowed names are the union of the tools's tool names and any
-        parameter names injected into the context. This matches the
-        original :meth:`LackpyService.run_program` behavior.
+        This matches :meth:`LackpyService.run_program`. Params bind no bare
+        names (stepy100 Task 5), so their names are not allowed either.
         """
-        if context.tools is None:
-            return InterpreterValidationResult(
-                valid=False,
-                errors=["PythonInterpreter requires a resolved tools in the execution context"],
-            )
-        allowed = set(context.tools.tools.keys())
-        if context.params:
-            allowed |= set(context.params.keys())
-        result = validate(program, allowed_names=allowed, extra_rules=context.extra_rules)
+        if context.tools is not None and getattr(context.tools, "tools", None):
+            return InterpreterValidationResult(valid=False, errors=[KIT_REMOVED])
+        result = validate(program, allowed_names=set(), extra_rules=context.extra_rules)
         return InterpreterValidationResult(
             valid=result.valid,
             errors=list(result.errors),
@@ -112,8 +109,10 @@ class PythonInterpreter:
         """Execute a validated lackpy program under the restricted runner.
 
         Runs the program with its working directory set to
-        ``context.base_dir`` (restored on exit). Tool callables come from
-        the resolved tools; parameter values come from the context.
+        ``context.base_dir`` (restored on exit), under the ``PathPolicy``
+        loaded from ``context.base_dir`` for this run. Parameter values come
+        from the context. A malformed settings file gives a failed result
+        that names the file.
         """
         start = time.perf_counter()
         validation = self.validate(program, context)
@@ -125,14 +124,21 @@ class PythonInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
+        loader = self._path_policy_loader or load_policy
+        try:
+            policy = loader(Path(context.base_dir))
+        except (ValueError, OSError) as e:
+            return InterpreterExecutionResult(
+                success=False,
+                error=f"cannot load the path policy: {e}",
+                output_format="none",
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
         prev_cwd = os.getcwd()
         try:
             os.chdir(context.base_dir)
-            exec_result = self._runner.run(
-                program,
-                context.tools.callables,
-                params=context.params or None,
-            )
+            exec_result = self._runner.run(program, params=context.params or None,
+                                           path_policy=policy)
         finally:
             os.chdir(prev_cwd)
 

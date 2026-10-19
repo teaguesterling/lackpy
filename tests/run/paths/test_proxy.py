@@ -35,7 +35,7 @@ def P(ws):
 
 
 def run(program, policy, params=None):
-    return RestrictedRunner().run(program, namespace={}, params=params, path_policy=policy)
+    return RestrictedRunner().run(program, params=params, path_policy=policy)
 
 
 class TestShape:

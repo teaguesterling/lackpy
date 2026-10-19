@@ -1,6 +1,11 @@
 """Tests for the lackpy CLI."""
 
-from lackpy.cli import build_parser, _parse_tools
+import json
+
+import pytest
+
+from lackpy.cli import build_parser, main
+from lackpy.service import KIT_REMOVED
 
 
 class TestParserFlags:
@@ -13,14 +18,14 @@ class TestParserFlags:
 
     def test_create_flag(self):
         parser = build_parser()
-        args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--profile", "read,glob"])
+        args = parser.parse_args(["-c", "find python files", "--create", "--name", "FindPy", "--profile", "fast"])
         assert args.intent == "find python files"
         assert args.create is True
         assert args.name == "FindPy"
 
     def test_generate_flag(self):
         parser = build_parser()
-        args = parser.parse_args(["-c", "read file main.py", "--generate", "--profile", "read_file"])
+        args = parser.parse_args(["-c", "read file main.py", "--generate", "--profile", "fast"])
         assert args.intent == "read file main.py"
         assert args.generate is True
 
@@ -46,36 +51,44 @@ class TestParserFlags:
         assert str(args.workspace) == "/tmp/test"
 
 
-    def test_tools_flag(self):
+
+    def test_tools_flag_is_gone(self, capsys):
+        # Retired kit model: --tools added extra tool names to the profile.
         parser = build_parser()
-        args = parser.parse_args(["-c", "do something", "--tools", "read_file,edit_file"])
-        assert args.tools == "read_file,edit_file"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["-c", "do something", "--tools", "read_file"])
 
-    def test_tools_flag_with_kit(self):
-        parser = build_parser()
-        args = parser.parse_args(["-c", "do something", "--profile", "debug", "--tools", "edit_file"])
-        assert args.profile == "debug"
-        assert args.tools == "edit_file"
-
-    def test_tools_flag_without_kit(self):
-        parser = build_parser()
-        args = parser.parse_args(["-c", "do something", "--tools", "read_file"])
-        assert args.profile is None
-        assert args.tools == "read_file"
+    def test_profile_help_names_a_profile_only(self):
+        help_text = build_parser().format_help()
+        assert "tool list" not in help_text
+        assert "--tools" not in help_text
 
 
-class TestParseTools:
-    def test_single_tool(self):
-        assert _parse_tools("read_file") == ["read_file"]
+class TestPlainProgramFile:
+    """A plain program file runs without --profile (stepy100 Task 7)."""
 
-    def test_multiple_tools(self):
-        assert _parse_tools("read_file,edit_file") == ["read_file", "edit_file"]
+    def test_plain_file_runs_without_a_profile(self, tmp_path, capsys):
+        (tmp_path / "t.txt").write_text("abc")
+        prog = tmp_path / "prog.py"
+        prog.write_text("from pathlib import Path\nprint(Path('t.txt').read_text())\n")
+        code = main([str(prog), "--workspace", str(tmp_path)])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 0, out
+        assert out["stdout"] == "abc\n"
 
-    def test_strips_whitespace(self):
-        assert _parse_tools(" read_file , edit_file ") == ["read_file", "edit_file"]
+    def test_tool_profile_is_an_error(self, tmp_path, capsys):
+        prog = tmp_path / "prog.py"
+        prog.write_text("x = 1\n")
+        code = main([str(prog), "--workspace", str(tmp_path), "--profile", "read_file"])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 1
+        assert KIT_REMOVED in out["error"]
 
-    def test_skips_empty(self):
-        assert _parse_tools("read_file,,edit_file") == ["read_file", "edit_file"]
+    def test_file_entrypoint_rejects_tools(self, tmp_path):
+        prog = tmp_path / "prog.py"
+        prog.write_text("x = 1\n")
+        with pytest.raises(SystemExit):
+            main([str(prog), "--workspace", str(tmp_path), "--tools", "read_file"])
 
 
 class TestNoDeprecatedSubcommands:

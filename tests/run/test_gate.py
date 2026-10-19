@@ -4,7 +4,7 @@ Items 1-9 are named ``test_gate_N_*``. ``test_review_focus_5_*`` follows them.
 Programs run through ``conftest.run_in_lackpy`` (validate, then the runner with a
 PathPolicy) unless a test must bypass the validator to prove the runtime closes a
 route the static check also closes; those use ``RestrictedRunner`` directly and
-say so. Task 7 switches the helper to ``LackpyService.run_program``.
+say so. Since Task 7 the helper runs ``LackpyService.run_program``.
 """
 
 import asyncio
@@ -18,6 +18,7 @@ import pytest
 
 from lackpy.lang import validate
 from lackpy.run.bridge import AsyncBridge
+from lackpy.run.refusal import LackpyRefusal
 from lackpy.run.paths import load_policy
 from lackpy.run.runner import RestrictedRunner
 
@@ -28,7 +29,7 @@ HERE = Path(__file__).parent
 
 def _raw(program, **kw):
     """Run with the validator bypassed (runtime defence on its own)."""
-    return RestrictedRunner().run(program, namespace={}, **kw)
+    return RestrictedRunner().run(program, **kw)
 
 
 # --- 1. module proxies close statistics.sys and Path('x').parser.os ----------
@@ -121,12 +122,13 @@ def test_gate_4_deep_valid_program_validates_then_runs(tmp_path, tmp_home):
 
 
 # --- 5. a hung tool is a refusal the program cannot catch ---------------------
+#
+# Parked item 6: rewritten without a kit namespace. No program can reach a bridged
+# call since the kit went (Task 7), so the gate is the bridge's own contract: a
+# timeout is a LackpyRefusal, which no handler the validator admits can catch.
 
-@pytest.mark.parametrize("handler, validated", [
-    ("except TimeoutError:", True),
-    ("except Exception:", False),  # rejected statically (safety.except-base): runner-direct
-], ids=["TimeoutError", "Exception-runner-direct"])
-def test_gate_5_timeout_cannot_be_caught(handler, validated):
+@pytest.mark.parametrize("handler", ["except TimeoutError:", "except Exception:"])
+def test_gate_5_timeout_cannot_be_caught(handler):
     bridge = AsyncBridge()
     loop = asyncio.new_event_loop()
     t = threading.Thread(target=loop.run_forever, daemon=True)
@@ -137,21 +139,25 @@ def test_gate_5_timeout_cannot_be_caught(handler, validated):
     async def hang():
         await asyncio.sleep(10)
 
-    def tool(n):
+    def hung_call(n):
         calls.append(n)
         return bridge.call_sync(hang(), timeout=0.1)
 
-    program = f"try:\n    y = tool(1)\n{handler}\n    y = tool(2)\n"
-    assert validate(program, allowed_names={"tool"}).valid is validated
+    code = f"try:\n    y = hung_call(1)\n{handler}\n    y = hung_call(2)\n"
     try:
-        result = RestrictedRunner().run(program, namespace={"tool": tool})
+        with pytest.raises(LackpyRefusal, match="waiting on a tool call past its timeout"):
+            exec(code, {"hung_call": hung_call})  # noqa: S102
     finally:
         loop.call_soon_threadsafe(loop.stop)
         t.join(5)
         loop.close()
-    assert not result.success
-    assert "waiting on a tool call past its timeout" in result.error
-    assert calls == [1], "the handler retried the hung tool"
+    assert calls == [1], "the handler retried the hung call"
+
+
+def test_gate_5_no_program_reaches_a_bridged_call():
+    # The runner takes no tool namespace, so no bridged callable is bound.
+    with pytest.raises(TypeError):
+        RestrictedRunner().run("x = 1", {"tool": lambda: 0})
 
 
 def test_gate_5_bare_except_is_rejected_statically():

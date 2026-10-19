@@ -72,6 +72,7 @@ def interp():
 
 
 class TestValidation:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     def test_valid_chain_passes(self, interp):
         ctx = ExecutionContext()
         program = 'source("src/**/*.py").find(".fn#main").names()'
@@ -79,6 +80,7 @@ class TestValidation:
         assert result.valid
         assert result.errors == []
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     def test_multi_step_chain_passes(self, interp):
         ctx = ExecutionContext()
         program = (
@@ -89,6 +91,7 @@ class TestValidation:
         result = interp.validate(program, ctx)
         assert result.valid
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     def test_unknown_bare_name_rejected(self, interp):
         ctx = ExecutionContext()
         result = interp.validate('unknown_fn("x")', ctx)
@@ -101,6 +104,7 @@ class TestValidation:
         result = interp.validate("import os", ctx)
         assert not result.valid
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     def test_empty_program_is_valid_noop(self, interp):
         """An empty plucker program is a valid no-op, same as empty Python."""
         ctx = ExecutionContext()
@@ -109,6 +113,7 @@ class TestValidation:
 
 
 class TestExecution:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_names_returns_list_of_strings(self, interp, plucker_ctx, fixture_file):
         program = f'source("{fixture_file}").find(".fn").names()'
@@ -119,6 +124,7 @@ class TestExecution:
         # Our fixture defines greet, double, fetch_data, __init__, increment
         assert "greet" in result.output or "double" in result.output
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_count_returns_int(self, interp, fixture_file):
         program = f'source("{fixture_file}").find(".fn").count()'
@@ -127,6 +133,7 @@ class TestExecution:
         assert isinstance(result.output, int)
         assert result.output > 0
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_view_returns_renderable(self, interp, fixture_file):
         program = (
@@ -138,6 +145,7 @@ class TestExecution:
         rendered = str(result.output)
         assert "```" in rendered
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_default_code_from_context(self, interp, plucker_ctx):
         """source() with no args uses context.config['code']."""
@@ -146,6 +154,7 @@ class TestExecution:
         assert result.success
         assert "greet" in result.output
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_explicit_code_overrides_default(
         self, interp, plucker_ctx, fixture_file
@@ -155,6 +164,7 @@ class TestExecution:
         result = await run_interpreter(interp, program, plucker_ctx)
         assert result.success
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_multi_step_chain(self, interp, fixture_file):
         program = (
@@ -175,12 +185,14 @@ class TestExecution:
 
 
 class TestOutputMetadata:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_metadata_includes_interpreter_name(self, interp, fixture_file):
         program = f'source("{fixture_file}").find(".fn").count()'
         result = await run_interpreter(interp, program, ExecutionContext())
         assert result.metadata.get("interpreter") == "plucker"
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_output_format_is_python(self, interp, fixture_file):
         """plucker output varies by terminal — format tag stays 'python'."""
@@ -188,6 +200,7 @@ class TestOutputMetadata:
         result = await run_interpreter(interp, program, ExecutionContext())
         assert result.output_format == "python"
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_duration_recorded(self, interp, fixture_file):
         program = f'source("{fixture_file}").find(".fn").count()'

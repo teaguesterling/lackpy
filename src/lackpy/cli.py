@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .profiles import ProfileError
 from .tools.toolbox import UnknownToolError
 
 
@@ -27,24 +28,11 @@ from .tools.toolbox import UnknownToolError
 # to the user as ordinary misuse. Anything added here must be a type raised
 # deliberately for a user-facing condition, never a builtin an implementation
 # error can also raise.
-_ENVELOPE_ERRORS = (RuntimeError, FileNotFoundError, UnknownToolError, NotImplementedError)
+_ENVELOPE_ERRORS = (RuntimeError, FileNotFoundError, UnknownToolError, NotImplementedError,
+                    ProfileError)
 
 
-def _parse_profile(profile_str: str) -> str | list[str]:
-    """Parse the --profile argument.
-
-    A comma-separated value is an explicit tool list; a bare value is passed
-    through as a profile name (resolved against [profiles.<name>] / a profile
-    file), matching the Python/MCP API. Use 'lackpyctl profile info <name>' to
-    inspect one.
-    """
-    parts = [k.strip() for k in profile_str.split(",")]
-    return parts if len(parts) > 1 else parts[0]
-
-
-def _parse_tools(tools_str: str) -> list[str]:
-    """Parse --tools argument as a comma-separated list of tool names."""
-    return [t.strip() for t in tools_str.split(",") if t.strip()]
+_TOOLS_REMOVED = "--tools was removed with the tool kits in lackpy stepy100; use pathlib.Path"
 
 
 def _parse_params(param_list: list[str] | None) -> dict[str, str]:
@@ -77,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--create", action="store_true", default=False, help="Save as Lackey file")
     parser.add_argument("--generate", action="store_true", default=False, help="Generate without running")
     parser.add_argument("--name", default=None, help="Class name for --create")
-    parser.add_argument("--profile", default=None, help="Profile name or comma-separated tool list")
-    parser.add_argument("--tools", default=None, help="Extra tool names (comma-separated) to add to the profile")
+    parser.add_argument("--profile", default=None,
+                        help="Profile name: a [profiles.<name>] table (model, mode, rules)")
     parser.add_argument("--param", action="append", default=None, help="Parameter: key=value (repeatable)")
     parser.add_argument("--validate", action="store_true", default=False, help="Validate without running")
     parser.add_argument("--mode", default=None, help="Inference mode: 1-shot, spm (default: from config or legacy)")
@@ -86,18 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _run_file(svc: Any, path: Path, profile: list[str] | None, params: dict[str, str], sandbox: Any,
-                    extra_tools: list[str] | None = None) -> dict[str, Any]:
-    """Run a file — Lackey file or plain program (with --profile or --tools)."""
+async def _run_file(svc: Any, path: Path, profile: str | None, params: dict[str, str],
+                    sandbox: Any) -> dict[str, Any]:
+    """Run a file — a Lackey file, or a plain program."""
     content = path.read_text()
     if "Lackey" in content and "def run" in content:
         return await svc.run_lackey(path, params=params, sandbox=sandbox)
-    elif profile or extra_tools:
-        exec_result = await svc.run_program(content, profile=profile, params=params, extra_tools=extra_tools)
-        return {"success": exec_result.success, "output": exec_result.effective_output,
-                "stdout": exec_result.stdout, "error": exec_result.error}
-    else:
-        return {"success": False, "error": "Specify --profile or --tools for plain program files, or use a Lackey file."}
+    exec_result = await svc.run_program(content, profile=profile, params=params)
+    return {"success": exec_result.success, "output": exec_result.effective_output,
+            "stdout": exec_result.stdout, "error": exec_result.error}
 
 
 def _file_entrypoint(raw_args: list[str]) -> int:
@@ -105,12 +90,13 @@ def _file_entrypoint(raw_args: list[str]) -> int:
     ep = argparse.ArgumentParser(prog="lackpy", add_help=False)
     ep.add_argument("file")
     ep.add_argument("--profile", default=None)
-    ep.add_argument("--tools", default=None)
     ep.add_argument("--param", action="append", default=None)
     ep.add_argument("--validate", action="store_true", default=False)
     ep.add_argument("--workspace", type=Path, default=None)
     ep.add_argument("--sandbox", default=None)
     args, _ = ep.parse_known_args(raw_args)
+    if any(a == "--tools" or a.startswith("--tools=") for a in raw_args):
+        ep.error(_TOOLS_REMOVED)
 
     path = Path(args.file)
     if not path.exists():
@@ -118,8 +104,7 @@ def _file_entrypoint(raw_args: list[str]) -> int:
         return 1
 
     workspace = args.workspace or Path.cwd()
-    profile = _parse_profile(args.profile) if args.profile else None
-    extra_tools = _parse_tools(args.tools) if args.tools else None
+    profile = args.profile
     params = _parse_params(args.param)
 
     from .service import LackpyService
@@ -127,12 +112,12 @@ def _file_entrypoint(raw_args: list[str]) -> int:
 
     if args.validate:
         program = path.read_text()
-        result = svc.validate(program, profile=profile, extra_tools=extra_tools)
+        result = svc.validate(program, profile=profile)
         out: dict[str, Any] = {"valid": result.valid, "errors": result.errors, "calls": list(result.calls)}
         print(json.dumps(out, indent=2))
         return 0 if result.valid else 1
 
-    result_dict = asyncio.run(_run_file(svc, path, profile, params, args.sandbox, extra_tools=extra_tools))
+    result_dict = asyncio.run(_run_file(svc, path, profile, params, args.sandbox))
     print(json.dumps(result_dict, indent=2, default=str))
     return 0 if result_dict.get("success") else 1
 
@@ -161,14 +146,11 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = args.workspace or Path.cwd()
 
-    extra_tools = _parse_tools(args.tools) if args.tools else None
-
     # --validate + -c → validate the code string
     if args.validate and args.intent:
         from .service import LackpyService
         svc = LackpyService(workspace=workspace)
-        profile = _parse_profile(args.profile) if args.profile else None
-        result = svc.validate(args.intent, profile=profile, extra_tools=extra_tools)
+        result = svc.validate(args.intent, profile=args.profile)
         out: dict[str, Any] = {"valid": result.valid, "errors": result.errors, "calls": list(result.calls)}
         print(json.dumps(out, indent=2))
         return 0 if result.valid else 1
@@ -177,17 +159,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.intent:
         from .service import LackpyService
         svc = LackpyService(workspace=workspace)
-        profile = _parse_profile(args.profile) if args.profile else None
+        profile = args.profile
         mode = getattr(args, 'mode', None)
 
         if args.create:
-            gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
-            tools = profile if isinstance(profile, list) else []
-            if extra_tools:
-                tools = tools + extra_tools
+            gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode))
             path = asyncio.run(svc.create_lackey(
                 program=gen.program, name=args.name or "Generated",
-                tools=tools,
+                tools=[],
                 creation_log=[
                     {"role": "user", "content": args.intent},
                     {"role": "assistant", "content": gen.program, "accepted": True},
@@ -198,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.generate:
             try:
-                gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
+                gen = asyncio.run(svc.generate(args.intent, profile=profile, mode=mode))
             except _ENVELOPE_ERRORS as e:
                 # STDERR here, unlike the delegate path below. --generate's stdout
                 # is program SOURCE, not an envelope, so `lackpy -c … --generate >
@@ -215,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Default: delegate (generate + run)
         try:
-            result = asyncio.run(svc.delegate(args.intent, profile=profile, mode=mode, extra_tools=extra_tools))
+            result = asyncio.run(svc.delegate(args.intent, profile=profile, mode=mode))
         except _ENVELOPE_ERRORS as e:
             # A caller parses one stream. Emitting the success envelope on stdout
             # and this one on stderr means anybody reading stdout records a failed
@@ -233,8 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         if program.strip():
             from .service import LackpyService
             svc = LackpyService(workspace=workspace)
-            profile = _parse_profile(args.profile) if args.profile else None
-            exec_result = asyncio.run(svc.run_program(program, profile=profile, extra_tools=extra_tools))
+            exec_result = asyncio.run(svc.run_program(program, profile=args.profile))
             out_dict = {"success": exec_result.success, "output": exec_result.effective_output,
                         "stdout": exec_result.stdout, "error": exec_result.error}
             print(json.dumps(out_dict, indent=2, default=str))

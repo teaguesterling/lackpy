@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from lackpy.service import LackpyService
+from lackpy.service import KIT_REMOVED, LackpyService
 
 
 SAMPLE_LACKEY = '''
@@ -11,15 +11,37 @@ from lackpy.lackey import Lackey, Tool
 class ReadFile(Lackey):
     """Read a file and return its contents."""
 
-    read_file = Tool()
-
     path: str = "test.txt"
 
     returns: str
 
     def run(self) -> str:
-        content = self.read_file(self.path)
+        from pathlib import Path
+        content = Path(self.path).read_text()
         return content
+'''
+
+# Retired kit model: SAMPLE_LACKEY declared `read_file = Tool()` and called self.read_file.
+KIT_LACKEY = '''
+from lackpy.lackey import Lackey, Tool
+
+class ReadFile(Lackey):
+    read_file = Tool()
+
+    path: str = "test.txt"
+
+    def run(self) -> str:
+        return self.read_file(self.path)
+'''
+
+REQUIRED_LACKEY = '''
+from lackpy.lackey import Lackey
+
+class Greet(Lackey):
+    name: str
+
+    def run(self) -> str:
+        return "hi " + self.name
 '''
 
 
@@ -45,31 +67,63 @@ class TestParseLackey:
     def test_parse_lackey(self, service, lackey_file):
         info = service.parse_lackey(lackey_file)
         assert info.class_name == "ReadFile"
-        assert "read_file" in info.tools
+        assert info.tools == []
         assert "path" in info.params
         assert info.returns == "str"
-        assert "read_file(path)" in info.run_body
-
-
-_BARE_NAME_PARAMS = pytest.mark.xfail(
-    reason="stepy100 Task 5: run_lackey passes Lackey params, and the run body reads them as bare names, which the runner no longer binds; needs a controller decision", strict=True)
+        assert "Path(path).read_text()" in info.run_body
 
 
 class TestRunLackey:
-    @_BARE_NAME_PARAMS
     @pytest.mark.asyncio
     async def test_run_lackey_default_params(self, service, lackey_file):
         result = await service.run_lackey(lackey_file)
         assert result["success"]
         assert result["output"] == "hello from lackey"
 
-    @_BARE_NAME_PARAMS
     @pytest.mark.asyncio
     async def test_run_lackey_override_params(self, service, lackey_file, workspace):
         (workspace / "other.txt").write_text("other content")
         result = await service.run_lackey(lackey_file, params={"path": "other.txt"})
-        assert result["success"]
+        assert result["success"], result["error"]
         assert result["output"] == "other content"
+
+    @pytest.mark.asyncio
+    async def test_run_lackey_params_reach_the_body_through_a_literal(self, service, lackey_file):
+        # Parked item 4: the body reads `path`; run_lackey prepends the params
+        # literal and one binding per param, so the run is plain Python.
+        result = await service.run_lackey(lackey_file)
+        assert result["program"].startswith('params = {\'path\': \'test.txt\'}\npath = params[\'path\']\n')
+
+    @pytest.mark.asyncio
+    async def test_run_lackey_rejects_a_param_of_the_wrong_type(self, service, lackey_file):
+        result = await service.run_lackey(lackey_file, params={"path": 3})
+        assert not result["success"]
+        assert "'path'" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_run_lackey_rejects_an_unknown_param(self, service, lackey_file):
+        result = await service.run_lackey(lackey_file, params={"other": "x"})
+        assert not result["success"]
+        assert "'other'" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_required_param_must_be_passed(self, service, workspace):
+        path = workspace / "greet.py"
+        path.write_text(REQUIRED_LACKEY)
+        missing = await service.run_lackey(path)
+        assert not missing["success"]
+        assert "'name'" in missing["error"]
+        passed = await service.run_lackey(path, params={"name": "bo"})
+        assert passed["success"], passed["error"]
+        assert passed["output"] == "hi bo"
+
+    @pytest.mark.asyncio
+    async def test_lackey_declaring_tools_is_an_error(self, service, workspace):
+        path = workspace / "kit_lackey.py"
+        path.write_text(KIT_LACKEY)
+        result = await service.run_lackey(path)
+        assert not result["success"]
+        assert result["error"] == KIT_REMOVED
 
 
 class TestCreateLackey:

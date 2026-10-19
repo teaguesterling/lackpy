@@ -41,6 +41,7 @@ def service(workspace):
 
 
 class TestTemplateDelegate:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; generation (templates and rules) migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_read_file_via_template(self, service):
         result = await service.delegate("read the file hello.txt", profile="debug")
@@ -51,6 +52,7 @@ class TestTemplateDelegate:
 
 
 class TestRulesDelegate:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; generation (templates and rules) migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_read_file_via_rules(self, service):
         result = await service.delegate("read file hello.txt", profile=["read_file"])
@@ -59,6 +61,7 @@ class TestRulesDelegate:
 
 
 class TestRunProgram:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; service integration migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_run_with_glob(self, service):
         result = await service.run_program("files = find_files('src/*.py')\nlen(files)", profile=["find_files"])
@@ -67,6 +70,7 @@ class TestRunProgram:
 
 
 class TestCreate:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; service integration migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_create_template(self, service):
         result = await service.create(
@@ -82,6 +86,7 @@ class TestKitManagement:
         kits = service.profile_list()
         assert any(k["name"] == "debug" for k in kits)
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; service integration migration pending", strict=True)
     def test_kit_create_and_info(self, service):
         service.profile_create("readonly", ["read_file", "find_files"], "Read-only tools")
         info = service.profile_info("readonly")
@@ -90,6 +95,7 @@ class TestKitManagement:
 
 
 class TestParamsIntegration:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; service integration migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_run_with_params(self, service):
         # Task 5: params replace the program's own params literal; no bare names.

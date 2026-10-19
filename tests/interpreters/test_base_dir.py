@@ -49,6 +49,7 @@ def elsewhere(tmp_path_factory, monkeypatch) -> Path:
     return d
 
 
+@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; plucker migration pending", strict=True)
 @pytest.mark.asyncio
 async def test_base_dir_is_honoured_from_another_cwd(corpus, elsewhere):
     assert Path(os.getcwd()) == elsewhere, "precondition: cwd is not the corpus"

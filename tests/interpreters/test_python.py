@@ -1,117 +1,145 @@
 """Tests for the PythonInterpreter plugin.
 
-These tests mirror the existing run_program behavior in LackpyService —
-the PythonInterpreter should be a drop-in for the same execution path,
-validated against the same tools and producing the same semantic output.
+These tests mirror the run_program behavior in LackpyService: the
+PythonInterpreter shares RestrictedRunner, the runtime namespace and the
+workspace PathPolicy, and binds no tool callables (stepy100 Plan 2, Task 7).
 """
 
+import json
+
 import pytest
-from pathlib import Path
 
 from lackpy.interpreters import (
     ExecutionContext,
     PythonInterpreter,
     run_interpreter,
 )
+from lackpy.lang.grader import Grade
+from lackpy.run.paths import load_policy
+from lackpy.service import KIT_REMOVED
 from lackpy.tools.registry import ResolvedTools
 from lackpy.tools.toolbox import ArgSpec, ToolSpec
-from lackpy.lang.grader import Grade
 
 
 def _make_kit():
-    """Build a minimal ResolvedTools with one callable tool for tests."""
+    """A ResolvedTools with one callable tool: the retired kit model."""
     def _count(items):
         return len(items)
 
     tools = {
         "count": ToolSpec(
-            name="count",
-            provider="builtin",
-            description="Count items",
-            args=[ArgSpec(name="items", type="list")],
-            returns="int",
-            grade_w=1,
-            effects_ceiling=1,
+            name="count", provider="builtin", description="Count items",
+            args=[ArgSpec(name="items", type="list")], returns="int",
+            grade_w=1, effects_ceiling=1,
         ),
     }
-    return ResolvedTools(
-        tools=tools,
-        callables={"count": _count},
-        grade=Grade(w=1, d=1),
-        description="count(items) -> int",
-    )
+    return ResolvedTools(tools=tools, callables={"count": _count},
+                         grade=Grade(w=1, d=1), description="count(items) -> int")
+
+
+@pytest.fixture
+def ws(tmp_path):
+    w = tmp_path / "ws"
+    w.mkdir()
+    (w / "a.txt").write_text("hello")
+    return w
+
+
+@pytest.fixture
+def interp(tmp_path):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    return PythonInterpreter(path_policy_loader=lambda w: load_policy(w, home=home, managed=None))
 
 
 class TestPythonValidation:
-    def test_valid_program_passes(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = interp.validate("count([1, 2, 3])", ctx)
+    def test_valid_program_passes(self, interp):
+        result = interp.validate("len([1, 2, 3])", ExecutionContext())
         assert result.valid
         assert result.errors == []
 
-    def test_missing_kit_fails(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=None)
-        result = interp.validate("1 + 1", ctx)
-        assert not result.valid
-        assert any("tools" in e for e in result.errors)
+    def test_no_tools_needed(self, interp):
+        # Retired kit model: a context without a resolved kit was invalid.
+        result = interp.validate("1 + 1", ExecutionContext(tools=None))
+        assert result.valid, result.errors
 
-    def test_import_rejected(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = interp.validate("import os", ctx)
+    def test_context_naming_tools_is_an_error(self, interp):
+        result = interp.validate("count([1])", ExecutionContext(tools=_make_kit()))
+        assert not result.valid
+        assert result.errors == [KIT_REMOVED]
+
+    def test_import_rejected(self, interp):
+        result = interp.validate("import os", ExecutionContext())
         assert not result.valid
 
-    def test_unknown_tool_rejected(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = interp.validate("delete_everything()", ctx)
+    def test_unknown_name_rejected(self, interp):
+        result = interp.validate("delete_everything()", ExecutionContext())
         assert not result.valid
 
 
 class TestPythonExecution:
     @pytest.mark.asyncio
-    async def test_execute_simple_program(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = await run_interpreter(interp, "count([1, 2, 3])", ctx)
-        assert result.success
+    async def test_execute_simple_program(self, interp, ws):
+        result = await run_interpreter(interp, "len([1, 2, 3])", ExecutionContext(base_dir=ws))
+        assert result.success, result.error
         assert result.output == 3
         assert result.output_format == "python"
 
     @pytest.mark.asyncio
-    async def test_execute_with_params(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(
-            tools=_make_kit(),
-            params={"data": [1, 2, 3, 4, 5]},
-        )
+    async def test_execute_reads_through_the_path_policy(self, interp, ws):
+        program = "from pathlib import Path\nPath('a.txt').read_text()"
+        result = await run_interpreter(interp, program, ExecutionContext(base_dir=ws))
+        assert result.success, result.error
+        assert result.output == "hello"
+        assert [e.tool for e in result.metadata["trace"].entries] == ["Path.read_text"]
+
+    @pytest.mark.asyncio
+    async def test_path_policy_is_loaded_from_the_base_dir(self, interp, ws):
+        (ws / ".claude").mkdir()
+        (ws / ".claude" / "settings.json").write_text(
+            json.dumps({"permissions": {"deny": ["Read(./a.txt)"]}}))
+        program = "from pathlib import Path\nPath('a.txt').read_text()"
+        result = await run_interpreter(interp, program, ExecutionContext(base_dir=ws))
+        assert not result.success
+        assert "not allowed in lackpy" in result.error
+
+    @pytest.mark.asyncio
+    async def test_malformed_settings_is_a_failed_result(self, interp, ws):
+        settings = ws / ".claude" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_text("{")
+        result = await run_interpreter(interp, "x = 1", ExecutionContext(base_dir=ws))
+        assert not result.success
+        assert str(settings) in result.error
+
+    @pytest.mark.asyncio
+    async def test_context_naming_tools_fails(self, interp, ws):
+        result = await run_interpreter(interp, "count([])", ExecutionContext(tools=_make_kit(), base_dir=ws))
+        assert not result.success
+        assert KIT_REMOVED in result.error
+
+    @pytest.mark.asyncio
+    async def test_execute_with_params(self, interp, ws):
+        ctx = ExecutionContext(base_dir=ws, params={"data": [1, 2, 3, 4, 5]})
         # Task 5: params replace the program's own params literal; no bare names.
-        result = await run_interpreter(interp, 'params = {"data": []}\ncount(params["data"])', ctx)
-        assert result.success
+        result = await run_interpreter(interp, 'params = {"data": []}\nlen(params["data"])', ctx)
+        assert result.success, result.error
         assert result.output == 5
 
     @pytest.mark.asyncio
-    async def test_failed_validation_short_circuits(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = await run_interpreter(interp, "import sys", ctx)
+    async def test_failed_validation_short_circuits(self, interp, ws):
+        result = await run_interpreter(interp, "import sys", ExecutionContext(base_dir=ws))
         assert not result.success
         assert "Validation failed" in result.error
 
     @pytest.mark.asyncio
-    async def test_result_has_duration(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = await run_interpreter(interp, "count([])", ctx)
+    async def test_result_has_duration(self, interp, ws):
+        result = await run_interpreter(interp, "len([])", ExecutionContext(base_dir=ws))
         assert result.success
         assert result.duration_ms >= 0
 
     @pytest.mark.asyncio
-    async def test_result_metadata_includes_trace(self):
-        interp = PythonInterpreter()
-        ctx = ExecutionContext(tools=_make_kit())
-        result = await run_interpreter(interp, "count([1, 2])", ctx)
+    async def test_result_metadata_includes_trace(self, interp, ws):
+        result = await run_interpreter(interp, "len([1, 2])", ExecutionContext(base_dir=ws))
         assert result.success
         assert "trace" in result.metadata
