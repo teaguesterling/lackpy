@@ -183,6 +183,11 @@ def _parse_info_string(info: str) -> tuple[CellType, dict[str, str], dict[str, s
     errors: list[str] = []
     m = _ANNOTATION_RE.match(info)
     if not m:
+        # Final review M6: text the fence line cannot hold (``@read(a.txt) extra``,
+        # ``lackpy hidden``) is an error, never a silent plain code cell.
+        errors.append(
+            f"unrecognized text on the fence line: {info!r}; a fence line is "
+            "```lackpy, then at most one @annotation(...), then key=value options")
         return "code", {}, {}, errors
 
     annotation = m.group(1)

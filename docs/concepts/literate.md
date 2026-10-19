@@ -345,6 +345,9 @@ refused: writing <workspace>/.claude/settings.json (it is a permission settings 
 The value of a run is the value of the trailing expression of the last code
 cell. A cell that does not end in an expression has no value, so the value is
 `None`. The value is data, or the text of its `repr`. A failed run has no value.
+An annotation cell (`@read`, `@write`, `@diff`, `@continue`) is never the
+last code cell: a document that ends in `@write` has the value of the code
+cell before it.
 
 Measured on 2026-10-18: for a document with `x = 2` in one cell and
 `x + 1` in the next, the output is `3`. If a later cell is `y = 5`, the output is `None`.

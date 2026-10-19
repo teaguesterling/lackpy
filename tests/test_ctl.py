@@ -176,3 +176,13 @@ def test_render_execute_with_an_unknown_profile_exits_1(tmp_path, tmp_policy_hom
     assert main(["render", "--execute", "--profile", "nope", str(doc), "--base-dir", str(ws)]) == 1
     assert "nope" in capsys.readouterr().err
     assert not (ws / "o.txt").exists()
+
+
+def test_render_execute_failure_still_shows_the_rendered_document(tmp_path, tmp_policy_home, capsys):
+    # Final review M2: one failing cell dropped the whole rendered document.
+    from lackpy.ctl import main
+    doc = _doc(tmp_path, "```lackpy\nx = 6 * 7\n```\n\nX={x}\n\n```lackpy\ny = 1 // 0\n```\n")
+    assert main(["render", "--execute", str(doc)]) == 1
+    captured = capsys.readouterr()
+    assert "X=42" in captured.out
+    assert "ZeroDivisionError" in captured.err

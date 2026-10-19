@@ -67,6 +67,10 @@ def _render(args) -> int:
             return 1
         result = asyncio.run(service.run_program(document, profile=profile))
         if not result.success:
+            # Final review M2: show the rendered document (the cells that ran),
+            # then the error; no -o file is written for a failed run.
+            if result.stdout:
+                print(result.stdout)
             print(f"lackpyctl render --execute: {result.error}", file=sys.stderr)
             return 1
         out = result.stdout

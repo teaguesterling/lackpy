@@ -148,6 +148,25 @@ class TestAnnotations:
         assert "unknown annotation" in result.errors[0]
         assert result.cells[0].cell_type == "code"  # falls back
 
+    def test_trailing_text_after_an_annotation_is_an_error(self):
+        # Final review M6: this parsed as an empty code cell with no error, so the
+        # document "succeeded" and read nothing.
+        result = parse("```lackpy @read(a.txt) extra\n```")
+        assert result.errors and "fence line" in result.errors[0]
+
+    def test_unknown_text_on_the_fence_line_is_an_error(self):
+        result = parse("```lackpy hidden\nx = 1\n```")
+        assert result.errors and "fence line" in result.errors[0]
+
+    def test_a_tag_with_trailing_text_is_an_error(self):
+        result = parse('<compute read="a.txt" extra>\n</compute>')
+        assert result.errors and "fence line" in result.errors[0]
+
+    def test_a_plain_fence_and_options_still_parse(self):
+        for doc in ("```lackpy\nx = 1\n```", "```lackpy x=1\nx = 1\n```",
+                    "```lackpy @read(a.txt)\n```", '<compute read="a.txt">\n</compute>'):
+            assert not parse(doc).errors, doc
+
     def test_annotation_with_options(self):
         doc = "```lackpy @hidden echo=true\nsetup = True\n```"
         result = parse(doc)

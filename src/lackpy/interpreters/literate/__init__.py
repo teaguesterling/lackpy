@@ -736,9 +736,16 @@ def _keep_value(values: dict[int, Any], index: int, outcome: _CellOutcome) -> No
         values.pop(index, None)
 
 
+#: Cell types that are never the output cell (final review M3): prose, and the
+#: annotation cells whose compiled source is lackpy's, not the author's (a
+#: ``@write`` cell's trailing ``write_text`` returns a character count).
+_NOT_OUTPUT_CELLS = frozenset({"prose", "read", "write", "diff", "continue"})
+
+
 def _last_code_value(cells: list[Cell], values: dict[int, Any]) -> Any:
-    """The value of the last code (non-prose) cell, or None when it did not succeed."""
-    code = [i for i, c in enumerate(cells) if c.cell_type != "prose"]
+    """The value of the last code cell (not prose, not an annotation cell), or None
+    when it did not succeed."""
+    code = [i for i, c in enumerate(cells) if c.cell_type not in _NOT_OUTPUT_CELLS]
     return values.get(code[-1]) if code else None
 
 

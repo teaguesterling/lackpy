@@ -1195,3 +1195,14 @@ class TestLiterateFinalFixWave:
                                                                 policy={"read_only": True}))
         assert result.success is False
         assert "read-only" in result.error, result.error
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("last", ["```lackpy @write(o.txt)\nhello world\n```\n",
+                                      "```lackpy @read(i.txt)\n```\n"])
+    async def test_m3_an_annotation_cell_is_not_the_output_cell(self, service, last):
+        # Final review M3: a document ending in @write had output = the character count.
+        (service._workspace / "i.txt").write_text("in")
+        doc = f"```lackpy\nx = 5\nx\n```\n\n{last}"
+        result = await service.run_program(doc, profile=_LIT)
+        assert result.success, result.error
+        assert result.output == 5

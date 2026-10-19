@@ -307,7 +307,14 @@ def compile_cell(cell: Cell) -> str:
 
 
 def compile_cells(parse_result: ParseResult) -> str:
-    """Compile a parsed document into a single Python program.
+    """Compile the cells of a parsed document into one Python text.
+
+    The text holds every given cell's compiled source in order, prose cells
+    too: a prose cell contributes its ``{...}`` expressions, one statement per
+    line (final review M9). Over a whole document it is analysis text (the
+    kibitzer pre-check reads it), not the program the session holds, which
+    has no prose. Over the code cells alone it is the document's python3 twin
+    (the equivalence test and the docs test pass only the code cells).
 
     An annotation cell imports ``Path`` only when the program so far binds no
     ``Path`` (:func:`without_path_import`), so the program validates as one

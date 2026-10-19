@@ -126,9 +126,14 @@ async def run_program(program: str, profile: str | None = None,
                       rules: list[str] | None = None) -> dict:
     """Validate and run a program you already have (skips generation). The program
     is plain Python that the lackpy validator checks; it reads and writes files
-    only through pathlib.Path, under the workspace's permission rules. `rules` names
-    extra checks: no_loops, no_nested_calls, max_depth(N), max_calls(N). Bytes, nan
-    and infinity come back as their Python repr text."""
+    only through pathlib.Path, under the workspace's permission rules. With a
+    profile whose `execution` is "literate", the program is a literate markdown
+    document (prose and ```lackpy code cells): `stdout` is the rendered document,
+    `output` is the value of the last code cell's trailing expression, and
+    `params` replace the defaults of the document's `params = {...}` literal.
+    `rules` names extra checks: no_loops, no_nested_calls, max_depth(N),
+    max_calls(N); on the literate axis they apply to every cell. Bytes, nan and
+    infinity come back as their Python repr text."""
     result = await _get_service().run_program(program, profile=profile, params=params, rules=rules)
     return _json_safe({
         "success": result.success, "output": result.output, "error": result.error,
