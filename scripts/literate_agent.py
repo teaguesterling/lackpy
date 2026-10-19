@@ -18,8 +18,6 @@ from pathlib import Path
 
 import time
 
-import httpx
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
@@ -31,6 +29,7 @@ from lackpy.interpreters.literate import (
     StopScanner,
 )
 from lackpy.prompts import DEFAULT_PERSONA, PERSONAS, compose
+from lackpy.run.paths import load_policy
 
 
 DEFAULT_MODEL = "qwen3:8b"
@@ -66,6 +65,8 @@ async def call_ollama(
     the returned text ends with (and includes) the matched marker so the
     session's textual fallback owns the pause semantics.
     """
+    import httpx  # here, not at import time: the loop is testable with a stub and no httpx
+
     indicator = asyncio.create_task(_progress_indicator("Generating")) if verbose else None
     start = time.perf_counter()
     payload = {
@@ -118,6 +119,8 @@ async def run_literate_agent(
     verbose: bool = False,
     persona: str = DEFAULT_PERSONA,
     num_predict: int = 8192,
+    generate=None,
+    policy_loader=load_policy,
 ) -> str:
     """Run the literate agent loop.
 
@@ -125,11 +128,23 @@ async def run_literate_agent(
     2. Execute the document
     3. If @continue was hit, feed results back to model
     4. Repeat until no more @continue or max iterations
+
+    Every cell runs in the session's ``CellSession`` (literate stepy D1), under
+    the ``PathPolicy`` that ``policy_loader`` builds for the working directory:
+    the same boundary the service gives a literate run. A refusal ends the
+    document (D4), so the loop stops on one rather than asking for a fix.
+
+    ``generate`` replaces :func:`call_ollama` (tests pass a stub); ``policy_loader``
+    replaces :func:`load_policy` (tests pass one with a temporary home).
     """
+    generate = generate or call_ollama
     interpreter = LiterateInterpreter()
     system_prompt = compose(persona, interpreter)
-    work_dir = Path(base_dir) if base_dir else Path.cwd()
-    context = ExecutionContext(base_dir=work_dir)
+    work_dir = (Path(base_dir) if base_dir else Path.cwd()).resolve()
+    context = ExecutionContext(
+        base_dir=work_dir,
+        config={"path_policy": policy_loader(work_dir)},
+    )
     # The fold. One persistent kernel is threaded across rounds, so functions and
     # objects defined in one round are live in the next; step() strips <think>,
     # gates + journals the doc, and returns Either. This thin client just does the
@@ -158,7 +173,7 @@ async def run_literate_agent(
 
         # Stop generation at the pause marker (client-side scan; the marker is
         # kept and the session's textual fallback handles the pause + discard).
-        response = await call_ollama(
+        response = await generate(
             full_prompt, model=model, system=system_prompt,
             num_predict=num_predict, verbose=verbose,
             # Both syntaxes are accepted input, so scan for either marker: the
@@ -179,6 +194,11 @@ async def run_literate_agent(
             if not result.ok:
                 print(f"Errors: {result.errors}", file=sys.stderr)
             print("--- End Result ---\n", file=sys.stderr)
+
+        if result.errors and result.errors[0].startswith("refused:"):
+            # A refusal ended the document and closed the session (D4): every
+            # later round would refuse too, so stop and say why.
+            return f"{session.rendered}\n\n{result.errors[0]}"
 
         if not result.ok:
             # Left: hand the errors + the raw un-interpreted document back so the

@@ -17,7 +17,7 @@ Follow this pattern: understand, plan, implement, verify.
 
 **Implement.** Make the changes. One logical change at a time. For new files, write the complete content. For existing files, make targeted modifications. Include enough context for unambiguous application.
 
-**Verify.** Run tests after changes when tests exist. Re-read modified files if the change was complex. Report the result.
+**Verify.** Re-read modified files if the change was complex. Report the result.
 
 # Code Quality
 

@@ -7,6 +7,11 @@ happens to its document after submission.
 LITERATE_SYSTEM_PROMPT is a standalone prompt (general persona + hint)
 for callers that don't use the persona system.
 
+Literate stepy Task 5 (D10): the hint teaches the stepy language. It is
+``format_preprompt()`` (reused, not copied), then the literate format, then one
+worked document. It names no tool and no ``os`` or process access: a cell is a
+lackpy program, and file I/O is ``pathlib.Path`` (the annotations compile to it).
+
 The hint is the model's only view of the execution pipeline. If the
 model doesn't know about a feature (holes, the pause protocol, the
 budget manifest, etc.), it can't use it effectively. Keep this in sync
@@ -21,6 +26,8 @@ LITERATE_HINT between ``_HINT_HEAD`` and ``_HINT_TAIL``.
 """
 
 from __future__ import annotations
+
+from lackpy.lang.spec import format_preprompt
 
 # ---------------------------------------------------------------------------
 # L5 forgiveness affordances (ship WITH the kernel)
@@ -94,14 +101,19 @@ _FORGIVENESS_CONVENTIONS = "\n".join(
 
 
 _HINT_HEAD = """\
-You respond ONLY with executable literate documents — markdown with <compute> code blocks. Your document is compiled and executed: prose becomes printed output, code runs as Python. There is no other interface.
+# The literate format
+
+The lesson above is for one lackpy program. A literate document is many cells, and the cells together are ONE lackpy program: the code of every cell, joined in order, must follow every rule above. A name or an import from an earlier cell is still bound in a later one.
+
+You respond ONLY with a literate document: markdown with <compute> code blocks. Your document is compiled and executed: prose becomes printed output, code runs as lackpy Python. There is no other interface.
 
 ## Output Rules
 
 - Your ENTIRE response must be a valid literate document. No conversational text before or after.
 - Do NOT wrap your response in an outer code fence (no ```markdown wrapper).
-- Prose lines print verbatim. Use {variable} to interpolate Python expressions into prose. Use {{double braces}} for literal braces.
-- Code blocks execute as Python. Variables carry forward across all blocks.
+- Prose lines print verbatim. Use {expression} to interpolate a value into prose. Use {{double braces}} for literal braces.
+- Code blocks run as lackpy Python. Names carry forward across all blocks.
+- A document cannot run commands or reach anything outside the workspace. Files are read and written with `Path`, as in the lesson above.
 
 ## Syntax
 
@@ -120,27 +132,22 @@ x = 1
 
 ## Annotations
 
-<compute>              — normal code block, executes, output visible
-<compute hidden>       — silent execution (setup, computation)
-<compute gather>       — executes silently, part of batch exploration
+<compute>              — normal code block, runs, output visible
+<compute hidden>       — silent run (setup, computation)
+<compute gather>       — runs silently, part of batch exploration
 <compute continue>     — pause: execution stops, results return to you
-<compute read="path">  — prints file contents
-<compute write="path"> — writes block body to file
-<compute diff="path">  — applies unified diff to file
-<compute scratch>      — executes, prints variable summary only
+<compute read="path">  — prints file contents (an empty body)
+<compute write="path"> — writes the block body, as it is, to the file
+<compute diff="path">  — applies a unified diff to the file
+<compute scratch>      — runs, prints a summary of the new names only
 
-## Tools
+Each of read and write is plain `Path` code. An annotation cell imports `Path` for you unless an earlier cell already did. So if a document uses a read or write annotation, or imports `Path` itself, do not import `Path` again: a second import of the same name is a rule violation.
 
-Available as Python functions in code blocks:
+A diff is applied by lackpy, not by your program. It has no python3 twin: the cells of a document that uses diff do not run the same under python3 as under lackpy. A diff whose context or `-` lines do not match the file fails and writes nothing.
 
-  read_file(path) → str              # read file contents
-  write_file(path, content) → None   # write file (creates dirs)
-  apply_diff(path, diff_text) → str  # apply unified diff
-  search_content(pattern, path=".") → str  # grep-like search
-  run_command(cmd) → str             # shell command
-  run_tests(path=".") → str          # run pytest
+## Output
 
-All Python builtins are available. Standard library imports work (import re, json, os, math, etc.).
+A document's output is its prose, and the printed output of its code. Its value is the trailing expression of the last code cell, when that cell ends in an expression: a bare name, a call, or `len(x)`. Any other cell ends without a value.
 
 ## How the Kernel Forgives
 
@@ -161,30 +168,47 @@ is *file content*: mark code samples there with an ordinary markdown fence
 
 ## Example
 
+This document reads `scores.txt` (lines like `Alice: 90`), reports the best score, and records the winner. It uses `Path` for all file I/O, and it imports `Path` once.
+
+=== EXAMPLE DOCUMENT ===
 <compute hidden>
-content = read_file("README.md")
-lines = content.strip().splitlines()
+from pathlib import Path
+
+scores = {}
+for row in Path("scores.txt").read_text().splitlines():
+    name, value = row.split(": ")
+    scores[name] = int(value)
+best = max(scores, key=scores.get)
 </compute>
 
-# File Report
+# Score Report
 
-The file has {len(lines)} lines. First line: {lines[0]}
+{len(scores)} people took part. The best score is {scores[best]}, by {best}.
+
+<compute write="best.txt">
+This file records the winner of the score report.
+</compute>
+
+<compute>
+Path("best.txt").read_text().strip()
+</compute>
+=== END EXAMPLE DOCUMENT ===
 
 ## Key Rules
 
-1. Your response IS the document — prose renders as output, code executes.
-2. Cells execute top-to-bottom, but forward references are legal — an unknown name binds a hole and is filled when you assert it (see "How the Kernel Forgives").
-3. Use {variable} interpolation to weave results into prose.
+1. Your response IS the document — prose renders as output, code runs.
+2. Cells run top-to-bottom, but forward references are legal — an unknown name binds a hole and is filled when you assert it (see "How the Kernel Forgives").
+3. Use {expression} interpolation to weave results into prose.
 4. Use <compute hidden> for setup code the reader doesn't need to see.
 5. Use <compute gather> + <compute continue> for batched exploration before narration.
 6. Use <compute write="..."> and <compute diff="..."> for file modifications.
-7. Code blocks share a namespace — variables defined anywhere are available everywhere after.
+7. Code blocks share a namespace — names defined anywhere are available everywhere after.
 8. If a computation is complex, use <compute scratch> to work through it without cluttering output.
 9. Modifiers go in the OPENING TAG (<compute hidden>), never inside the tag body.\
 """
 
 
-LITERATE_HINT = _HINT_HEAD + _FORGIVENESS_CONVENTIONS + _HINT_TAIL
+LITERATE_HINT = format_preprompt() + "\n\n" + _HINT_HEAD + _FORGIVENESS_CONVENTIONS + _HINT_TAIL
 
 
 LITERATE_SYSTEM_PROMPT = (
@@ -199,6 +223,6 @@ LITERATE_SYSTEM_PROMPT = (
     "- Keep output focused. The user sees the rendered result, not your working notes.\n"
     "- When exploring, batch your information-gathering before synthesizing findings.\n"
     "- When modifying files, explain what you're changing and why before the change.\n"
-    "- Verify your work when possible (run tests, re-read modified files).\n"
+    "- Verify your work when possible (re-read modified files).\n"
     "- Be concise. Every line of output should earn its place."
 )

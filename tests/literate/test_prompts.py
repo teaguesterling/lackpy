@@ -2,6 +2,8 @@
 
 import pytest
 
+from lackpy.lang.spec import format_preprompt
+
 from lackpy.prompts import PERSONAS, compose, list_personas
 from lackpy.interpreters.literate import LiterateInterpreter
 
@@ -13,7 +15,10 @@ class TestCompose:
             result = compose(name, interp)
             assert "{interpreter_hint}" not in result
             assert "<compute>" in result
-            assert "read_file" in result
+            # Literate stepy Task 5 (retired kit model: asserted "read_file"):
+            # the prompt teaches Path, not tool calls.
+            assert "read_file" not in result
+            assert "Path(" in result
 
     def test_compose_with_raw_string(self):
         result = compose("general", "Output JSON only.")
@@ -51,7 +56,7 @@ class TestCompose:
         assert "<compute scratch>" in hint
 
     def test_composed_prompt_not_too_long(self):
-        """Composed prompts should stay under 6000 chars for smaller models."""
+        """Composed prompts stay bounded: the lesson, the format, one document."""
         interp = LiterateInterpreter()
         for name in list_personas():
             result = compose(name, interp)
@@ -60,7 +65,9 @@ class TestCompose:
             # wordier than @annotations, and every block gains a closing tag),
             # and the fence-era prompt already sat at 5931. The guard against
             # prompt bloat is kept, just re-based on the new floor.
-            assert len(result) < 6400, (
+            # Task 5: re-based on the stepy lesson (format_preprompt, ~2.5k) plus
+            # the worked document. The tool list (~400) is gone.
+            assert len(result) < 11000, (
                 f"Persona {name!r} composed to {len(result)} chars"
             )
 
@@ -125,3 +132,88 @@ class TestL5ForgivenessConventions:
             assert "hole" in composed
             assert "<compute continue>" in composed
             assert "manifest" in composed
+
+
+# ---------------------------------------------------------------------------
+# Literate stepy Task 5 (D10): generation teaches the stepy language.
+# ---------------------------------------------------------------------------
+
+_BANNED = ["read_file", "find_files", "write_file", "edit_file", "apply_diff",
+           "search_content", "run_command", "run_tests", "subprocess",
+           "import os", "os.path"]
+
+
+def _every_literate_prompt() -> dict[str, str]:
+    from lackpy.infer.prompt import build_system_prompt
+    from lackpy.interpreters.literate.prompt import LITERATE_HINT, LITERATE_SYSTEM_PROMPT
+
+    interp = LiterateInterpreter()
+    prompts = {
+        "hint": LITERATE_HINT,
+        "system": LITERATE_SYSTEM_PROMPT,
+        "build_system_prompt": build_system_prompt(namespace_desc="", interpreter=interp),
+    }
+    for name in list_personas():
+        prompts[f"persona:{name}"] = compose(name, interp)
+    return prompts
+
+
+def test_no_kit_or_subprocess_names_in_literate_prompt():
+    for where, prompt in _every_literate_prompt().items():
+        for word in _BANNED:
+            assert word not in prompt, f"{word!r} in {where}"
+
+
+def test_literate_prompt_is_the_lesson_then_the_format_then_a_document():
+    from lackpy.interpreters.literate.prompt import LITERATE_HINT
+
+    assert LITERATE_HINT.startswith(format_preprompt())
+    lesson = LITERATE_HINT.index(format_preprompt())
+    fmt = LITERATE_HINT.index("## Annotations")
+    doc = LITERATE_HINT.index("<compute hidden>", fmt + 200)
+    assert lesson < fmt < doc
+
+
+def test_literate_prompt_teaches_the_ruled_points():
+    from lackpy.interpreters.literate.prompt import LITERATE_HINT
+
+    flat = " ".join(LITERATE_HINT.split())
+    # Annotation cells import Path themselves: the document must not import it again.
+    assert "do not import `Path` again" in flat
+    # Output is the trailing expression of the last code cell.
+    assert "last code cell" in flat and "trailing expression" in flat
+    # @diff is applied by lackpy and has no python3 twin.
+    assert "applied by lackpy" in flat and "python3" in flat
+
+
+def _worked_document() -> str:
+    from lackpy.interpreters.literate.prompt import LITERATE_HINT
+
+    start = "=== EXAMPLE DOCUMENT ===\n"
+    end = "\n=== END EXAMPLE DOCUMENT ==="
+    assert start in LITERATE_HINT and end in LITERATE_HINT
+    return LITERATE_HINT.split(start, 1)[1].split(end, 1)[0] + "\n"
+
+
+@pytest.mark.asyncio
+async def test_the_worked_document_in_the_prompt_runs(tmp_path):
+    """The one document the prompt shows must run through the service's literate
+    path, in a tmp workspace holding the file it reads (controller decision)."""
+    from lackpy.profiles import Profile
+    from lackpy.run.paths import load_policy
+    from lackpy.service import LackpyService
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "scores.txt").write_text("Alice: 90\nBob: 85\nCarol: 92\n")
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    svc = LackpyService(
+        workspace=ws,
+        path_policy_loader=lambda w: load_policy(w, home=home, managed=None),
+    )
+    doc = _worked_document()
+    result = await svc.run_program(doc, profile=Profile(execution="literate"))
+    assert result.success, result.error
+    assert "Carol" in result.stdout
+    assert (ws / "best.txt").read_text()

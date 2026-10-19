@@ -803,7 +803,8 @@ class LackpyService:
         the standard dispatcher: that path runs ``sanitize_output`` +
         ``deterministic_cleanup`` + validates the result AS Python + a Python
         correction chain -- all of which reject or mangle a fenced document. This
-        runs the provider loop with the LiterateInterpreter system-prompt hint and
+        runs the provider loop with the LiterateInterpreter system-prompt hint (the
+        stepy lesson, the literate format, one worked document) and
         validates each candidate by PARSING it (``LiterateInterpreter.validate``),
         returning the first that parses. Cleanup is literate-safe (outer wrapper /
         preamble only). No Python sanitize/correction.
@@ -814,7 +815,9 @@ class LackpyService:
 
         interp = LiterateInterpreter()
         vctx = ExecutionContext(base_dir=str(self._workspace.resolve()), tools=resolved)
-        namespace_desc = resolved.description
+        # No tool is taught (literate stepy D10): the prompt is the stepy lesson, the
+        # literate format and one document, so no namespace description reaches it.
+        namespace_desc = ""
         start = time.perf_counter()
         errors: dict[str, list[str]] = {}
         for provider in providers:

@@ -1069,3 +1069,30 @@ class TestFinalReviewFixes:
         result = await service.create("x = 1", name="count_lines")
         assert result["success"], result
         assert Path(result["path"]).name == "count_lines.tmpl"
+
+
+class TestLiterateGenerationPrompt:
+    """Literate stepy Task 5 (D10): the literate path teaches no tools."""
+
+    @pytest.mark.asyncio
+    async def test_the_provider_gets_no_namespace_description(self, service):
+        from lackpy.interpreters.literate import LiterateInterpreter
+
+        seen = {}
+
+        class FakeProvider:
+            name = "fake"
+
+            def available(self):
+                return True
+
+            async def generate(self, intent, namespace_desc, **kw):
+                seen["namespace_desc"] = namespace_desc
+                seen["interpreter"] = kw.get("interpreter")
+                return "Hello"
+
+        result = await service._generate_literate(
+            "greet", [FakeProvider()], service._resolve_profile(_LIT).tools, None, None)
+        assert result.program == "Hello"
+        assert seen["namespace_desc"] == ""
+        assert isinstance(seen["interpreter"], LiterateInterpreter)
