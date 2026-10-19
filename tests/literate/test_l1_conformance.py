@@ -729,30 +729,9 @@ class TestInjectedAndIdentityRebindConformance:
     when identity cannot see it.
     """
 
-    @pytest.mark.asyncio
-    async def test_injected_param_failed_rebind_keeps_provided_value(
-        self, tmp_path
-    ):
-        # NEW-2: the param's dict was provided out-of-band; the RHS raised
-        # before assignment, so the provided value must survive untouched.
-        context = ExecutionContext(
-            base_dir=tmp_path, params={"config": {"k": "v"}}
-        )
-        result = await run_batch(context, lackpy_doc("config = 1 // 0"))
-        ledger = result.metadata["ledger"]
-
-        # The provided value stands — not an ErrorValue.
-        assert result.metadata["variables"]["config"] == {"k": "v"}
-        # No superseded trace fabricated for a name the document never owned.
-        assert not ledger.query(entry_type=SUPERSEDED, name="config")
-        assert not ledger.query(entry_type=ERROR_REIFIED, name="config")
-        # But nothing silent: the failure is ledgered (name=None entry) with
-        # the untouched injected name recorded, and the round reports Left.
-        err = [
-            e for e in ledger.query(entry_type=ERROR_REIFIED) if e.name is None
-        ]
-        assert err and err[-1].detail["kept_injected"] == ["config"]
-        assert round_is_left(ledger.entries())
+    # test_injected_param_failed_rebind_keeps_provided_value was retired by the
+    # final fix wave (I4): params no longer bind bare names (design D15), so a
+    # param is never an injected name a document can fail to rebind.
 
     @pytest.mark.asyncio
     async def test_document_asserted_name_still_reifies_on_failed_rebind(

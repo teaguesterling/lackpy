@@ -340,6 +340,16 @@ class LiterateSession:
         # Lazy imports avoid a circular import with the package __init__ (which
         # re-exports this module).
         from . import LiterateInterpreter, _build_kernel
+
+        if context.params:
+            # Final review I4: params replace the defaults of a document's one
+            # params literal (design D15). A session's document arrives a round
+            # at a time, so there is no whole document to hold it: fail loud
+            # rather than drop the values.
+            raise ValueError(
+                "a LiterateSession does not take params: params replace the "
+                "defaults of a whole document's params literal (run the document "
+                "with LiterateInterpreter.execute)")
         from .kernel import (
             BindingVersions,
             Ledger,

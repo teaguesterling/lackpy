@@ -153,3 +153,18 @@ def test_a_refusal_while_the_policy_loads_is_a_failed_result(workspace):
     out = _call("run_program", {"program": "x = 1\nx"})
     assert out["success"] is False
     assert "Read(./loop/secret)" in out["error"]
+
+
+def test_validate_follows_the_literate_axis(workspace):
+    # Final review M1: a literate profile's document is validated cell by cell;
+    # markdown was parsed as Python ("Parse error: invalid syntax (line 1)").
+    (workspace / ".lackpy").mkdir()
+    (workspace / ".lackpy" / "config.toml").write_text(
+        '[profiles.lit]\nexecution = "literate"\n')
+    ok = _call("validate", {"program": "Intro.\n\n```lackpy\nx = 1\n```\n\nX={x}\n", "profile": "lit"})
+    assert ok["valid"] is True, ok["errors"]
+    bad = _call("validate", {"program": "```lackpy\nx = 1\n```\n\n```lackpy\nfor i in []:\n    pass\n```\n",
+                             "profile": "lit", "rules": ["no_loops"]})
+    assert bad["valid"] is False
+    assert any("document cell 2" in v["message"] for v in bad["violations"]), bad
+    assert [v["message"] for v in bad["violations"]] == bad["errors"]

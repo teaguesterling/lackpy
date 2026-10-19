@@ -29,6 +29,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, Literal
 
 from ..lang import validate
+from ..lang.registry import Violation
 from .namespace import build_namespace
 from .paths import PathPolicy
 from .refusal import LackpyRefusal
@@ -113,8 +114,12 @@ class CellSession:
     """One literate document's namespace, and its program."""
 
     def __init__(self, *, path_policy: PathPolicy | None, trace: Trace | None = None,
-                 program_file: str | None = None) -> None:
+                 program_file: str | None = None, extra_rules: list | None = None) -> None:
         self.trace = trace if trace is not None else Trace()
+        # The caller's extra rules (``validate(extra_rules=...)``): every cell and
+        # every expression is validated with them, as part of the whole program
+        # (final review I3).
+        self._extra_rules = list(extra_rules) if extra_rules else None
         self._path_policy = path_policy
         self._captured, print_fn = make_print_capture()
         self._namespace = build_namespace(program_file=program_file, path_policy=path_policy,
@@ -129,6 +134,9 @@ class CellSession:
         self._lines = 0
         self._starts: list[int] = []
         self._ids: list[int] = []
+        # A caller's name for a cell (``run_cell(label=...)``), used in place of
+        # "cell <id>" when an error names an earlier cell's line (final review M4).
+        self._labels: dict[int, str] = {}
         self._refusal: str | None = None  # the first refusal's text: the session is closed
 
     def bound_names(self) -> set[str]:
@@ -174,10 +182,16 @@ class CellSession:
         """The error every call gives once the session is closed, or None while it is open."""
         return None if self._refusal is None else self._closed_text()
 
-    def run_cell(self, source: str) -> CellOutcome:
-        """Validate ``source`` as an extension of the program, then exec it in the namespace."""
+    def run_cell(self, source: str, *, label: str | None = None) -> CellOutcome:
+        """Validate ``source`` as an extension of the program, then exec it in the namespace.
+
+        ``label`` names the cell in a later cell's validation error that lands on
+        one of its lines ("line 2 of <label>"); without one the cell is "cell <id>".
+        """
         cell_id = self._next_id
         self._next_id += 1
+        if label is not None:
+            self._labels[cell_id] = label
         if self._refusal is not None:
             return self._closed(cell_id)
         self._captured.clear()
@@ -209,6 +223,39 @@ class CellSession:
             return self._exec(cell_id, cell.code, cell.tail)
         except RUNTIME_FAILURES as e:
             return self._failure(cell_id, e)
+
+    def check_cell(self, source: str, *, label: str | None = None) -> list[Violation]:
+        """Validate ``source`` as an extension of the program, without running it.
+
+        For validation without execution (``LackpyService.validate`` on a literate
+        document, final review M1). The violations are the ones :meth:`run_cell`
+        would report, with the same line naming. A cell with none joins the
+        program (it is never executed and cannot be re-run); a cell with any
+        does not, as in :meth:`run_cell`.
+        """
+        cell_id = self._next_id
+        self._next_id += 1
+        if label is not None:
+            self._labels[cell_id] = label
+        self._cells[cell_id] = _Cell(code=None)
+        try:
+            ast.parse(source)
+        except SyntaxError as e:
+            return [Violation("safety.parse", e.lineno, f"Parse error: {e.msg} (line {e.lineno})")]
+        violations = self._check(source)
+        if not violations:
+            self._join(cell_id, source)
+        return violations
+
+    def check_expr(self, source: str) -> list[Violation]:
+        """Validate ``source`` as one expression line after the program, without evaluating it."""
+        if "\n" in source or "\r" in source:
+            return [Violation("safety.parse", None, "an expression must be one line")]
+        try:
+            ast.parse(source, mode="eval")
+        except SyntaxError as e:
+            return [Violation("safety.parse", 1, f"Parse error: {e.msg} (line 1)")]
+        return self._check(source)
 
     def eval_expr(self, source: str) -> ExprOutcome:
         """Validate ``source`` as one expression line after the program, then evaluate it.
@@ -353,44 +400,53 @@ class CellSession:
         self._program = f"{self._program}\n{source}" if self._ids[:-1] else source
         self._lines += source.count("\n") + 1
 
-    def _where(self, line: int) -> tuple[int, int]:
-        """The (cell id, cell line) of a program line."""
+    def _where(self, line: int) -> tuple[str, int]:
+        """The (cell name, cell line) of a program line: the cell's label, else "cell <id>"."""
         i = bisect.bisect_right(self._starts, line) - 1
-        return self._ids[i], line - self._starts[i] + 1
+        cell_id = self._ids[i]
+        return self._labels.get(cell_id, f"cell {cell_id}"), line - self._starts[i] + 1
 
-    def _violations(self, source: str) -> str | None:
-        """Validate the program extended by ``source``; return the error text, or None.
+    def _check(self, source: str) -> list[Violation]:
+        """The violations of the program extended by ``source``, renumbered.
 
         Every violation counts (the program alone has none; see the module text).
         Line numbers in ``source`` become its own; a line of an earlier cell is
-        named by cell id and line, and noted as made invalid by this cell.
-        Hints are dictionary text and are left as they are.
+        named by its label (else cell id) and line, and noted as made invalid by
+        this cell. A violation's ``line`` is the line in ``source``, or None for an
+        earlier cell's line. Hints are dictionary text and are left as they are.
         """
         offset = self._lines
         program = f"{self._program}\n{source}" if self._ids else source
-        verdict = validate(program, allowed_names=set())
-        if not verdict.violations:
-            return None
+        verdict = validate(program, allowed_names=set(), extra_rules=self._extra_rules)
 
         def local(n: int) -> str:
             if n > offset:
                 return f"line {n - offset}"
             cell, line = self._where(n)
-            return f"line {line} of cell {cell}"
+            return f"line {line} of {cell}"
 
         def renumber(m: re.Match[str]) -> str:
             return m.group(0) if m.group(1) is None else local(int(m.group(1)))
 
-        parts = []
+        out = []
         for v in verdict.violations:
-            # The format of ``service.validation_error`` (message, then the hint), which
-            # run/ cannot import: the service module pulls in inference and config.
             text = _LINE.sub(renumber, v.message)
+            line = v.line - offset if v.line is not None and v.line > offset else None
             if v.line is not None and v.line <= offset:
                 # The message names the line (renumbered above), or the note does.
                 where = "" if f"{local(v.line)}" in text else f"{local(v.line)}, "
                 text += f" [{where}an earlier cell's line, made invalid by this cell]"
-            parts.append(f"{text} ({v.hint})" if v.hint else text)
+            out.append(Violation(v.rule_id, line, text, v.hint))
+        return out
+
+    def _violations(self, source: str) -> str | None:
+        """Validate the program extended by ``source``; return the error text, or None."""
+        violations = self._check(source)
+        if not violations:
+            return None
+        # The format of ``service.validation_error`` (message, then the hint), which
+        # run/ cannot import: the service module pulls in inference and config.
+        parts = [f"{v.message} ({v.hint})" if v.hint else v.message for v in violations]
         return f"Validation failed: {'; '.join(parts)}"
 
 

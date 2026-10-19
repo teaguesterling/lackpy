@@ -539,7 +539,10 @@ class LackpyService:
         """Validate a lackpy program. No kit tool names are allowed.
 
         Args:
-            program: The lackpy program source to validate.
+            program: The lackpy program source to validate. With a literate
+                profile (``execution == "literate"``), a literate document: it is
+                validated cell by cell, as a run validates it, and each
+                violation names its document cell (final review M1).
             profile: A profile name or ``Profile``. A profile that names tools
                 gives an invalid result carrying ``KIT_REMOVED``.
             rules: Additional validation rules to apply beyond core checks.
@@ -548,10 +551,13 @@ class LackpyService:
             A ValidationResult indicating whether the program is valid.
         """
         try:
-            self._resolve_profile(profile)
+            rp = self._resolve_profile(profile)
             rules = resolve_rules(rules)
         except (ProfileError, ValueError) as e:
             return ValidationResult(valid=False, errors=[str(e)])
+        if rp.execution == "literate":
+            from .interpreters.literate import validate_document
+            return validate_document(program, extra_rules=rules)
         return validate(program, allowed_names=set(), extra_rules=rules)
 
     async def generate(self, intent: str, profile: Profile | str | None = None,
@@ -727,7 +733,8 @@ class LackpyService:
         """
         read_only = _read_only(rp.policy)
         if rp.execution == "literate":
-            return await self._execute_literate(program, param_values, read_only=read_only)
+            return await self._execute_literate(program, param_values, read_only=read_only,
+                                                rules=rules)
 
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
@@ -736,6 +743,7 @@ class LackpyService:
 
     async def _execute_literate(
         self, program: str, param_values: dict[str, Any], *, read_only: bool = False,
+        rules: list | None = None,
     ) -> ExecutionResult:
         """Run a literate document (design D9) and adapt the result.
 
@@ -754,6 +762,9 @@ class LackpyService:
         then the reified failures. A read-only profile also passes a read-only
         ``grade_ceiling``, so the static planner refuses a visible write cell
         before it runs (the policy still refuses what the planner cannot see).
+        The caller's ``rules`` apply to every cell's cumulative validation and to
+        every prose expression (final review I3). ``param_values`` replace the
+        defaults of the document's ``params`` literal (final review I4, D15).
         """
         from .interpreters.base import ExecutionContext
         from .interpreters.literate import LiterateInterpreter
@@ -763,10 +774,14 @@ class LackpyService:
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
         config: dict[str, Any] = {"path_policy": policy}
+        if rules:
+            config["extra_rules"] = rules
         if read_only:
             # Task 4 review M5: the static planner over the policy (ruling) —
             # a write cell it can see is refused before it runs.
             config["grade_ceiling"] = _READ_ONLY_CEILING
+            # Final review M5: the refusal says why the ceiling is there.
+            config["grade_ceiling_reason"] = "the profile is read-only (policy.read_only = true)"
         ctx = ExecutionContext(
             base_dir=str(self._workspace.resolve()),
             params=param_values,

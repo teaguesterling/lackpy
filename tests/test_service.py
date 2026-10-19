@@ -1096,3 +1096,102 @@ class TestLiterateGenerationPrompt:
         assert result.program == "Hello"
         assert seen["namespace_desc"] == ""
         assert isinstance(seen["interpreter"], LiterateInterpreter)
+
+
+class TestLiterateFinalFixWave:
+    """Final review I3, I4, M1, M4 and M5 on the literate axis, through the service."""
+
+    @pytest.mark.asyncio
+    async def test_i4_params_replace_the_literal_defaults(self, service):
+        # The reviewer's reproduction gave output=2 (the passed value was dropped).
+        doc = "```lackpy\nparams = {'n': 1}\nx = params['n'] * 2\nx\n```\n"
+        result = await service.run_program(doc, profile=_LIT, params={"n": 5})
+        assert result.success, result.error
+        assert result.output == 10
+
+    @pytest.mark.asyncio
+    async def test_i4_a_document_without_the_literal_fails_loud(self, service):
+        result = await service.run_program("```lackpy\nx = n * 2\nx\n```\n", profile=_LIT,
+                                           params={"n": 5})
+        assert result.success is False
+        assert "no top-level params" in result.error
+
+    @pytest.mark.asyncio
+    async def test_i3_the_callers_rules_apply_to_each_cell(self, service):
+        # The reviewer's reproduction gave success=True, output=3.
+        doc = "```lackpy\nt = 0\nfor i in [1, 2]:\n    t = t + i\nt\n```\n"
+        result = await service.run_program(doc, profile=_LIT, rules=["no_loops"])
+        assert result.success is False
+        assert "For-loop forbidden" in result.error
+        assert result.output is None
+
+    @pytest.mark.asyncio
+    async def test_i3_the_callers_rules_apply_to_prose_expressions(self, service):
+        doc = "```lackpy\nx = 'ab'\n```\n\nN={len(str(x))}\n"
+        assert (await service.run_program(doc, profile=_LIT)).success
+        result = await service.run_program(doc, profile=_LIT, rules=["no_nested_calls"])
+        assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_i3_rules_do_not_fail_the_startup_selftest(self, service):
+        result = await service.run_program("```lackpy\nx = 1\nx\n```\n", profile=_LIT,
+                                           rules=["max_calls(1)"])
+        assert result.success, result.error
+        assert result.output == 1
+
+    def test_m1_a_valid_document_validates(self, service):
+        doc = "Intro.\n\n```lackpy\nx = 1\n```\n\nX={x}\n"
+        result = service.validate(doc, profile=_LIT)
+        assert result.valid, result.errors
+
+    def test_m1_violations_name_the_document_cell(self, service):
+        doc = ("Intro.\n\n```lackpy\nx = 1\n```\n\n"
+               "```lackpy\nfor i in [1]:\n    x = i\n```\n")
+        result = service.validate(doc, profile=_LIT, rules=["no_loops"])
+        assert result.valid is False
+        assert any("document cell 3" in e and "For-loop forbidden" in e for e in result.errors), result.errors
+        assert result.errors == [v.message for v in result.violations]
+
+    def test_m1_a_prose_expression_is_validated(self, service):
+        doc = "```lackpy\nx = 1\n```\n\nShown: {open('a')}\n"
+        result = service.validate(doc, profile=_LIT)
+        assert result.valid is False
+        assert any("document cell 2" in e and "open" in e for e in result.errors), result.errors
+
+    def test_m1_a_parse_error_is_invalid(self, service):
+        result = service.validate("```lackpy @read\n```", profile=_LIT)
+        assert result.valid is False
+        assert any("requires a path" in e for e in result.errors)
+
+    def test_m1_annotation_cells_import_path_as_the_kernel_does(self, service):
+        doc = ("```lackpy @read(a.txt)\n```\n\n```lackpy @write(b.txt)\nhi\n```\n\n"
+               "```lackpy\nn = len(Path('a.txt').read_text())\n```\n")
+        result = service.validate(doc, profile=_LIT)
+        assert result.valid, result.errors
+
+    @pytest.mark.asyncio
+    async def test_m1_validate_and_run_agree_on_the_failing_cell(self, service):
+        doc = "```lackpy\nx = 1\n```\n\n```lackpy\nfor i in [1]:\n    x = i\n```\n"
+        verdict = service.validate(doc, profile=_LIT, rules=["no_loops"])
+        assert [e for e in verdict.errors if "document cell 2" in e]
+        result = await service.run_program(doc, profile=_LIT, rules=["no_loops"])
+        assert result.success is False
+        assert "For-loop forbidden" in result.error
+
+    @pytest.mark.asyncio
+    async def test_m4_an_earlier_cells_line_is_named_by_document_cell(self, service):
+        doc = "Intro.\n\n```lackpy\nimport json\n```\n\n```lackpy\nimport json\n```\n"
+        result = await service.run_program(doc, profile=_LIT)
+        assert result.success is False
+        # Cell 2 of the document (the first code cell), fenced at document line 3.
+        assert "document cell 2 (line 3)" in result.error, result.error
+        verdict = service.validate(doc, profile=_LIT)
+        assert any("document cell 2 (line 3)" in e for e in verdict.errors), verdict.errors
+
+    @pytest.mark.asyncio
+    async def test_m5_a_read_only_refusal_says_the_profile_is_read_only(self, service):
+        doc = ("```lackpy\nfrom pathlib import Path\nPath('o.txt').write_text('x')\n```\n")
+        result = await service.run_program(doc, profile=Profile(execution="literate",
+                                                                policy={"read_only": True}))
+        assert result.success is False
+        assert "read-only" in result.error, result.error

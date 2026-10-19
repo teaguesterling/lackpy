@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from ...lang import ValidationResult
 from ..base import (
     ExecutionContext,
     InterpreterExecutionResult,
@@ -49,7 +50,7 @@ from .kernel.ledger import Ledger, LedgerEntry
 from .kernel.reactive import DIRTY, DependencyGraph
 from .kernel.static_analysis import BUILTIN_NAMES, collect_bindings, collect_names
 from .kernel.versions import SUPERSEDED, BindingVersions, value_kind
-from .parser import Cell, parse
+from .parser import Cell, ParseResult, parse
 from .prompt import LITERATE_HINT
 
 
@@ -121,7 +122,18 @@ class LiterateInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
                 metadata={"completed": False, "selftest": report.summary()},
             )
-        result = await self._run_document(program, context, kernel)
+        parsed = parse(program)
+        if context.params and not parsed.errors:
+            params_error = _apply_document_params(parsed, context.params)
+            if params_error is not None:
+                return InterpreterExecutionResult(
+                    success=False,
+                    error=f"Configuration error: {params_error}",
+                    output_format="none",
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                    metadata={"completed": False, "selftest": report.summary()},
+                )
+        result = await self._run_document(program, context, kernel, parsed=parsed)
         result.metadata["selftest"] = report.summary()
         return result
 
@@ -132,6 +144,7 @@ class LiterateInterpreter:
         kernel: LightweightKernel,
         ledger: Ledger | None = None,
         versions: BindingVersions | None = None,
+        parsed: ParseResult | None = None,
     ) -> InterpreterExecutionResult:
         """Run a literate document through an ALREADY-BUILT kernel: classify ->
         ceiling gate -> run cells (forgiveness pre-pass + execute) -> render.
@@ -169,7 +182,9 @@ class LiterateInterpreter:
         versions = versions if versions is not None else BindingVersions()
         run_mark = len(ledger)
 
-        parsed = parse(program)
+        # ``parsed``: the batch ``execute()`` passes the document it parsed and
+        # applied the params to (final review I4); else parse it here.
+        parsed = parsed if parsed is not None else parse(program)
         if parsed.errors:
             return InterpreterExecutionResult(
                 success=False,
@@ -199,6 +214,9 @@ class LiterateInterpreter:
         if raw_ceiling is None:
             raw_ceiling = getattr(context.tools, "grade", None)
         gate_violations: dict[int, str] = {}
+        # Why the ceiling is there, when the caller says (final review M5): a
+        # read-only profile's refusal says so, not only the grade numbers.
+        ceiling_reason = (context.config or {}).get("grade_ceiling_reason")
         if raw_ceiling is not None:
             ceiling = as_grade(raw_ceiling)
             for index, cell in enumerate(parsed.cells):
@@ -210,6 +228,8 @@ class LiterateInterpreter:
                 effects = classify_cell(cell.cell_type, src)
                 violation = exceeds_ceiling(effects, ceiling)
                 if violation:
+                    if ceiling_reason:
+                        violation = f"{violation}: {ceiling_reason}"
                     gate_violations[index] = (
                         f"effect ceiling exceeded: {violation}"
                     )
@@ -1241,41 +1261,122 @@ def _build_kernel(context: ExecutionContext) -> LightweightKernel:
     service pass the policy it loads for the workspace.) The display threshold is
     ``context.config["display_threshold"]``.
 
-    ``context.params`` become the session's first cell, ``name = <literal>``
-    for each, so they are validated and bound like any cell (no host object
-    enters the namespace). A param whose value is not a Python literal raises
-    ``ValueError``. A granted toolset's callables do not join the namespace:
-    a literate cell can do nothing a lackpy program cannot.
+    ``context.params`` bind no name here (final review I4, design D15): the
+    batch ``execute()`` writes them into the document's ``params`` literal
+    (:func:`_apply_document_params`). A granted toolset's callables do not join
+    the namespace: a literate cell can do nothing a lackpy program cannot.
     """
     config = context.config or {}
-    session = CellSession(path_policy=config.get("path_policy"))
-    kernel = LightweightKernel(
+    # The caller's rules (``config["extra_rules"]``, rule callables) apply to
+    # every cell's cumulative validation and every prose expression (final
+    # review I3).
+    session = CellSession(path_policy=config.get("path_policy"),
+                          extra_rules=config.get("extra_rules"))
+    return LightweightKernel(
         session,
         display_threshold=config.get("display_threshold", DEFAULT_DISPLAY_THRESHOLD),
     )
-    if context.params:
-        result = kernel.execute_cell(
-            Cell(cell_type="hidden", content=_params_source(context.params)), -1)
-        if not result.success:
-            raise ValueError(f"the params could not be bound: {result.error}")
-    return kernel
 
 
-def _params_source(params: dict[str, Any]) -> str:
-    """``name = <literal>`` lines for ``params``; ``ValueError`` for a value that is not a literal."""
-    lines = []
-    for name, value in params.items():
-        if not name.isidentifier():
-            raise ValueError(f"param name {name!r} is not an identifier")
-        text = repr(value)
+#: The cell types whose compiled source is the cell's own text, so a params
+#: literal in one of them can be rewritten in place.
+_SOURCE_CELLS = frozenset({"code", "hidden", "gather", "scratch"})
+
+
+def _apply_document_params(parsed: ParseResult, params: dict[str, Any]) -> str | None:
+    """Replace the defaults of the document's ``params`` literal with ``params``.
+
+    Final review I4: the literate axis applies passed params as ``run_program``
+    does (design D15), with ``RestrictedRunner``'s own AST rewrite and errors
+    (``runner._apply_params``). The program it checks is every code cell of the
+    document, joined: ``params`` must be bound exactly once, by a top-level
+    ``params = {"name": <literal>, ...}`` in one cell. Only that literal's text
+    is replaced in its cell, so the rest of the cell (comments too) is kept.
+    Returns the error text, or None; on an error no cell is changed.
+    """
+    from ...run.runner import _apply_params, _params_literal
+
+    trees: list[tuple[Cell, ast.Module]] = []
+    for cell in parsed.cells:
+        if cell.cell_type == "prose":
+            continue
         try:
-            same = ast.literal_eval(text) == value
-        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
-            same = False
-        if not same:
-            raise ValueError(f"param {name!r} is not a Python literal ({type(value).__name__})")
-        lines.append(f"{name} = {text}")
-    return "\n".join(lines)
+            trees.append((cell, ast.parse(compile_cell(cell))))
+        except (ValueError, SyntaxError):
+            continue  # the kernel reports the error when the cell runs
+    program = ast.Module(body=[stmt for _, tree in trees for stmt in tree.body], type_ignores=[])
+    literal = _params_literal(program)
+    error = _apply_params(program, params)
+    if error is not None:
+        return error
+    assert literal is not None  # _apply_params found it
+    holder = next(cell for cell, tree in trees
+                  if any(getattr(stmt, "value", None) is literal for stmt in tree.body))
+    if holder.cell_type not in _SOURCE_CELLS:
+        return f"the params literal must be in a code cell, not a @{holder.cell_type} cell"
+    holder.content = _splice(holder.content, literal, ast.unparse(literal))
+    return None
+
+
+def _splice(source: str, node: ast.AST, text: str) -> str:
+    """``source`` with the span of ``node`` replaced by ``text``.
+
+    ``ast`` column offsets count UTF-8 bytes, so each is converted on its line.
+    """
+    lines = source.splitlines(keepends=True)
+
+    def offset(lineno: int, col: int) -> int:
+        line = lines[lineno - 1]
+        return sum(len(x) for x in lines[:lineno - 1]) + len(line.encode()[:col].decode())
+
+    start = offset(node.lineno, node.col_offset)
+    end = offset(node.end_lineno, node.end_col_offset)  # type: ignore[arg-type]
+    return source[:start] + text + source[end:]
+
+
+def validate_document(program: str, extra_rules: list | None = None) -> ValidationResult:
+    """Validate a literate document cell by cell, without running it (final review M1).
+
+    The checks a run makes before each cell executes: the document must parse,
+    and each code cell must extend the program so far as one lackpy program
+    (the caller's ``extra_rules`` too), with annotation cells importing
+    ``Path`` as the kernel does. Each prose expression is checked as one line
+    after the program. ``@diff`` and ``@continue`` cells hold no program text.
+    A cell that fails does not join the program, as at run time. Each
+    violation's message starts with the document cell
+    (:func:`.kernel.lightweight.cell_label`); its ``line`` is the line in the
+    cell, or None. Name resolution (holes) is a runtime matter and is not
+    checked.
+    """
+    from ...lang import ValidationResult, Violation
+    from .compiler import binds_path, prose_segments, without_path_import
+    from .kernel.lightweight import cell_label
+
+    parsed = parse(program)
+    if parsed.errors:
+        violations = [Violation("literate.parse", None, e) for e in parsed.errors]
+        return ValidationResult(valid=False, errors=[v.message for v in violations],
+                                violations=violations)
+    session = CellSession(path_policy=None, extra_rules=extra_rules)
+    violations = []
+    for index, cell in enumerate(parsed.cells):
+        label = cell_label(cell, index)
+        if cell.cell_type == "prose":
+            found = [v for seg in prose_segments(cell) if seg.expr is not None
+                     for v in session.check_expr(seg.expr)]
+        elif cell.cell_type in ("diff", "continue"):
+            continue
+        else:
+            source = compile_cell(cell)
+            if cell.cell_type in ("read", "write") and binds_path(session.program):
+                source = without_path_import(source)
+            if not source.strip():
+                continue
+            found = session.check_cell(source, label=label)
+        violations += [Violation(v.rule_id, v.line, f"{label}: {v.message}", v.hint)
+                       for v in found]
+    return ValidationResult(valid=not violations, errors=[v.message for v in violations],
+                            violations=violations)
 
 
 # Re-export the multi-round fold API. Imported at the end (after LiterateInterpreter

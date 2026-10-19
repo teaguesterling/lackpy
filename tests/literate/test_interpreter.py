@@ -570,9 +570,13 @@ class TestCellsRunThroughTheSession:
         assert result.metadata["ledger"].query(entry_type="refused")
 
     @pytest.mark.asyncio
-    async def test_params_are_bound_as_data(self, interpreter, tmp_path):
+    async def test_params_replace_the_defaults_of_the_params_literal(self, interpreter, tmp_path):
+        # Final review I4 (design D15): passed params replace the defaults in the
+        # document's one params literal; no param binds a bare name. (This test
+        # replaced test_params_are_bound_as_data, which encoded bare-name binding.)
         ctx = ExecutionContext(base_dir=tmp_path, params={"n": 3, "cfg": {"k": "v"}})
-        doc = "```lackpy\ny = n * 2\n```\n\nk={cfg['k']} y={y}\n"
+        doc = ("```lackpy\nparams = {'n': 1, 'cfg': {'k': 'default'}}\n```\n\n"
+               "```lackpy\ny = params['n'] * 2\n```\n\nk={params['cfg']['k']} y={y}\n")
         result = await interpreter.execute(doc, ctx)
         assert result.success, result.error
         assert "k=v y=6" in result.output
@@ -584,3 +588,83 @@ class TestCellsRunThroughTheSession:
         result = await interpreter.execute("```lackpy\nx = 1\n```\n", ctx)
         assert result.success is False
         assert "param" in result.error
+
+
+class TestParamsLiteral:
+    """Final review I4: the literate axis applies passed params as run_program does
+    (design D15): the defaults of the document's one top-level ``params = {...}``
+    literal are replaced, in whichever code cell holds it, with the same AST
+    rewrite and the same errors as ``RestrictedRunner``. No param binds a bare name."""
+
+    @staticmethod
+    def _ctx(tmp_path, **params):
+        return ExecutionContext(base_dir=tmp_path, params=params)
+
+    @pytest.mark.asyncio
+    async def test_the_reviewers_document_uses_the_passed_value(self, interpreter, tmp_path):
+        doc = "```lackpy\nparams = {'n': 1}\nx = params['n'] * 2\nx\n```\n"
+        result = await interpreter.execute(doc, self._ctx(tmp_path, n=5))
+        assert result.success, result.error
+        assert result.metadata["value"] == 10
+
+    @pytest.mark.asyncio
+    async def test_no_param_binds_a_bare_name(self, interpreter, tmp_path):
+        doc = "```lackpy\nparams = {'n': 1}\n```\n\n```lackpy\nx = n * 2\n```\n"
+        result = await interpreter.execute(doc, self._ctx(tmp_path, n=5))
+        assert result.success is False
+        # ``n`` is an unbound hole, never the passed 5.
+        from lackpy.interpreters.literate.kernel.forgiveness import Hole
+        assert isinstance(result.metadata["variables"]["n"], Hole)
+        assert result.metadata["variables"]["params"] == {"n": 5}
+
+    @pytest.mark.asyncio
+    async def test_a_document_with_no_params_literal_fails_loud(self, interpreter, tmp_path):
+        result = await interpreter.execute("```lackpy\nx = n * 2\n```\n", self._ctx(tmp_path, n=5))
+        assert result.success is False
+        assert "no top-level params" in result.error
+        assert result.metadata.get("variables") is None  # nothing ran
+
+    @pytest.mark.asyncio
+    async def test_params_bound_in_two_cells_fails_loud(self, interpreter, tmp_path):
+        doc = "```lackpy\nparams = {'n': 1}\n```\n\n```lackpy\nparams = {'n': 2}\n```\n"
+        result = await interpreter.execute(doc, self._ctx(tmp_path, n=5))
+        assert result.success is False
+        assert "exactly once" in result.error
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_key_fails_loud(self, interpreter, tmp_path):
+        doc = "```lackpy\nparams = {'n': 1}\n```\n"
+        result = await interpreter.execute(doc, self._ctx(tmp_path, m=5))
+        assert result.success is False
+        assert "'m' is not a key" in result.error
+
+    @pytest.mark.asyncio
+    async def test_a_value_of_another_type_fails_loud(self, interpreter, tmp_path):
+        doc = "```lackpy\nparams = {'n': 1}\n```\n"
+        result = await interpreter.execute(doc, self._ctx(tmp_path, n="five"))
+        assert result.success is False
+        assert "must be int" in result.error
+
+    @pytest.mark.asyncio
+    async def test_the_rest_of_the_cell_is_kept(self, interpreter, tmp_path):
+        # Only the literal is rewritten: comments and other lines of its cell stay.
+        doc = ("```lackpy\n# defaults\nparams = {'n': 1}  # the count\n"
+               "x = params['n']\nx\n```\n")
+        result = await interpreter.execute(doc, self._ctx(tmp_path, n=4))
+        assert result.success, result.error
+        assert result.metadata["value"] == 4
+        rendered = result.metadata["rendered_markdown"]
+        assert "# defaults" in rendered and "# the count" in rendered
+
+    @pytest.mark.asyncio
+    async def test_without_params_the_defaults_run(self, interpreter, tmp_path):
+        doc = "```lackpy\nparams = {'n': 1}\nparams['n']\n```\n"
+        result = await interpreter.execute(doc, ExecutionContext(base_dir=tmp_path))
+        assert result.success, result.error
+        assert result.metadata["value"] == 1
+
+    def test_a_session_given_params_fails_loud(self, tmp_path):
+        # A multi-round session has no whole document to hold the literal.
+        from lackpy.interpreters.literate import LiterateSession
+        with pytest.raises(ValueError, match="params"):
+            LiterateSession(self._ctx(tmp_path, n=5))

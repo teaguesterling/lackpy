@@ -168,7 +168,7 @@ class LightweightKernel:
         elif rerun_id is not None:
             outcome = self._session.rerun_cell(rerun_id)
         else:
-            outcome = self._session.run_cell(source)
+            outcome = self._session.run_cell(source, label=cell_label(cell, cell_index))
         if outcome.cell_id is not None and outcome.phase in (None, "runtime"):
             self._in_program.add(outcome.cell_id)
             if cell.cell_type in ("read", "write") and source.startswith(_IMPORT_PATH):
@@ -323,6 +323,13 @@ class LightweightKernel:
         ns = {k: v for k, v in self._session.data(wanted).items() if not k.startswith("_")}
         ns.update({k: v for k, v in self._reified.items() if names is None or k in wanted})
         return ns
+
+
+def cell_label(cell: Cell, cell_index: int) -> str:
+    """How an error names a document cell (final review M4): its number in the
+    document (prose cells count, as ``parse()`` numbers them, from 1) and the
+    document line of its fence."""
+    return f"document cell {cell_index + 1} (line {cell.line_number})"
 
 
 def _static_bindings(source: str) -> set[str]:
