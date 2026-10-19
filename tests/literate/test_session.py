@@ -291,12 +291,13 @@ class TestSessionArtifacts:
         # Source-preserving like `rendered`, not executed like `display`.
         assert "Value: {n}." in md
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
     async def test_markdown_keeps_a_fenced_payload_intact(self, tmp_path):
         # The nested-fence case: a longer outer fence is what keeps this valid.
+        policy = load_policy(tmp_path, home=tmp_path / "home", managed=None)
         session = LiterateSession(
-            ExecutionContext(base_dir=tmp_path), interpreter=LiterateInterpreter(), max_rounds=2
+            ExecutionContext(base_dir=tmp_path, config={"path_policy": policy}),
+            interpreter=LiterateInterpreter(), max_rounds=2
         )
         doc = (
             '<compute write="notes.md">\n# Notes\n\n```python\ndef add(a, b):\n'

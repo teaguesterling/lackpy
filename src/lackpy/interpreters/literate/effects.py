@@ -1,293 +1,86 @@
-"""Static effect classification for literate cells.
+"""Effect helpers for literate cells (literate stepy Task 3, design D6/D7).
 
-Maps a *compiled* cell (the Python source the kernel will ``exec``) to an
-:class:`CellEffects` profile -- *without running it*. The profile says, in terms
-of lackpy's existing :class:`~lackpy.lang.grader.Grade` lattice
-(``w``: 0=pure, 1=pinhole read, 2=scoped exec, 3=scoped write):
+Two questions, two helpers:
 
-  - what grade the cell needs (so the step can refuse cells over a profile's
-    effect ceiling *before* a single effect happens),
-  - which file paths it writes/reads with a *statically known literal* (so the
-    step can journal exactly those files and roll them back on failure), and
-  - whether it reaches for effect surface this pass can't bound (``import``,
-    ``open``, raw exec) or a dynamic path it can't journal -- i.e. the parts that
-    must be *sandboxed* rather than *transacted*.
+* **Before a cell runs** — :func:`classify_effects` grades the cell's compiled
+  source from the ``Path`` members it names, in terms of lackpy's
+  :class:`~lackpy.lang.grader.Grade` lattice (``w``: 0 pure, 1 pinhole read,
+  3 scoped write). The ceiling gate in the interpreter uses it to reify a cell
+  over the profile's ceiling as ``Unavailable`` instead of running it (L1.5).
+  This is a cooperative planner, not the boundary: a write it cannot see (a
+  helper defined in an earlier cell) is refused by the policy, and a read-only
+  profile's policy is :func:`lackpy.run.paths.read_only_policy` (D7).
+* **After a cell ran** — :func:`path_writes` names the ``Path`` writes in the
+  cell's slice of the session trace. Strict reactive mode withholds a re-run of
+  a cell that wrote (D7). The ``Path`` stand-in is a cell's only route to the
+  filesystem, so the trace sees every write.
 
-This is the foundation the effect-aware step consumes four ways: the ceiling
-gate, the file journal, the sandbox decision, and the dry-run manifest shown to
-the model/policy before commit.
-
-**Grades are config-driven, not hardcoded.** Each literate tool's grade + effect
-kind + path argument is declared in ``tool_effects.toml`` (a ToolSpec-shaped
-table) and loaded into :data:`LITERATE_TOOL_EFFECTS`. Callers may inject a
-different map via ``classify_effects(..., tool_effects=)`` -- the seam through
-which the resolved toolbox will supply grades once the literate tools are
-registered as real graded specs (today they bypass the toolbox as plain
-functions; unifying them is the remaining follow-up).
-
-**Scope -- read this.** This is a *cooperative planner*, NOT a security boundary.
-Because literate cells run un-restricted Python (the prompt permits ``import os``
-etc.), no name-based AST pass can soundly enumerate every effect path. The
-classifier classifies the *declared* surface (the literate tools) precisely and
-flags a curated set of raw escape hatches as ``unanalyzable``; a determined cell
-can still alias around it. Soundness against adversarial code comes from the
-restricted-AST whitelist (the ``python`` interpreter's validator) and/or nsjail --
-not from this module. ``unanalyzable`` is exactly the "I can't bound this; the
-step must sandbox it and must not promise rollback" signal.
+The kit grade map (``tool_effects.toml``) and the audit-hook observer are gone
+with the kit tools (D7).
 """
 
 from __future__ import annotations
 
 import ast
-import contextvars
-import sys
-import tomllib
-from contextlib import contextmanager
-from dataclasses import dataclass, field
-from importlib.resources import files
-from typing import Iterator, Mapping
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 from ...lang.grader import Grade
+from ...run.trace import TraceEntry
 
-
-@dataclass(frozen=True)
-class ToolEffect:
-    """Effect descriptor for one literate tool (one row of tool_effects.toml).
-
-    Attributes:
-        grade: The tool's world-coupling/effects grade.
-        kind: ``"read"`` | ``"write"`` | ``"exec"`` -- selects the enforcement
-            mechanism (read=run, write=journal, exec=sandbox).
-        path_arg: Name of the parameter carrying a file path, or None.
-        path_index: Positional index of that parameter, or None.
-    """
-
-    grade: Grade
-    kind: str
-    path_arg: str | None = None
-    path_index: int | None = None
-
-
-def _load_tool_effects() -> dict[str, ToolEffect]:
-    """Load the literate tool effect table from the shipped TOML data."""
-    raw = (files(__package__) / "tool_effects.toml").read_text(encoding="utf-8")
-    table: dict[str, ToolEffect] = {}
-    for t in tomllib.loads(raw).get("tools", []):
-        table[t["name"]] = ToolEffect(
-            grade=Grade(w=t.get("grade_w", 3), d=t.get("effects_ceiling", 3)),
-            kind=t["kind"],
-            path_arg=t.get("path_arg"),
-            path_index=t.get("path_index"),
-        )
-    return table
-
-
-# The literate tool namespace's effect grades -- the single, config-driven source
-# of truth (tool_effects.toml). Injectable per-call via classify_effects().
-LITERATE_TOOL_EFFECTS: dict[str, ToolEffect] = _load_tool_effects()
-
-
-def tool_effect_from_spec(spec: object) -> ToolEffect:
-    """Derive a :class:`ToolEffect` from a ToolSpec-shaped object (duck-typed).
-
-    The single derivation the ceiling gate uses for profile/toolbox-injected tools.
-    ``effect_kind`` / ``path_arg`` / ``path_index`` on the spec make the tool
-    precise: an injected *write* tool with a declared path arg becomes journalable
-    (its literal target can be rolled back), and a w=3 *exec* tool is not mistaken
-    for a write. When the spec omits ``effect_kind``, ``kind`` falls back to the
-    grade heuristic (w>=3 write, w==2 exec, else read) -- only the grade matters for
-    the ceiling comparison, so an ungraded-kind tool is still gated correctly, just
-    not journaled (no path).
-    """
-    w = getattr(spec, "grade_w", 3)
-    d = getattr(spec, "effects_ceiling", 3)
-    kind = getattr(spec, "effect_kind", None)
-    if kind is None:
-        kind = "write" if w >= 3 else "exec" if w == 2 else "read"
-    return ToolEffect(
-        grade=Grade(w, d),
-        kind=kind,
-        path_arg=getattr(spec, "path_arg", None),
-        path_index=getattr(spec, "path_index", None),
-    )
-
-# Raw effect primitives that defeat name-based classification: code execution
-# (eval/exec/compile/__import__), dynamic attribute access (getattr/setattr/
-# delattr), file/stdin I/O (open/input). Calling any (or importing anything)
-# means we can no longer bound the cell's effects. NOTE: locals/globals/vars are
-# deliberately NOT here -- they are pure namespace introspection (no world
-# effect), and the first-party @scratch directive compiles to locals(); flagging
-# them would falsely refuse benign read-only documents under a low ceiling.
-_ESCAPE_HATCH_CALLS: frozenset[str] = frozenset(
-    {"open", "eval", "exec", "compile", "__import__",
-     "getattr", "setattr", "delattr", "input"}
-)
+#: ``Path`` members that write, and the trace tool names they record.
+PATH_WRITE_MEMBERS = frozenset({"write_text", "write_bytes", "mkdir"})
+PATH_WRITE_TOOLS = frozenset(f"Path.{m}" for m in PATH_WRITE_MEMBERS)
+#: ``Path`` members that read the filesystem.
+PATH_READ_MEMBERS = frozenset({"read_text", "read_bytes", "exists", "is_file", "is_dir",
+                               "glob", "rglob", "iterdir"})
 
 _PURE = Grade(0, 0)
-_CONSERVATIVE = Grade(3, 3)
+_READ = Grade(1, 1)
+_WRITE = Grade(3, 3)
 
 
 @dataclass(frozen=True)
 class CellEffects:
-    """A literate cell's statically-determined effect profile.
-
-    Attributes:
-        grade: Aggregate world-coupling/effects grade (max over the cell's
-            recognized effectful calls; forced to ``Grade(3, 3)`` when
-            ``unanalyzable``).
-        writes: File paths the cell writes via a *literal* argument -- the exact
-            set the step can journal for rollback.
-        reads: File paths the cell reads via a literal argument (informational;
-            reads need no rollback).
-        exec_calls: Names of exec-kind tools the cell invokes (``run_command``,
-            ``run_tests``). Non-empty => a sandbox is required.
-        dynamic_paths: A path-bearing tool was called with a non-literal path, so
-            its target can't be journaled statically.
-        unanalyzable: The cell reaches raw effect surface (``import`` / ``open`` /
-            raw exec) this pass can't bound. The step must sandbox it and must
-            not promise transactional rollback.
-    """
+    """A cell's statically-determined effect grade."""
 
     grade: Grade
-    writes: frozenset[str]
-    reads: frozenset[str]
-    exec_calls: frozenset[str]
-    dynamic_paths: bool
-    unanalyzable: bool
-
-    @property
-    def needs_sandbox(self) -> bool:
-        """Whether running this cell safely requires a sandbox boundary."""
-        return self.unanalyzable or bool(self.exec_calls)
-
-    @property
-    def transactional(self) -> bool:
-        """Whether the cell's filesystem effects can be journaled and rolled back.
-
-        True when every effect is either a pure/read op (nothing to undo) or a
-        write to a statically-known path. Exec, dynamic paths, or raw effect
-        surface make the cell non-transactional -- its effects can't be cleanly
-        reversed at the ``@continue`` commit boundary.
-        """
-        return not (self.unanalyzable or self.dynamic_paths or self.exec_calls)
 
 
-def classify_effects(
-    compiled_source: str,
-    *,
-    tool_effects: Mapping[str, ToolEffect] | None = None,
-) -> CellEffects:
-    """Classify the effects of one compiled cell without executing it.
+def classify_effects(compiled_source: str) -> CellEffects:
+    """Grade one compiled cell without running it.
 
-    Args:
-        compiled_source: The Python source the kernel will ``exec`` for this
-            cell (the output of ``compiler._COMPILERS[...]``). Annotated cells
-            (``@read``/``@write``/``@diff``) compile to literal-path tool calls,
-            so they classify through the same path as raw code cells.
-        tool_effects: Name -> :class:`ToolEffect` map defining which calls are
-            graded effects. Defaults to :data:`LITERATE_TOOL_EFFECTS` (loaded
-            from ``tool_effects.toml``); inject a toolbox-derived map to override.
-
-    Returns:
-        A :class:`CellEffects`. A cell that doesn't parse is treated as
-        ``unanalyzable`` (the kernel's own static check reports the syntax error
-        separately; here we just refuse to vouch for its effects).
+    Every attribute named ``write_text``, ``write_bytes`` or ``mkdir`` — called
+    or not, so an alias counts — makes the cell a scoped write; a ``Path`` read
+    member makes it a pinhole read. A cell that does not parse is graded a
+    write (conservative); the kernel reports the syntax error.
     """
-    effects_map = tool_effects if tool_effects is not None else LITERATE_TOOL_EFFECTS
     try:
         tree = ast.parse(compiled_source)
     except SyntaxError:
-        return CellEffects(
-            grade=_CONSERVATIVE, writes=frozenset(), reads=frozenset(),
-            exec_calls=frozenset(), dynamic_paths=True, unanalyzable=True,
-        )
-
+        return CellEffects(_WRITE)
     grade = _PURE
-    writes: set[str] = set()
-    reads: set[str] = set()
-    exec_calls: set[str] = set()
-    dynamic_paths = False
-    unanalyzable = False
-
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            unanalyzable = True
-            continue
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-            # Attribute/subscript calls (p.write_text(), os.remove()) can hide
-            # effects we can't attribute to a known tool. We don't flag every
-            # method call as unanalyzable (str.join etc. are everywhere); the
-            # curated escape-hatch set below covers the dangerous bare names.
-            continue
-
-        name = node.func.id
-        if name in _ESCAPE_HATCH_CALLS:
-            unanalyzable = True
-            continue
-
-        te = effects_map.get(name)
-        if te is None:
-            continue
-
-        grade = _max_grade(grade, te.grade)
-        if te.kind == "exec":
-            exec_calls.add(name)
-        elif te.kind in ("read", "write"):
-            literal = _literal_path(node, te.path_arg, te.path_index)
-            if literal is None:
-                dynamic_paths = True
-            elif te.kind == "write":
-                writes.add(literal)
-            else:
-                reads.add(literal)
-
-    if unanalyzable:
-        grade = _max_grade(grade, _CONSERVATIVE)
-
-    return CellEffects(
-        grade=grade,
-        writes=frozenset(writes),
-        reads=frozenset(reads),
-        exec_calls=frozenset(exec_calls),
-        dynamic_paths=dynamic_paths,
-        unanalyzable=unanalyzable,
-    )
+        if isinstance(node, ast.Attribute):
+            if node.attr in PATH_WRITE_MEMBERS:
+                return CellEffects(_WRITE)
+            if node.attr in PATH_READ_MEMBERS:
+                grade = _READ
+    return CellEffects(grade)
 
 
-def combine(effects: list[CellEffects]) -> CellEffects:
-    """Aggregate a segment's per-cell effects into one profile for the manifest.
+def path_writes(entries: Iterable[TraceEntry]) -> tuple[str, ...]:
+    """The ``Path`` write tools in ``entries``, each once, sorted.
 
-    Grade is the max; path sets union; the boolean flags OR together. Describes
-    everything that happens between two ``@continue`` commit points -- the ceiling
-    gate and the dry-run manifest both consume this."""
-    grade = _PURE
-    writes: set[str] = set()
-    reads: set[str] = set()
-    exec_calls: set[str] = set()
-    dynamic_paths = False
-    unanalyzable = False
-    for e in effects:
-        grade = _max_grade(grade, e.grade)
-        writes |= e.writes
-        reads |= e.reads
-        exec_calls |= e.exec_calls
-        dynamic_paths = dynamic_paths or e.dynamic_paths
-        unanalyzable = unanalyzable or e.unanalyzable
-    return CellEffects(
-        grade=grade, writes=frozenset(writes), reads=frozenset(reads),
-        exec_calls=frozenset(exec_calls), dynamic_paths=dynamic_paths,
-        unanalyzable=unanalyzable,
-    )
+    A failed write counts too: it may have changed the file part way.
+    """
+    return tuple(sorted({e.tool for e in entries if e.tool in PATH_WRITE_TOOLS}))
 
 
 def exceeds_ceiling(effects: CellEffects, ceiling: Grade) -> str | None:
     """Return a human-readable reason if ``effects`` exceeds ``ceiling``, else None.
 
-    The gate compares both grade axes -- world-coupling (``w``) and effects-depth
-    (``d``). The literate step calls this on a segment's combined effects to refuse
-    a document whose aggregate effects exceed the profile's allowed grade *before*
-    any cell runs. ``w`` is reported first because it is the coupling axis that
-    decides enforcement (read/exec/write)."""
+    Both grade axes are compared, world-coupling (``w``) first."""
     if effects.grade.w > ceiling.w:
         return f"world-coupling w={effects.grade.w} exceeds ceiling w={ceiling.w}"
     if effects.grade.d > ceiling.d:
@@ -299,8 +92,7 @@ def as_grade(value: object) -> Grade:
     """Coerce a ceiling spec into a :class:`Grade`.
 
     Accepts a ``Grade`` (returned as-is), a ``(w, d)`` pair, or a single int
-    (applied to both axes). This lets a config/TOML-sourced ``grade_ceiling``
-    (often a list or int) be used without the caller hand-building a ``Grade``."""
+    (applied to both axes), so a config/TOML-sourced ``grade_ceiling`` works."""
     if isinstance(value, Grade):
         return value
     if isinstance(value, bool):  # bool is an int subclass; reject the ambiguity
@@ -312,198 +104,3 @@ def as_grade(value: object) -> Grade:
     raise TypeError(
         f"grade_ceiling must be a Grade, (w, d) pair, or int; got {value!r}"
     )
-
-
-def _max_grade(a: Grade, b: Grade) -> Grade:
-    return Grade(w=max(a.w, b.w), d=max(a.d, b.d))
-
-
-def _literal_path(node: ast.Call, pname: str | None, idx: int | None) -> str | None:
-    """Extract a string-literal path argument, or None if absent/non-literal."""
-    if pname is not None:
-        for kw in node.keywords:  # keyword form: f(path="x")
-            if kw.arg == pname:
-                return _const_str(kw.value)
-    if idx is not None and idx < len(node.args):  # positional form: f("x")
-        return _const_str(node.args[idx])
-    return None
-
-
-def _const_str(node: ast.expr) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Runtime effect OBSERVATION (CPython audit hooks)
-# ---------------------------------------------------------------------------
-#
-# The static classifier above answers "what does this source LOOK like it
-# does?".  This section answers a different question: "what did this cell
-# ACTUALLY DO when it ran?" — recorded via one process-global
-# ``sys.addaudithook`` that is inert except inside an :func:`observe_effects`
-# scope.  The reactive re-exec pass uses the answer as its effect-replay
-# gate: a dirtied dependent that was observed performing a world effect on
-# its first run is withheld from re-execution (strict mode).
-#
-# HONEST FRAMING — this is best-effort observation, not proof.  It sees
-# effects that flow through Python's audited APIs.  Known gaps, by design:
-#
-# * THE FLAGS-BASED ``os.open`` GAP (read this one first): the ``open``
-#   audit event with a non-string mode — ``os.open`` and everything the
-#   stdlib builds on it — is deliberately ignored (counting it would
-#   false-positive the import machinery's bytecode-cache writes, whose tmp
-#   files defeat any path filter).  Concretely, a cell that CREATES a file
-#   only through that route is observed pure and can DOUBLE-FIRE on a
-#   permitted re-exec.  The enumerable stdlib entry points are handled or
-#   bounded as follows:
-#
-#   - ``tempfile`` (``mkstemp`` / ``mkdtemp`` and the wrappers built on
-#     them: ``NamedTemporaryFile``, ``TemporaryDirectory``, ...) — COVERED:
-#     they raise their own ``tempfile.*`` audit events, which are counted.
-#   - ``Path.touch()`` with the default ``exist_ok=True`` — COVERED: it
-#     calls ``os.utime`` first (the audit event fires at call time, even
-#     when the file does not yet exist), which is counted.
-#   - ``Path.touch(exist_ok=False)`` and raw ``os.open`` writes — NOT
-#     OBSERVED.  A cell writer who needs the observer's protection should
-#     use ``open()`` / the literate tools instead.
-#
-# * a C extension issuing raw syscalls raises no audit event;
-# * an effect performed on a thread the cell spawned runs in that thread's
-#   own context, where no observation is active;
-# * observation records what the FIRST run did — a cell whose first run
-#   skipped its effectful branch (``if flag: write(...)``) observes pure.
-#
-# The sandbox + stdlib-limiting are the outer defense for those gaps; this
-# observer reduces effect-replay risk, it does not eliminate it.
-
-#: Audit events counted as WORLD EFFECTS, kept deliberately NARROW so that
-#: imports, read-opens, and compilation never false-positive.  ``open`` is
-#: handled separately (only write/append/create/update modes count).  Note
-#: the aliasing CPython applies: ``os.replace`` raises ``os.rename``;
-#: ``os.unlink`` raises ``os.remove``.
-_WORLD_EFFECT_EVENTS: frozenset[str] = frozenset({
-    "os.rename",
-    "os.remove",
-    "os.mkdir",
-    "os.rmdir",
-    "os.chmod",
-    "os.chown",
-    "os.link",
-    "os.symlink",
-    "os.truncate",  # also raised by os.ftruncate / file.truncate()
-    # os.utime mutates metadata AND is the observable half of Path.touch():
-    # touch(exist_ok=True) — the default — calls os.utime FIRST, and audit
-    # events fire at call time (before the OSError on a missing file), so
-    # default touch is observed even when its create falls through to the
-    # unobserved flags-based os.open.
-    "os.utime",
-    # tempfile raises its own proper audit events (the create itself routes
-    # through flags-based os.open, which the observer must ignore — see
-    # _observe_audit_event); counting these covers mkstemp/mkdtemp and
-    # everything built on them (NamedTemporaryFile, TemporaryDirectory, ...).
-    "tempfile.mkstemp",
-    "tempfile.mkdtemp",
-    "socket.connect",
-    "socket.bind",
-    "subprocess.Popen",
-    "os.system",
-})
-
-#: ``open`` mode characters that make an open a WRITE (w/a/x/+); a plain
-#: read (``'r'``, ``'rb'``) is not a world effect.
-_OPEN_WRITE_MODE_CHARS = frozenset("wax+")
-
-
-@dataclass
-class EffectObservation:
-    """What one observed scope (one cell execution) was SEEN to do.
-
-    ``events`` holds the deduplicated observed world-effect event tags
-    (``"open:w"``, ``"os.remove"``, ``"subprocess.Popen"``, ...); empty means
-    no world effect was observed — which, per the module notes above, is
-    best-effort evidence of purity, not proof.
-    """
-
-    events: set[str] = field(default_factory=set)
-
-    @property
-    def effectful(self) -> bool:
-        return bool(self.events)
-
-
-#: The currently-active observation, or ``None`` (hook inert).  A contextvar
-#: so concurrent sessions in different tasks/threads cannot cross-attribute
-#: each other's effects; cell execution itself is synchronous, so the scope
-#: set around ``execute_cell`` covers exactly that cell's work.
-_active_observation: contextvars.ContextVar[EffectObservation | None] = (
-    contextvars.ContextVar("lackpy_literate_effect_observation", default=None)
-)
-
-#: Audit hooks cannot be removed once added (CPython contract) — install
-#: exactly one, lazily, on first use, and guard against double-install.
-_audit_hook_installed = False
-
-
-def _observe_audit_event(event: str, args: tuple) -> None:
-    """The one process-global audit hook.  Inert unless a scope is active.
-
-    Must NEVER raise: an audit hook that raises aborts the audited operation
-    for the whole process, so any internal surprise fails open (the event is
-    simply not recorded — consistent with the best-effort contract).
-    """
-    obs = _active_observation.get()
-    if obs is None:
-        return
-    try:
-        if event == "open":
-            # open(path, mode, flags).  Count string modes containing any of
-            # w/a/x/+ only.  A non-string mode means a flags-based open
-            # (os.open and friends, including the import machinery's
-            # bytecode-cache writes) — ignored, per the module notes.
-            mode = args[1] if len(args) > 1 else None
-            if not isinstance(mode, str):
-                return
-            if _OPEN_WRITE_MODE_CHARS.isdisjoint(mode):
-                return
-            obs.events.add(f"open:{mode}")
-        elif event in _WORLD_EFFECT_EVENTS:
-            # Import machinery maintains __pycache__ via os.replace/os.rename
-            # of *.pyc files; a cell whose `import` compiles a module must
-            # not be tagged effectful for it.
-            if any(str(a).endswith(".pyc") for a in args):
-                return
-            obs.events.add(event)
-    except Exception:
-        return
-
-
-def _ensure_audit_hook() -> None:
-    global _audit_hook_installed
-    if _audit_hook_installed:
-        return
-    sys.addaudithook(_observe_audit_event)
-    _audit_hook_installed = True
-
-
-@contextmanager
-def observe_effects() -> Iterator[EffectObservation]:
-    """Observe world effects performed while the ``with`` body runs.
-
-    Lazily installs the process-global audit hook (once), activates a fresh
-    :class:`EffectObservation` for the current context, and deactivates it on
-    exit.  If scopes nest (they should not on the cell-execution path), the
-    inner scope's events propagate to the outer one on exit so no observed
-    effect is lost.
-    """
-    _ensure_audit_hook()
-    obs = EffectObservation()
-    token = _active_observation.set(obs)
-    try:
-        yield obs
-    finally:
-        _active_observation.reset(token)
-        outer = _active_observation.get()
-        if outer is not None:
-            outer.events |= obs.events

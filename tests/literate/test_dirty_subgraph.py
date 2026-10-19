@@ -10,11 +10,11 @@ DIRTY (a ``dirty`` ledger entry each) and re-run in dependency order against the
 updated namespace, re-versioning (L1.3) and re-forgiving (L1.1/1.2/1.5) as
 needed.
 
-Effect-replay safety (strict mode, the default): every cell's first execution
-is OBSERVED through the audit-hook scope (``effects.observe_effects``); a
-dependent observed performing a world effect is marked dirty but withheld
-(``reexecuted=False`` + the observed events), so an observed effect is not
-replayed.  Best-effort, not proof — see the honest framing in ``effects.py``.
+Effect-replay safety (strict mode, the default): each cell's first execution
+is OBSERVED through its slice of the session trace (literate stepy Task 3: a
+``Path`` write entry, ``effects.path_writes``); a dependent observed writing is
+marked dirty but withheld (``reexecuted=False`` + the observed writes), so an
+observed write is not replayed.
 
 These tests cover the batch/session path (``LiterateInterpreter._run_document``);
 the streaming driver is untouched.
@@ -261,17 +261,15 @@ class TestDirtySubgraphReexecution:
         assert dirty[0].detail["reexecuted"] is False
         assert dirty[0].detail["mode"] == "strict"
         assert "observed to perform a world effect" in dirty[0].detail["reason"]
-        # The observed evidence is on the entry — the write open, at least.
-        assert any(
-            e.startswith("open:") for e in dirty[0].detail["observed_effects"]
-        )
+        # The observed evidence is on the entry: the Path write in the trace.
+        assert dirty[0].detail["observed_effects"] == ["Path.write_text"]
         # The write happened exactly once (only a.txt exists — never b.txt).
         assert (tmp_path / "a.txt").exists()
         assert not (tmp_path / "b.txt").exists()
 
     @pytest.mark.asyncio
     async def test_ceiling_refused_dependent_stays_refused_on_reexec(
-        self, tmp_path
+        self, tmp_path, tmp_home
     ):
         # Ceiling-gate soundness on the REACTIVE path: a cell the effect
         # ceiling refused on the linear pass has no observed_effects entry
@@ -282,13 +280,13 @@ class TestDirtySubgraphReexecution:
         from lackpy.interpreters.literate.kernel.forgiveness import Unavailable
         from lackpy.lang.grader import Grade
 
-        context = ExecutionContext(
-            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
-        )
+        context = ExecutionContext(base_dir=tmp_path, config={
+            "grade_ceiling": Grade(1, 1),
+            "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)})
         result = await _run(
             context,
-            "```lackpy\nname = 'out1.txt'\n```\n\n"
-            "```lackpy\nw = write_file(name, 'DANGER')\n```\n\n"
+            "```lackpy\nfrom pathlib import Path\nname = 'out1.txt'\n```\n\n"
+            "```lackpy\nw = Path(name).write_text('DANGER')\n```\n\n"
             "```lackpy\nname = 'out2.txt'\n```",  # re-assert → dirties cell 1
         )
         # The refused effect never fires — on either pass.
@@ -309,7 +307,7 @@ class TestDirtySubgraphReexecution:
 
     @pytest.mark.asyncio
     async def test_ceiling_refused_stays_refused_in_permissive_mode(
-        self, tmp_path
+        self, tmp_path, tmp_home
     ):
         # The ceiling refusal is POLICY, not replay caution: permissive mode
         # (which accepts effect replay) still may not run a refused cell.
@@ -320,12 +318,13 @@ class TestDirtySubgraphReexecution:
             config={
                 "grade_ceiling": Grade(1, 1),
                 "reactive_mode": "permissive",
+                "path_policy": load_policy(tmp_path, home=tmp_home, managed=None),
             },
         )
         result = await _run(
             context,
-            "```lackpy\nname = 'out1.txt'\n```\n\n"
-            "```lackpy\nw = write_file(name, 'DANGER')\n```\n\n"
+            "```lackpy\nfrom pathlib import Path\nname = 'out1.txt'\n```\n\n"
+            "```lackpy\nw = Path(name).write_text('DANGER')\n```\n\n"
             "```lackpy\nname = 'out2.txt'\n```",
         )
         assert not (tmp_path / "out1.txt").exists()

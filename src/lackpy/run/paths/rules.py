@@ -328,3 +328,16 @@ class PathPolicy:
             shown = " | ".join("/" + "/".join(p) for p in sorted(set(patterns)))
             lines.append(f"{rule.effect} {ops}: {rule.text()} -> {shown} (from {rule.source})")
         return lines
+
+
+def read_only_policy(policy: PathPolicy) -> PathPolicy:
+    """A new policy: ``policy`` plus a deny on every write (literate stepy D7).
+
+    A read-only literate profile is this policy: ``Edit(//**)`` refuses every
+    write, and reads keep the rules, roots and denies of ``policy``. ``policy``
+    itself is not changed.
+    """
+    deny = PathRule(kind="edit", effect="deny", pattern="//**", anchor=policy.workspace,
+                    source="the read-only profile")
+    return PathPolicy(policy.workspace, [*policy.rules, deny], policy.extra_dirs,
+                      protected=policy.protected)

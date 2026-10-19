@@ -222,6 +222,28 @@ class CellSession:
         finally:
             self._captured.clear()
 
+    def edit_text(self, path: str, edit: Callable[[str], str]) -> CellOutcome:
+        """Read ``path``, replace its text with ``edit(text)``, through the session's ``Path``.
+
+        For a host-side edit (the literate ``@diff``, design D6): the read and the
+        write go through the session's own ``Path`` stand-in, so the policy checks
+        both and the trace records both. ``edit`` is host code (a pure function of
+        the text); it never enters the namespace. Nothing joins the program, and
+        the outcome has no ``cell_id``. An exception gives ``phase="runtime"``; a
+        refusal gives ``phase="refused"`` and closes the session (D4). With no
+        policy, ``pathlib`` refuses, as it does for a cell.
+        """
+        if self._refusal is not None:
+            return CellOutcome(ok=False, phase="refused", error=self._closed_text())
+        self._captured.clear()
+        try:
+            path_class = self._namespace["__builtins__"]["__import__"]("pathlib").Path
+            target = path_class(path)
+            target.write_text(edit(target.read_text()))
+        except RUNTIME_FAILURES as e:
+            return self._failure(None, e)
+        return CellOutcome(ok=True)
+
     # -- internals -------------------------------------------------------------
 
     def _run_cell(self, cell_id: int, source: str) -> CellOutcome:
@@ -283,7 +305,7 @@ class CellSession:
             value = _ADDRESS.sub("", repr(value))
         return ExprOutcome(ok=True, value=value, stdout="".join(self._captured))
 
-    def _failure(self, cell_id: int, e: BaseException) -> CellOutcome:
+    def _failure(self, cell_id: int | None, e: BaseException) -> CellOutcome:
         line = None
         if isinstance(e, LackpyRefusal):
             text = error_text(e)

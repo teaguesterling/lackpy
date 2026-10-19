@@ -206,12 +206,12 @@ class TestSemantic4UnavailableSource:
     @pytest.mark.asyncio
     async def test_over_ceiling_cell_binds_unavailable(self, context, tmp_path):
         ctx = ExecutionContext(
-            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
+            base_dir=tmp_path, config={**context.config, "grade_ceiling": Grade(1, 1)}
         )
         result = await run_batch(
             ctx,
             lackpy_doc(
-                "data = write_file('out.txt', 'x')",  # over the ceiling
+                "from pathlib import Path\ndata = Path('out.txt').write_text('x')",  # over
                 "ok = 1 + 1",                          # within — must run
             ),
         )
@@ -258,9 +258,9 @@ class TestSemantic5DirtySubgraph:
     Contract: a re-assertion (an L1.3 ``superseded`` entry) marks the
     transitive dependents of the old value stale; each is ledgered with a
     ``dirty`` entry (nothing silent).  In strict mode (the default) a
-    dependent whose first run was OBSERVED effect-free (audit-hook
-    observation, ``effects.observe_effects``) is re-executed against the
-    updated namespace (``reexecuted=True``, new version); a dependent
+    dependent whose first run was OBSERVED effect-free (no ``Path`` write in
+    its slice of the session trace, ``effects.path_writes``) is re-executed
+    against the updated namespace (``reexecuted=True``, new version); a dependent
     OBSERVED performing a world effect is withheld (``reexecuted=False`` +
     the reason + the observed events) so the observed effect is not
     replayed; an INDEPENDENT cell is untouched — never dirtied, never
@@ -594,9 +594,7 @@ class TestReassertionFailureConformance:
         }
         assert dirty[2].detail["reexecuted"] is False
         assert "observed to perform a world effect" in dirty[2].detail["reason"]
-        assert any(
-            e.startswith("open:") for e in dirty[2].detail["observed_effects"]
-        )
+        assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
         # Written exactly once — a double-fire would have left 'tick0'.
         assert out.read_text() == "tick1"
 
@@ -607,19 +605,19 @@ class TestRuntimeEffectObservation:
     The first fix's STATIC re-exec gate was unsound in both directions — a
     bare-name call to an effectful helper graded "pure" (double-fired a
     write), while a pure method-call dependent was withheld.  The corrected
-    design observes what each cell's first execution actually DOES via a
-    process-global CPython audit hook scoped to the executing cell
-    (``effects.observe_effects``), and gates dirty re-execution on that
-    evidence:
+    design observes what each cell's first execution actually DOES (since
+    literate stepy Task 3: the ``Path`` write entries in the cell's slice of
+    the session trace, ``effects.path_writes``; the audit hook is gone), and
+    gates dirty re-execution on that evidence:
 
     * ``strict`` (default): withhold a dirtied dependent iff its first run
       was OBSERVED performing a world effect;
     * ``permissive`` (opt-in, ``config={"reactive_mode": "permissive"}``):
       re-run all dirty dependents — effects may re-fire, documented.
 
-    Best-effort, never claimed as proof: raw-syscall C extensions,
-    flags-based opens, cell-spawned threads, and first-run-skipped branches
-    can evade observation — the sandbox is the outer defense.
+    The ``Path`` stand-in is a cell's only route to the filesystem, so the
+    trace sees every write a cell makes. A first run that skipped its
+    effectful branch still observes no write.
     """
 
     HELPER_WRITE_DOC = (
@@ -645,9 +643,7 @@ class TestRuntimeEffectObservation:
         assert dirty[2].detail["reexecuted"] is False
         assert dirty[2].detail["mode"] == "strict"
         assert "observed to perform a world effect" in dirty[2].detail["reason"]
-        assert any(
-            e.startswith("open:") for e in dirty[2].detail["observed_effects"]
-        )
+        assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
         # The file was written exactly once, with the ORIGINAL seed.
         assert (tmp_path / "helper_out.txt").read_text() == "one"
 
@@ -673,9 +669,7 @@ class TestRuntimeEffectObservation:
         assert dirty[2].detail["outcome"] == "clean"
         # The re-run's own observed effects are ledgered — the replay is
         # visible, never silent.
-        assert any(
-            e.startswith("open:") for e in dirty[2].detail["observed_effects"]
-        )
+        assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
         # The effect DID re-fire: the file now holds the NEW seed.
         assert (tmp_path / "helper_out.txt").read_text() == "two"
 

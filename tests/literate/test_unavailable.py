@@ -33,6 +33,15 @@ import pytest
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter, LiterateSession
 from lackpy.lang.grader import Grade
+from lackpy.run.paths import load_policy
+
+
+def _ctx(base, tmp_home):
+    """A read-only ceiling (w=1), and a policy, so a cell that the gate lets
+    through could really run."""
+    policy = load_policy(base, home=tmp_home, managed=None)
+    return ExecutionContext(base_dir=base, config={
+        "grade_ceiling": Grade(1, 1), "path_policy": policy})
 
 
 @pytest.fixture
@@ -42,7 +51,7 @@ def interpreter():
 
 class TestUnavailableSource:
     @pytest.mark.asyncio
-    async def test_unavailable_source_binds_pending(self, interpreter, tmp_path):
+    async def test_unavailable_source_binds_pending(self, interpreter, tmp_path, tmp_home):
         """A cell whose source is unavailable (over the effect ceiling) binds
         an Unavailable value + a source_unavailable ledger entry; the round
         continues — no abort, no document-level refusal."""
@@ -52,11 +61,9 @@ class TestUnavailableSource:
             is_forgiving,
         )
 
-        ctx = ExecutionContext(
-            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
-        )
+        ctx = _ctx(tmp_path, tmp_home)
         doc = (
-            "```lackpy\ndata = write_file('out.txt', 'x')\n```\n\n"
+            "```lackpy\nfrom pathlib import Path\ndata = Path('out.txt').write_text('x')\n```\n\n"
             "```lackpy\nok = 1 + 1\n```\n"
         )
         result = await interpreter.execute(doc, ctx)
@@ -84,7 +91,7 @@ class TestUnavailableSource:
         assert "effect ceiling exceeded" in result.error
 
     @pytest.mark.asyncio
-    async def test_pending_distinct_from_pause_pending(self, interpreter, tmp_path):
+    async def test_pending_distinct_from_pause_pending(self, interpreter, tmp_path, tmp_home):
         """Conflict #4: the L1.5 concept must not collide with the driver's
         pause status ``"pending"`` ("not executed due to @continue pause") —
         distinct names at both the value-kind and ledger-entry level."""
@@ -103,18 +110,16 @@ class TestUnavailableSource:
 
         # And in a real gated run the ledger records source_unavailable rows,
         # never the driver's "pending" status.
-        ctx = ExecutionContext(
-            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
-        )
+        ctx = _ctx(tmp_path, tmp_home)
         result = await interpreter.execute(
-            "```lackpy\ndata = write_file('o.txt', 'x')\n```\n", ctx
+            "```lackpy\nfrom pathlib import Path\ndata = Path('o.txt').write_text('x')\n```\n", ctx
         )
         ledger = result.metadata["ledger"]
         assert ledger.query(entry_type=SOURCE_UNAVAILABLE)
         assert ledger.query(entry_type="pending") == []
 
     @pytest.mark.asyncio
-    async def test_pending_chains_and_versions(self, tmp_path):
+    async def test_pending_chains_and_versions(self, tmp_path, tmp_home):
         """Composition: downstream references to an Unavailable value chain as
         blocked holes (L1.1); a later within-ceiling assertion of the name
         supersedes the Unavailable version with a real value (L1.3)."""
@@ -123,12 +128,10 @@ class TestUnavailableSource:
             Unavailable,
         )
 
-        ctx = ExecutionContext(
-            base_dir=tmp_path, config={"grade_ceiling": Grade(1, 1)}
-        )
+        ctx = _ctx(tmp_path, tmp_home)
         session = LiterateSession(ctx)
         result = await session.step(
-            "```lackpy\ndata = write_file('out.txt', 'x')\n```\n\n"
+            "```lackpy\nfrom pathlib import Path\ndata = Path('out.txt').write_text('x')\n```\n\n"
             "```lackpy\nlength = len(data)\n```\n\n"
             "```lackpy\ndata = 'now available'\n```\n"
         )

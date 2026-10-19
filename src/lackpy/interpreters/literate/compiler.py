@@ -14,9 +14,14 @@ Compilation rules:
   @hidden  → pass through (same as code; visibility is the driver's concern)
   @gather  → pass through
   @continue → sentinel function call that the kernel detects
-  @read    → print(read_file(path))
-  @write   → write_file(path, content)
-  @diff    → apply_diff(path, diff_text)
+  @read    → print(Path(path).read_text())
+  @write   → Path(path).write_text(<the body text>); a path with a directory
+             part makes its parent first (as the kit's write_file did)
+  @diff    → analysis source only (a Path read and write of the file): the
+             kernel applies the diff on the host side (design D6)
+  An annotation cell imports Path while the program has not bound it (a
+  second import is a rebinding the validator rejects), so the code cells,
+  joined, are a plain python3 program.
   @scratch → the body; the kernel prints the new-name summary
 
 The _split_interpolation() function handles prose interpolation by
@@ -195,19 +200,64 @@ def _compile_continue(cell: Cell) -> str:
     return CONTINUE_SENTINEL
 
 
+_IMPORT_PATH = "from pathlib import Path"
+
+#: The annotation cells whose compiled source starts with ``_IMPORT_PATH``.
+_PATH_CELLS = frozenset({"read", "write", "diff"})
+
+
+def without_path_import(source: str) -> str:
+    """``source`` without its leading ``from pathlib import Path`` line.
+
+    The validator rejects a second import of a name (``safety.import``: a
+    rebinding), so an annotation cell imports ``Path`` only while the program
+    has not bound it yet. The kernel drops the line when the session already
+    binds ``Path``; :func:`compile_cells` does the same for the joined program.
+    """
+    head = _IMPORT_PATH + "\n"
+    return source[len(head):] if source.startswith(head) else source
+
+
+def _binds_path(source: str) -> bool:
+    """Whether ``source`` binds ``Path`` at its top level (an import or an assignment)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            if any((a.asname or a.name.split(".")[0]) == "Path" for a in stmt.names):
+                return True
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            if any(isinstance(t, ast.Name) and t.id == "Path" for t in targets):
+                return True
+    return False
+
+
 def _compile_read(cell: Cell) -> str:
     path = cell.annotation_args.get("path", "")
-    return f"print(read_file({repr(path)}))"
+    return f"{_IMPORT_PATH}\nprint(Path({path!r}).read_text())"
 
 
 def _compile_write(cell: Cell) -> str:
+    # The body text is the file's content, as with the kit's write_file, which
+    # also made the parent directory.
     path = cell.annotation_args.get("path", "")
-    return f"write_file({repr(path)}, {repr(cell.content)})"
+    lines = [_IMPORT_PATH]
+    if path.rpartition("/")[0].strip("./"):  # a directory part other than . or /
+        lines.append(f"Path({path!r}).parent.mkdir(parents=True, exist_ok=True)")
+    lines.append(f"Path({path!r}).write_text({cell.content!r})")
+    return "\n".join(lines)
 
 
 def _compile_diff(cell: Cell) -> str:
+    # ANALYSIS source only, like prose: the kernel never runs it. It names a
+    # read and a write of the file, so the ceiling gate grades the cell a
+    # write; the import defines Path, so the hole pre-pass never skips the
+    # cell. The kernel applies the patch with CellSession.edit_text.
     path = cell.annotation_args.get("path", "")
-    return f"apply_diff({repr(path)}, {repr(cell.content)})"
+    return f"{_IMPORT_PATH}\nPath({path!r}).write_text(Path({path!r}).read_text())"
 
 
 def _compile_scratch(cell: Cell) -> str:
@@ -242,13 +292,23 @@ def compile_cell(cell: Cell) -> str:
 
 
 def compile_cells(parse_result: ParseResult) -> str:
-    """Compile a parsed document into a single Python program."""
+    """Compile a parsed document into a single Python program.
+
+    An annotation cell imports ``Path`` only when no earlier cell bound it
+    (:func:`without_path_import`), so the program validates as one lackpy
+    program and runs under python3.
+    """
     parts: list[str] = []
+    path_bound = False
     for cell in parse_result.cells:
         compiler = _COMPILERS.get(cell.cell_type)
         if compiler is None:
             raise ValueError(f"Unknown cell type: {cell.cell_type}")
         compiled = compiler(cell)
+        if cell.cell_type in _PATH_CELLS and path_bound:
+            compiled = without_path_import(compiled)
+        elif cell.cell_type != "prose":
+            path_bound = path_bound or _binds_path(compiled)
         if compiled.strip():
             parts.append(compiled)
     return "\n".join(parts)

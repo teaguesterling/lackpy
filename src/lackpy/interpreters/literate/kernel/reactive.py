@@ -42,9 +42,9 @@ def/ref only.  Dynamic names, ``import *``, and aliasing are NOT tracked; nor is
 in-memory mutation (``lst.append(x)``).  Callers bound the effect-replay risk
 via RUNTIME EFFECT OBSERVATION (see ``_run_document``'s re-exec pass): in the
 default strict mode a dependent that was observed performing a world effect on
-its first run is withheld from re-execution.  That gate is best-effort — it
-observes effects that flow through Python's audited APIs, it does not prove
-their absence (the sandbox is the outer defense).
+its first run is withheld from re-execution.  The evidence is the ``Path``
+write entries in the cell's slice of the session trace (literate stepy D7);
+a write on a branch the first run skipped is not seen.
 """
 
 from __future__ import annotations

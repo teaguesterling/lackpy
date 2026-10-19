@@ -9,7 +9,10 @@ extension of the program so far and execs it in the restricted namespace.
 There is no other way in. The kernel holds no namespace of its own, execs
 nothing and evals nothing: a cell can do nothing a lackpy program cannot.
 
-* Code, ``@hidden``, ``@gather`` and the annotation cells run with
+* ``@diff`` runs on the host side (D6): ``session.edit_text`` reads the file
+  through the session's ``Path`` stand-in, the patch is applied here in pure
+  Python, and the result is written through the same stand-in.
+* Code, ``@hidden``, ``@gather``, ``@read`` and ``@write`` run with
   ``session.run_cell``; a re-run (reactive re-execution) uses
   ``session.rerun_cell`` with the cell's id (:meth:`rerun_cell`).
 * Prose (D3) is text and ``{expr}`` segments. A text segment renders as it
@@ -39,9 +42,10 @@ from typing import Any
 
 from lackpy.run.cells import CellOutcome, CellSession
 
-from ..compiler import _COMPILERS, prose_segments
+from ..compiler import _COMPILERS, prose_segments, without_path_import
 from ..display import DEFAULT_DISPLAY_THRESHOLD, make_display
 from ..parser import Cell
+from ..patch import apply_patch
 from .forgiveness import is_forgiving
 from .interface import CellResult
 from .static_analysis import StaticAnalysisError, check_cell, collect_bindings
@@ -122,7 +126,13 @@ class LightweightKernel:
                               namespace_delta={"__continue_requested__": True},
                               cell_index=cell_index)
 
+        if cell.cell_type == "diff":
+            return self._apply_diff(cell, cell_index)
+
         source = compiler(cell)
+        if cell.cell_type in ("read", "write") and "Path" in self._session.bound_names():
+            # A second import of Path is a rebinding the validator rejects.
+            source = without_path_import(source)
         if cell.cell_type == "prose":
             try:
                 check_cell(source, self.known_names())
@@ -187,6 +197,17 @@ class LightweightKernel:
         return CellResult(success=True, output=output, error=None, error_phase=None,
                           namespace_delta=delta, cell_index=cell_index,
                           cell_id=outcome.cell_id)
+
+    def _apply_diff(self, cell: Cell, cell_index: int) -> CellResult:
+        # D6: host side. The session reads and writes the file through its own
+        # Path stand-in (the policy checks both); the patch is pure Python here.
+        path = cell.annotation_args.get("path", "")
+        outcome = self._session.edit_text(path, lambda text: apply_patch(text, cell.content))
+        if not outcome.ok:
+            return _failed(cell_index, outcome.error or "the diff failed",
+                           outcome.phase or "runtime")
+        return CellResult(success=True, output="", error=None, error_phase=None,
+                          namespace_delta={}, cell_index=cell_index)
 
     def _render_prose(self, cell: Cell, cell_index: int) -> CellResult:
         # As python3's print(f"...") does: what an expression prints comes out

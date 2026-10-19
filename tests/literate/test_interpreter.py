@@ -20,6 +20,12 @@ def context(tmp_path):
     return ExecutionContext(base_dir=tmp_path)
 
 
+def _pctx(base, tmp_home, **config):
+    """A context whose path policy is ``base``, with a temporary home."""
+    policy = load_policy(base, home=tmp_home, managed=None)
+    return ExecutionContext(base_dir=base, config={"path_policy": policy, **config})
+
+
 @pytest.fixture
 def workspace(tmp_path):
     (tmp_path / "hello.txt").write_text("Hello World\n")
@@ -91,28 +97,25 @@ class TestCodeExecution:
 
 
 class TestFileOperations:
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_read_annotation(self, interpreter, workspace):
-        ctx = ExecutionContext(base_dir=workspace)
+    async def test_read_annotation(self, interpreter, workspace, tmp_home):
+        ctx = _pctx(workspace, tmp_home)
         doc = "```lackpy @read(hello.txt)\n```"
         result = await interpreter.execute(doc, ctx)
         assert result.success
         assert "Hello World" in result.output
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_write_annotation(self, interpreter, workspace):
-        ctx = ExecutionContext(base_dir=workspace)
+    async def test_write_annotation(self, interpreter, workspace, tmp_home):
+        ctx = _pctx(workspace, tmp_home)
         doc = '```lackpy @write(output.txt)\nNew file content\n```'
         result = await interpreter.execute(doc, ctx)
         assert result.success
         assert "New file content" in (workspace / "output.txt").read_text()
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_diff_annotation(self, interpreter, workspace):
-        ctx = ExecutionContext(base_dir=workspace)
+    async def test_diff_annotation(self, interpreter, workspace, tmp_home):
+        ctx = _pctx(workspace, tmp_home)
         doc = """\
 ```lackpy @diff(hello.txt)
 --- a/hello.txt
@@ -125,11 +128,12 @@ class TestFileOperations:
         assert result.success
         assert "Hello Universe" in (workspace / "hello.txt").read_text()
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_read_file_tool(self, interpreter, workspace):
-        ctx = ExecutionContext(base_dir=workspace)
-        doc = '```lackpy\ncontent = read_file("hello.txt")\n```\n\nFile says: {content}'
+    async def test_read_into_a_name(self, interpreter, workspace, tmp_home):
+        # Was test_read_file_tool (the kit's read_file): the same read through Path.
+        ctx = _pctx(workspace, tmp_home)
+        doc = ('```lackpy\nfrom pathlib import Path\ncontent = Path("hello.txt").read_text()\n```'
+               '\n\nFile says: {content}')
         result = await interpreter.execute(doc, ctx)
         assert result.success
         assert "Hello World" in result.output
@@ -308,46 +312,24 @@ class TestCeilingGate:
         assert result.success
         assert "Result: 4" in result.output
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_no_ceiling_means_no_gate(self, interpreter, tmp_path):
+    async def test_no_ceiling_means_no_gate(self, interpreter, tmp_path, tmp_home):
         # Without a grade_ceiling the doc runs as before (writes the file).
-        ctx = ExecutionContext(base_dir=tmp_path)
+        ctx = _pctx(tmp_path, tmp_home)
         doc = "```lackpy @write(out.py)\nvalue = 1\n```\n"
         result = await interpreter.execute(doc, ctx)
         assert result.success
         assert (tmp_path / "out.py").exists()
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_scratch_directive_allowed_under_read_ceiling(self, interpreter, workspace):
-        # Review #2/#8: @scratch compiles to locals(); it must NOT be refused as
-        # an escape hatch under a read-only ceiling.
-        ctx = ExecutionContext(base_dir=workspace, config={"grade_ceiling": Grade(1, 1)})
+    async def test_scratch_directive_allowed_under_read_ceiling(self, interpreter, workspace,
+                                                                tmp_home):
+        # Review #2/#8: @scratch (and a @read) must NOT be refused under a
+        # read-only ceiling.
+        ctx = _pctx(workspace, tmp_home, grade_ceiling=Grade(1, 1))
         doc = "```lackpy @read(hello.txt)\n```\n\n```lackpy @scratch\nx = 1\n```"
         result = await interpreter.execute(doc, ctx)
         assert result.success
-
-    @pytest.mark.asyncio
-    async def test_injected_tool_is_graded_by_the_gate(self, interpreter, tmp_path):
-        # Review #1/#3: a profile-injected write-capable tool must be graded by
-        # the gate, not slip under a read-only ceiling as a pure call. (Task 2:
-        # the half that ran the injected host callable is gone -- a granted
-        # tool's callable no longer joins the namespace.)
-        spec = ToolSpec(name="custom_writer", provider="python", description="w",
-                        args=[], returns="bool", grade_w=3, effects_ceiling=3)
-        resolved = ResolvedTools(
-            tools={"custom_writer": spec},
-            callables={"custom_writer": lambda p, d: None},
-            grade=Grade(3, 3), description="custom",
-        )
-        doc = '```lackpy\ncustom_writer("out.txt", "data")\n```'
-
-        ctx = ExecutionContext(base_dir=tmp_path, tools=resolved,
-                               config={"grade_ceiling": Grade(1, 1)})
-        result = await interpreter.execute(doc, ctx)
-        assert not result.success                 # refused
-        assert "w=3" in result.error
 
     @pytest.mark.asyncio
     async def test_syntax_error_reports_kernel_error_not_ceiling(self, interpreter, tmp_path):
@@ -382,9 +364,9 @@ class TestCeilingGate:
         return ResolvedTools(tools={"reader": spec}, callables={"reader": lambda: "x"},
                              grade=Grade(grade_w, grade_w), description="t")
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_ceiling_defaults_to_granted_toolset_grade(self, interpreter, tmp_path):
+    async def test_ceiling_defaults_to_granted_toolset_grade(self, interpreter, tmp_path,
+                                                             tmp_home):
         # Profile -> ceiling wiring: with NO explicit ceiling, the gate caps the
         # document at the granted toolset's grade. A read-only toolset (w=1)
         # refuses a write-builtin doc; a write-capable toolset (w=3) allows it.
@@ -395,7 +377,8 @@ class TestCeilingGate:
         assert not result.success and "w=3" in result.error
         assert not (tmp_path / "o.py").exists()
 
-        rw = ExecutionContext(base_dir=tmp_path, tools=self._toolset(3))
+        rw = _pctx(tmp_path, tmp_home)
+        rw.tools = self._toolset(3)
         assert (await interpreter.execute(write_doc, rw)).success
 
     @pytest.mark.asyncio
@@ -422,60 +405,55 @@ class TestWritesKeptUnderForgiveness:
 
     OK_CEILING = {"grade_ceiling": Grade(3, 3)}  # gate present but permissive: writes allowed
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_write_persists_when_a_later_cell_fails(self, interpreter, tmp_path):
+    async def test_write_persists_when_a_later_cell_fails(self, interpreter, tmp_path, tmp_home):
         # WAS test_failure_removes_a_newly_created_file (rollback).
         doc = ("```lackpy @write(out.txt)\nfresh\n```\n\n"
                "```lackpy\nfail = {}['boom']\n```")
-        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        ctx = _pctx(tmp_path, tmp_home, **self.OK_CEILING)
         result = await interpreter.execute(doc, ctx)
         assert not result.success                              # aggregate Left
         assert (tmp_path / "out.txt").read_text() == "fresh"   # write KEPT
         assert result.metadata["ledger"].query(entry_type="error_reified")
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_overwrite_persists_when_a_later_cell_fails(self, interpreter, tmp_path):
+    async def test_overwrite_persists_when_a_later_cell_fails(self, interpreter, tmp_path, tmp_home):
         # WAS test_failure_restores_overwritten_file (rollback to ORIGINAL).
         (tmp_path / "keep.txt").write_text("ORIGINAL")
         doc = ("```lackpy @write(keep.txt)\nNEW\n```\n\n"
                "```lackpy\nx = 1 / 0\n```")
-        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        ctx = _pctx(tmp_path, tmp_home, **self.OK_CEILING)
         result = await interpreter.execute(doc, ctx)
         assert not result.success
         assert (tmp_path / "keep.txt").read_text() == "NEW"    # KEPT, not restored
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_success_commits_the_write(self, interpreter, tmp_path):
-        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+    async def test_success_commits_the_write(self, interpreter, tmp_path, tmp_home):
+        ctx = _pctx(tmp_path, tmp_home, **self.OK_CEILING)
         result = await interpreter.execute("```lackpy @write(out.txt)\nkept\n```", ctx)
         assert result.success
         assert (tmp_path / "out.txt").read_text() == "kept"
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_write_persists_without_a_ceiling(self, interpreter, tmp_path):
+    async def test_write_persists_without_a_ceiling(self, interpreter, tmp_path, tmp_home):
         # WAS test_rollback_happens_without_a_ceiling. Forgiveness, like the
         # old journal, does not depend on a ceiling or a granted toolset.
         doc = ("```lackpy @write(out.txt)\nfresh\n```\n\n"
                "```lackpy\nfail = {}['boom']\n```")
-        ctx = ExecutionContext(base_dir=tmp_path)  # no ceiling, no tools
+        ctx = _pctx(tmp_path, tmp_home)  # no ceiling, no tools
         result = await interpreter.execute(doc, ctx)
         assert not result.success
         assert (tmp_path / "out.txt").read_text() == "fresh"
 
-    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
-    async def test_diff_persists_when_a_later_cell_fails(self, interpreter, tmp_path):
+    async def test_diff_persists_when_a_later_cell_fails(self, interpreter, tmp_path, tmp_home):
         # WAS test_failure_restores_a_diffed_file (rollback to Hello World).
         (tmp_path / "hello.txt").write_text("Hello World\n")
         doc = ("```lackpy @diff(hello.txt)\n"
                "--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n"
                "-Hello World\n+Hello Universe\n```\n\n"
                "```lackpy\nfail = {}['boom']\n```")
-        ctx = ExecutionContext(base_dir=tmp_path, config=self.OK_CEILING)
+        ctx = _pctx(tmp_path, tmp_home, **self.OK_CEILING)
         result = await interpreter.execute(doc, ctx)
         assert not result.success
         assert (tmp_path / "hello.txt").read_text() == "Hello Universe\n"  # KEPT

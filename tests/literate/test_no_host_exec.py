@@ -34,8 +34,8 @@ SRC = ROOT.parents[1]  # src/lackpy (a namespace package: no __file__)
 #: Modules the literate package may import (top-level name; ``lackpy`` covers
 #: every ``lackpy.*`` and relative import).
 ALLOWED_MODULES = frozenset({
-    "__future__", "ast", "collections", "contextlib", "contextvars", "dataclasses",
-    "functools", "json", "markdown_it", "re", "time", "tomllib", "typing", "uuid",
+    "__future__", "ast", "collections", "contextlib", "dataclasses",
+    "functools", "json", "markdown_it", "re", "time", "typing", "uuid",
     "lackpy",
 })
 
@@ -51,17 +51,10 @@ EXCEPTIONS = {
         "dir(builtins) only: the builtin names check_cell resolves against",
     ("kernel/static_analysis.py", 'compile(code, "<cell>", "exec", ast.PyCF_ONLY_AST)'):
         "parse only (ast.PyCF_ONLY_AST): no code object is made",
-    ("effects.py", "import sys"):
-        "sys.addaudithook for observe_effects; Task 3 replaces the observer (D7)",
-    ("effects.py", "from importlib.resources import files"):
-        "reads the packaged tool_effects.toml; Task 3 deletes both (D7)",
     ("kernel/recovery.py", "import asyncio"):
         "runs the host's own inference coroutine (a model call), never document code",
     ("kernel/recovery.py", "import concurrent.futures"):
         "a thread for that inference coroutine when a loop is already running",
-    ("tools.py", "import os"): "tools.py is unwired (tested below); Task 3 deletes it (D7)",
-    ("tools.py", "import subprocess"): "tools.py is unwired; Task 3 deletes it (D7)",
-    ("tools.py", "from pathlib import Path"): "tools.py is unwired; Task 3 deletes it (D7)",
 }
 
 _CODE_NAMES = {"exec", "eval", "compile", "__import__", "__builtins__"}
@@ -144,10 +137,11 @@ def test_every_exception_has_a_reason():
     assert all(reason.strip() for reason in EXCEPTIONS.values())
 
 
-def test_the_unwired_file_has_no_importer_in_src():
+def test_the_tool_layer_is_gone():
+    """D7: the kit tools and their grade table are deleted, and nothing imports them."""
+    assert not (ROOT / "tools.py").exists()
+    assert not (ROOT / "tool_effects.toml").exists()
     for path in SRC.rglob("*.py"):
-        if path == ROOT / "tools.py":
-            continue
         text = path.read_text()
         assert "literate.tools" not in text and "make_tool_namespace" not in text, path
         assert "from .tools import" not in text and "from ..tools import" not in text, path

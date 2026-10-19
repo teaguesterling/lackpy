@@ -31,15 +31,7 @@ from .annotations import kernel_note
 from ...run.cells import CellSession
 from .compiler import compile_cell
 from .display import DEFAULT_DISPLAY_THRESHOLD
-from .effects import (
-    LITERATE_TOOL_EFFECTS,
-    ToolEffect,
-    as_grade,
-    classify_effects,
-    exceeds_ceiling,
-    observe_effects,
-    tool_effect_from_spec,
-)
+from .effects import as_grade, classify_effects, exceeds_ceiling, path_writes
 from .kernel import CellResult, LightweightKernel
 from .kernel.driver import REFUSED
 from .kernel.forgiveness import (
@@ -209,14 +201,13 @@ class LiterateInterpreter:
         gate_violations: dict[int, str] = {}
         if raw_ceiling is not None:
             ceiling = as_grade(raw_ceiling)
-            effects_map = _gate_effects_map(context)
             for index, cell in enumerate(parsed.cells):
                 try:
                     src = compile_cell(cell)
                     ast.parse(src)
                 except (ValueError, SyntaxError):
                     continue
-                effects = classify_effects(src, tool_effects=effects_map)
+                effects = classify_effects(src)
                 violation = exceeds_ceiling(effects, ceiling)
                 if violation:
                     gate_violations[index] = (
@@ -229,8 +220,7 @@ class LiterateInterpreter:
         # contract a cell failure reifies as a value + ledger entry and the
         # run completes, so there is no failure point left to roll back from.
         # File writes stand, like every other binding (state kept, failure
-        # ledgered). journal.FileJournal remains available as a component for
-        # a future opt-in strict/transactional mode.
+        # ledgered).
         output_parts: list[str] = []
         continue_requested = False
         assigned_names: set[str] = set()
@@ -261,8 +251,8 @@ class LiterateInterpreter:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
-        # What each executed cell was OBSERVED to do (audit-hook events from
-        # its execution scope; see effects.observe_effects) — the evidence
+        # What each executed cell was OBSERVED to do (the Path writes in its
+        # slice of the session trace; see effects.path_writes) — the evidence
         # the re-exec pass gates on.  A cell absent from this map never
         # executed this round (reified/skipped), so re-running it is a FIRST
         # execution, not a replay.
@@ -406,8 +396,8 @@ class LiterateInterpreter:
 
         Returns the rendered fragment for this cell, whether it requested a
         ``@continue`` pause, whether it actually executed, and what world
-        effects its execution was OBSERVED to perform (audit-hook events; see
-        :func:`.effects.observe_effects`) — the evidence the reactive re-exec
+        effects its execution was OBSERVED to perform (the ``Path`` writes in
+        its trace slice; see :func:`.effects.path_writes`) — the evidence the reactive re-exec
         pass gates on.  Mutates ``kernel`` / ``ledger`` / ``versions`` /
         ``assigned_names`` in place, like the original inline body.
         """
@@ -424,16 +414,17 @@ class LiterateInterpreter:
                 return _CellOutcome(rendered=reified, continue_requested=False)
 
         known_before = kernel.known_names()
-        # Observe the execution we are doing anyway: the audit hook records
-        # any world effect the cell performs (best-effort — see the honest
-        # framing in effects.py) so the re-exec pass can gate on what the
-        # cell DID rather than on what its source looks like.
-        with observe_effects() as observation:
-            if rerun:
-                result = kernel.rerun_cell(cell, index, rerun_id)
-            else:
-                result = kernel.execute_cell(cell, index)
-        observed = tuple(sorted(observation.events))
+        # Observe the execution we are doing anyway (D7): the Path writes in
+        # this cell's slice of the session trace, so the re-exec pass gates on
+        # what the cell DID rather than on what its source looks like. The
+        # Path stand-in is a cell's only route to the filesystem.
+        trace = kernel.session.trace.entries
+        mark = len(trace)
+        if rerun:
+            result = kernel.rerun_cell(cell, index, rerun_id)
+        else:
+            result = kernel.execute_cell(cell, index)
+        observed = path_writes(trace[mark:])
 
         if result.error_phase == REFUSED:
             # D4: a refusal is not forgiven. It is never reified as a Hole or
@@ -534,14 +525,14 @@ class LiterateInterpreter:
         EFFECT-REPLAY (the key risk, per the brief).  Re-running a cell's
         source replays its side effects — a dependent that writes a file
         would write it twice.  The gate is RUNTIME OBSERVATION, not static
-        classification: every cell's first execution runs inside an
-        audit-hook observation scope (:func:`.effects.observe_effects`), and
-        ``observed_effects`` carries what each cell was actually SEEN to do.
+        classification: the ``Path`` write entries in each cell's slice of the
+        session trace (:func:`.effects.path_writes`, design D7) are in
+        ``observed_effects``, what each cell was actually SEEN to do.
         Two modes (``reactive_mode``, default strict):
 
         * ``strict`` — a dirtied dependent OBSERVED to perform a world effect
-          on its first run (a write/append/create ``open``, an ``os``
-          mutation, a socket connect/bind, a subprocess spawn) is withheld:
+          on its first run (``Path.write_text``, ``Path.write_bytes`` or
+          ``Path.mkdir``, also one that failed part way) is withheld:
           ``reexecuted=False`` + the reason + the observed events.  A
           dependent whose first run was observed effect-free is re-run —
           including method-call dependents (``name.upper()``) and
@@ -569,12 +560,9 @@ class LiterateInterpreter:
         The disambiguator is the gate's own verdict (``gate_violations``),
         not the absence of observation evidence.
 
-        BEST-EFFORT, stated plainly: observation sees effects that flow
-        through Python's audited APIs.  A C extension issuing raw syscalls,
-        a flags-based ``os.open`` write, an effect on a cell-spawned thread,
-        or an effectful branch the first run skipped can all slip past the
-        observer — the sandbox and stdlib-limiting are the outer defense for
-        that gap (see the notes in :mod:`.effects`).  When a strict-mode
+        COVERAGE: the ``Path`` stand-in is a cell's only route to the
+        filesystem, so the trace sees every write a cell makes. An effectful
+        branch the first run skipped is not seen.  When a strict-mode
         re-run of a first-run-pure cell does fire an effect, the effect is
         NOT prevented — but it is observed and recorded on the ``dirty``
         entry, never silent.
@@ -691,8 +679,8 @@ class _CellOutcome:
 
     ``executed`` is False when the forgiveness pre-pass reified/skipped the
     cell (it never ran, so there is nothing observed); ``observed_effects``
-    is the sorted, deduplicated audit-event tags the execution was seen to
-    perform (empty = no world effect observed).
+    is the sorted, deduplicated ``Path`` write tools the execution was seen to
+    perform (empty = no write observed).
     """
 
     rendered: str
@@ -1211,38 +1199,9 @@ def _reify_unavailable_for_cell(
 
 
 _INTERNAL_NAMES = frozenset({
-    "read_file", "write_file", "apply_diff",
-    "search_content", "run_command", "run_tests",
     "__literate_continue__", "__builtins__",
     "__continue_requested__",
 })
-
-
-def _gate_effects_map(context: ExecutionContext) -> dict[str, ToolEffect]:
-    """Effect grades the ceiling gate scores against, for THIS context.
-
-    Starts from the literate builtins (``LITERATE_TOOL_EFFECTS``) and adds any
-    profile/toolbox-injected tools (``context.tools``) graded by their own
-    ``ToolSpec``. Without this the gate would only know the builtins, so an
-    injected write-capable tool would classify as pure and slip under a
-    read-only ceiling. (Since literate stepy Task 2 the callables no longer join
-    the namespace; the grading stays until Task 3 replaces the grade map.)
-
-    Each injected tool is graded by ``tool_effect_from_spec``: a spec that declares
-    ``effect_kind`` + ``path_arg`` is graded precisely (and an injected write tool
-    with a literal path arg is journalable); a spec that omits them falls back to
-    the grade heuristic (kind from ``grade_w``, no path -> gated but not journaled).
-    Builtins win over injected tools of the same name (the literate ``write_file``
-    in the namespace is what actually runs), so their precise TOML entry stands.
-    """
-    effects_map = dict(LITERATE_TOOL_EFFECTS)
-    resolved = context.tools
-    specs = getattr(resolved, "tools", None) if resolved is not None else None
-    for name, spec in (specs or {}).items():
-        if name in effects_map:
-            continue
-        effects_map[name] = tool_effect_from_spec(spec)
-    return effects_map
 
 
 def _build_kernel(context: ExecutionContext) -> LightweightKernel:

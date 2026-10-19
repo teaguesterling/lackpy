@@ -207,23 +207,24 @@ class TestReadCompilation:
             annotation_args={"path": "src/main.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert "print(read_file(" in code and "src/main.py" in code
+        assert "print(Path('src/main.py').read_text())" in code
+        assert "from pathlib import Path" in code
 
 
 class TestWriteCompilation:
-    def test_write_compiles_to_write_file(self):
+    def test_write_compiles_to_path_write_text(self):
         cells = [Cell(
             cell_type="write",
             content="print('hello')",
             annotation_args={"path": "output.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert "write_file(" in code and "output.py" in code
-        assert "print('hello')" in code
+        assert code == "from pathlib import Path\nPath('output.py').write_text(\"print('hello')\")"
 
 
 class TestDiffCompilation:
-    def test_diff_compiles_to_apply_diff(self):
+    def test_diff_compiles_to_a_path_read_and_write(self):
+        # Analysis source only: the kernel applies a diff on the host side (D6).
         diff_content = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new"
         cells = [Cell(
             cell_type="diff",
@@ -231,9 +232,9 @@ class TestDiffCompilation:
             annotation_args={"path": "file.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert "apply_diff(" in code and "file.py" in code
-        assert "-old" in code
-        assert "+new" in code
+        assert "apply_diff" not in code
+        assert "Path('file.py').read_text()" in code
+        assert "Path('file.py').write_text(" in code
 
 
 class TestScratchCompilation:
