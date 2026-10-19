@@ -1,0 +1,48 @@
+# /// intent
+# goal   = "Update the status line in notes.md from 'draft' to 'final' if it occurs exactly once"
+# reads  = ["notes.md"]
+# writes = ["notes.md"]
+# output = "printed"
+# ///
+
+import json
+import re
+from pathlib import Path
+
+# Read the notes.md file
+notes_path = Path("notes.md")
+if not notes_path.exists():
+    print("notes.md not found")
+    exit(1)
+
+# Read the content
+try:
+    content = notes_path.read_text()
+except Exception as e:
+    print(f"Failed to read notes.md: {e}")
+    exit(1)
+
+# Split into lines
+lines = content.splitlines()
+
+# Count occurrences of 'Status: draft'
+draft_lines = [i for i, line in enumerate(lines) if line.strip() == "Status: draft"]
+
+# Check if it occurs exactly once
+if len(draft_lines) != 1:
+    print("Status: draft does not occur exactly once")
+    exit(1)
+
+# Modify the line
+line_index = draft_lines[0]
+lines[line_index] = "Status: final"
+
+# Write back
+try:
+    notes_path.write_text("\n".join(lines))
+except Exception as e:
+    print(f"Failed to write notes.md: {e}")
+    exit(1)
+
+# Print success
+print("Status updated to final")

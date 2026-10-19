@@ -1,0 +1,26 @@
+```python
+# /// intent
+# goal   = "For each line in data/rows.jsonl, print 'bad' if the line is not valid JSON, otherwise print the row id"
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+# Read the rows.jsonl file line by line
+path = Path("data/rows.jsonl")
+lines = path.read_text().splitlines()
+
+# Process each line
+for line in lines:
+    try:
+        # Parse the JSON line
+        row = json.loads(line)
+        # Extract and print the id
+        print(row["id"])
+    except (json.JSONDecodeError, KeyError):
+        # If JSON is invalid or missing 'id', print 'bad'
+        print("bad")
+```

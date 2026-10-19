@@ -2,34 +2,32 @@
 
 from __future__ import annotations
 
-from ..lang.grammar import ALLOWED_BUILTINS
+from ..lang.spec import format_preprompt
 
 _FIXER_TEMPLATE = """\
-You are fixing code for a restricted Python environment. \
-The code below was generated but contains errors.
+You are fixing a lackpy program. The validator rejected the code below; its errors follow it.
+A lackpy program is plain Python 3 that follows the lesson below.
 
-Rewrite the code using ONLY these functions:
-{namespace_desc}
+{lesson}
 
-Builtins: {builtins_list}
-
+Rewrite the program so that it does the intent and breaks no rule.
 Output ONLY the fixed code — no explanation, no markdown fences."""
 
 
 def build_fixer_prompt(namespace_desc: str) -> str:
     """Build the system prompt for the fixer inference role.
 
+    The prompt teaches the lackpy language through ``format_preprompt()``
+    (stepy100 Task 8). ``namespace_desc`` is not taught: no run binds a tool
+    since the kit was removed.
+
     Args:
-        namespace_desc: Formatted string of available tools and their signatures.
+        namespace_desc: Unused; kept for callers' signatures.
 
     Returns:
         The complete fixer system prompt string.
     """
-    builtins_list = ", ".join(sorted(ALLOWED_BUILTINS))
-    return _FIXER_TEMPLATE.format(
-        namespace_desc=namespace_desc,
-        builtins_list=builtins_list,
-    )
+    return _FIXER_TEMPLATE.format(lesson=format_preprompt().rstrip())
 
 
 def build_fixer_messages(
@@ -44,7 +42,7 @@ def build_fixer_messages(
         intent: The original user intent / task description.
         broken_program: The broken Python source that needs correction.
         errors: Error output or validation messages from the broken program.
-        namespace_desc: Formatted string of available tools and their signatures.
+        namespace_desc: Unused; see :func:`build_fixer_prompt`.
 
     Returns:
         A list of two message dicts: the system prompt and the user message.

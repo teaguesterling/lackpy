@@ -1,0 +1,29 @@
+# /// intent
+# goal   = "Print the sum of the size field over all valid rows in data/rows.jsonl, skipping invalid JSON lines."
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+total_size = 0
+path = Path("data/rows.jsonl")
+
+try:
+    with path.open('r') as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                if isinstance(data, dict) and "size" in data:
+                    total_size += data["size"]
+            except json.JSONDecodeError:
+                continue
+except FileNotFoundError:
+    pass
+
+print(total_size)

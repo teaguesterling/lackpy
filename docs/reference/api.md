@@ -66,14 +66,6 @@
 
 ---
 
-## Kit registry
-
-::: lackpy.tools.registry.resolve_tools
-
-::: lackpy.tools.registry.ResolvedTools
-
----
-
 ## Runner
 
 ::: lackpy.run.runner.RestrictedRunner
@@ -91,7 +83,21 @@
 
 ::: lackpy.run.trace.TraceEntry
 
-::: lackpy.run.trace.make_traced
+---
+
+## File access
+
+See [Concepts: File access](../concepts/paths.md).
+
+::: lackpy.run.paths.sources.load_policy
+
+::: lackpy.run.paths.rules.PathPolicy
+
+::: lackpy.run.paths.rules.PathRule
+
+::: lackpy.run.paths.rules.parse_rule
+
+::: lackpy.run.paths.proxy.make_path_class
 
 ---
 

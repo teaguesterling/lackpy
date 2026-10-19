@@ -1,0 +1,14 @@
+# /// intent
+# goal   = "Add '- release notes' after '- changelog' in notes.md, failing if '- changelog' does not occur exactly once."
+# reads  = ["notes.md"]
+# writes = ["notes.md"]
+# output = "none"
+# ///
+
+from pathlib import Path
+
+path = Path("notes.md")
+text = path.read_text()
+assert text.count("- changelog") == 1, "changelog occurs exactly once"
+new_text = text.replace("- changelog", "- changelog\n- release notes")
+path.write_text(new_text)

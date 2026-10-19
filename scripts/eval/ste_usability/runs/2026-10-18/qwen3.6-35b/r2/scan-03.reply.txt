@@ -1,0 +1,31 @@
+```python
+# /// intent
+# goal   = "Count total lines in files under src directory"
+# reads  = ["src"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+def count_lines(p):
+    if not p.exists() or not p.is_file():
+        return 0
+    text = p.read_text()
+    return len(text.splitlines())
+
+def total_lines(d):
+    if not d.is_dir():
+        return 0
+    total = 0
+    for child in d.iterdir():
+        if child.is_file():
+            total += count_lines(child)
+        elif child.is_dir():
+            total += total_lines(child)
+    return total
+
+src = Path("src")
+result = total_lines(src)
+print(result)
+```

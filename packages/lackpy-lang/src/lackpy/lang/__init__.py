@@ -30,6 +30,7 @@ from .failure_modes import (
     SYNTAX_ARTIFACT,
     WRONG_OUTPUT,
 )
+from .registry import RULES, Rule, Violation, Waiver, rule_by_id
 from .spec import format_spec, get_spec
 from .validator import ValidationResult, validate
 
@@ -38,6 +39,8 @@ __all__ = [
     "ALLOWED_NODES", "FORBIDDEN_NODES", "FORBIDDEN_NAMES", "ALLOWED_BUILTINS",
     # validation — is this program safe?
     "validate", "ValidationResult",
+    # registry — every check is a rule with an id and a tier
+    "RULES", "Rule", "Violation", "Waiver", "rule_by_id",
     # grading — how restricted/effectful is it?
     "Grade", "compute_grade", "DEFAULT_GRADE_W", "DEFAULT_EFFECTS_CEILING",
     # spec — the human/agent-facing language description

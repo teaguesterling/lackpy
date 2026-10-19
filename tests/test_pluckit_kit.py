@@ -99,6 +99,7 @@ class TestPluckitValidation:
 
 
 class TestPluckitExecution:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; pluckit migration pending", strict=True)
     def test_select_returns_mock_data(self, toolbox, tmp_path):
         kits_dir = tmp_path / "kits"
         kits_dir.mkdir()
@@ -115,6 +116,7 @@ class TestPluckitExecution:
         assert isinstance(result.output, list)
         assert len(result.trace.entries) == 3
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; pluckit migration pending", strict=True)
     def test_mutation_chain_executes(self, toolbox, tmp_path):
         kits_dir = tmp_path / "kits"
         kits_dir.mkdir()
@@ -131,6 +133,7 @@ class TestPluckitExecution:
         assert result.output["committed"] is True
         assert len(result.trace.entries) == 3
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; pluckit migration pending", strict=True)
     def test_query_chain_executes(self, toolbox, tmp_path):
         kits_dir = tmp_path / "kits"
         kits_dir.mkdir()
@@ -146,6 +149,7 @@ class TestPluckitExecution:
         assert result.success, result.error
         assert "functions" in result.output
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; pluckit migration pending", strict=True)
     def test_history_chain_executes(self, toolbox, tmp_path):
         kits_dir = tmp_path / "kits"
         kits_dir.mkdir()

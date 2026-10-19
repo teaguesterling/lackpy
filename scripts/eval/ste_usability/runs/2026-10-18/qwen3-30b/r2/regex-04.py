@@ -1,0 +1,36 @@
+# /// intent
+# goal   = "Print the names of functions defined in .cpp files under src, sorted"
+# reads  = ["src/a.cpp", "src/b.cpp", "src/c.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+# Regular expression to match function definitions: int <name>() {
+func_pattern = re.compile(r'^int\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(')
+
+# List to store function names
+function_names = []
+
+# Iterate over .cpp files in src directory
+for cpp_file in Path("src").glob("*.cpp"):
+    try:
+        # Read the file content
+        content = cpp_file.read_text()
+        # Search for function definitions
+        for line in content.splitlines():
+            match = func_pattern.match(line)
+            if match:
+                function_names.append(match.group(1))
+    except (OSError, UnicodeDecodeError) as e:
+        # Handle file read errors without catching Exception
+        pass
+
+# Sort function names
+function_names.sort()
+
+# Print the function names
+for name in function_names:
+    print(name)

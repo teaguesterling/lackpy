@@ -1,0 +1,25 @@
+```python
+# /// intent
+# goal   = "Count the lines that contain TODO in each .cpp file under src. Print each file name and its count, sorted by file name."
+# reads  = ["src/*.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+from collections import Counter
+from pathlib import Path
+
+def count_todos(path):
+    text = path.read_text()
+    count = sum(1 for line in text.splitlines() if 'TODO' in line)
+    return count
+
+def main():
+    src_dir = Path('src')
+    cpp_files = sorted(src_dir.glob('*.cpp'))
+    for file in cpp_files:
+        n = count_todos(file)
+        print(f'{file.name}: {n}')
+
+main()
+```

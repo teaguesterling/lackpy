@@ -15,39 +15,29 @@ def _render(args) -> int:
     ```lackpy fences and the [kernel] channel is stripped, so the result renders
     anywhere markdown does. Nothing runs -- which matters, because running a
     literate document writes files and shells out, and that must never be a
-    side effect of asking to see it.
+    side effect of asking to see it. --execute is refused (stepy100 Task 7,
+    review N1) until the literate interpreter runs on the stepy100 runtime.
     """
     from .interpreters.literate.parser import to_markdown
 
     if args.path == "-":
         document = sys.stdin.read()
-        source_dir = Path.cwd()
     else:
         source = Path(args.path)
         if not source.is_file():
             print(f"No such document: {source}", file=sys.stderr)
             return 1
         document = source.read_text()
-        source_dir = source.parent
 
     if args.execute:
-        import asyncio
+        # Task 7 review N1: executing ran the literate axis with no validator and
+        # no PathPolicy (a document read files outside --base-dir). Refused until
+        # the literate interpreter migrates, like every service route (C1).
+        from .profiles import LITERATE_PENDING
 
-        from .interpreters.base import ExecutionContext
-        from .interpreters.literate import LiterateInterpreter, LiterateSession
-
-        base_dir = Path(args.base_dir) if args.base_dir else source_dir
-        session = LiterateSession(
-            ExecutionContext(base_dir=base_dir),
-            interpreter=LiterateInterpreter(),
-            max_rounds=1,
-        )
-        result = asyncio.run(session.step(document))
-        for error in result.errors:
-            print(f"lackpy: {error}", file=sys.stderr)
-        out = session.display
-    else:
-        out = to_markdown(document)
+        print(f"lackpyctl render --execute: {LITERATE_PENDING}", file=sys.stderr)
+        return 1
+    out = to_markdown(document)
 
     if args.output:
         Path(args.output).write_text(out + "\n")
@@ -128,12 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
     render_p.add_argument(
         "--execute",
         action="store_true",
-        help="Run the document and render its OUTPUT (writes files, runs commands)",
+        help="Disabled until the literate interpreter migrates to the stepy100 runtime",
     )
     render_p.add_argument(
         "--base-dir",
         default=None,
-        help="Directory the document resolves paths against (default: its own)",
+        help="Unused while --execute is disabled",
     )
 
     # profile

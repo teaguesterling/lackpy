@@ -1,0 +1,6 @@
+2026-10-18 09:00:01 INFO start
+2026-10-18 09:00:02 ERROR code=E12 disk full
+2026-10-18 09:00:05 WARN code=W03 slow
+2026-10-18 09:01:00 ERROR code=E12 disk full
+2026-10-18 09:02:30 ERROR code=E40 timeout
+2026-10-18 09:03:00 INFO stop

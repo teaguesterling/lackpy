@@ -5,29 +5,114 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import LackpyConfig, load_config
 from .infer.dispatch import InferenceDispatcher, GenerationResult
 from .infer.prompt import format_params_description
 from .infer.providers.rules import RulesProvider
 from .infer.providers.templates import TemplatesProvider
-from .tools.providers.builtin import BuiltinProvider
 from .tools.providers.python import PythonProvider
 from .tools.registry import ResolvedTools
-from .profiles import Profile, ResolvedProfile, resolve_profile
+from .lang.grader import compute_grade
+from .profiles import KIT_REMOVED, LITERATE_PENDING, STAGED_DSL_PENDING, Profile, ProfileError, ResolvedProfile, resolve_profile
 from .tools.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
 from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
-from .run.bridge import AsyncBridge, is_async_callable
-from .run.runner import RestrictedRunner
+from .run.paths import PathPolicy, load_policy
+from .run.runner import RestrictedRunner, _binds_params
+from .run.refusal import LackpyRefusal
+from .run.trace import error_text
 
 logger = logging.getLogger(__name__)
+
+
+def validation_error(validation: ValidationResult) -> str:
+    """The failed-result text for a rejected program (review I3, spec D17).
+
+    Each violation reads ``message (hint)`` when the rule names an approved
+    alternative, so the caller learns the path forward from the error alone.
+    """
+    if validation.violations:
+        parts = [f"{v.message} ({v.hint})" if v.hint else v.message for v in validation.violations]
+    else:
+        parts = list(validation.errors)
+    return f"Validation failed: {'; '.join(parts)}"
+
+
+_RULE_NAME = re.compile(r"^\s*([a-z_]+)\s*(?:\(\s*(\d+)\s*\))?\s*$")
+
+
+def resolve_rules(rules: list | None) -> list | None:
+    """Turn the rule names a caller passes (MCP ``rules: list[str]``) into rule callables.
+
+    A callable is kept as it is. A name is one of ``lackpy.lang.rules``:
+    ``no_loops``, ``no_nested_calls``, or ``max_depth(N)`` / ``max_calls(N)``
+    with an int ``N`` (review M1). Raises ``ValueError`` naming an unknown or
+    malformed rule; each public method turns that into a failed result.
+    """
+    if not rules:
+        return rules
+    from .lang import rules as lang_rules
+    plain = {"no_loops": lang_rules.no_loops, "no_nested_calls": lang_rules.no_nested_calls}
+    factories = {"max_depth": lang_rules.max_depth, "max_calls": lang_rules.max_calls}
+    resolved = []
+    for rule in rules:
+        if callable(rule):
+            resolved.append(rule)
+            continue
+        match = _RULE_NAME.match(rule) if isinstance(rule, str) else None
+        name, arg = (match.group(1), match.group(2)) if match else (None, None)
+        if name in plain and arg is None:
+            resolved.append(plain[name])
+        elif name in factories and arg is not None:
+            resolved.append(factories[name](int(arg)))
+        else:
+            known = ", ".join([*plain, *(f"{f}(N)" for f in factories)])
+            raise ValueError(f"unknown rule {rule!r}; the known rules are {known}")
+    return resolved
+
+def _policy_error(e: BaseException) -> str:
+    """The failed-result text for a PathPolicy that cannot be loaded.
+
+    ``load_policy`` raises ``ValueError`` naming the settings file; any other
+    type is named too, so a loader defect is not mistaken for a settings one.
+    A ``LackpyRefusal`` (a ``BaseException``) is caught by the callers too
+    (review I4), so a settings state never escapes to FastMCP.
+    """
+    if type(e) is ValueError:
+        return f"cannot load the path policy: {error_text(e)}"
+    return f"cannot load the path policy ({type(e).__name__}): {error_text(e)}"
+
+
+def _traced_paths(trace: Any, tools: tuple[str, ...]) -> list[str]:
+    """The paths, as the program built them, of the successful ``tools`` calls; no repeats."""
+    seen: dict[str, None] = {}
+    for entry in trace.entries:
+        if entry.success and entry.tool in tools and entry.args:
+            seen.setdefault(str(entry.args[0]), None)
+    return list(seen)
+
+
+def _check_mode(mode: str | None) -> None:
+    """Refuse inference mode "staged-dsl" (review N2).
+
+    Its strategy runs ``AstSelectInterpreter`` over the process cwd at generation
+    time, with no PathPolicy, and returns the matched source as the program.
+    """
+    if mode == "staged-dsl":
+        raise ProfileError(STAGED_DSL_PENDING)
+
+
+def _no_tools() -> ResolvedTools:
+    """The empty tool set every profile resolves to since the kit was removed."""
+    return ResolvedTools(tools={}, callables={}, grade=compute_grade({}), description="")
 
 
 def _strip_top_level_return(program: str) -> str:
@@ -98,8 +183,8 @@ class LackpyService:
     """Unified service layer orchestrating the lackpy pipeline.
 
     Both the MCP server and CLI are thin adapters over this class.
-    Initialize with a workspace path to set the working directory
-    for tool execution.
+    Initialize with a workspace path: programs run from it, and its
+    ``PathPolicy`` governs their file access.
 
     When kibitzer is installed, the service automatically creates a
     KibitzerSession for mode enforcement, tool tracking, and coaching.
@@ -107,29 +192,30 @@ class LackpyService:
     Args:
         workspace: Root directory for tool execution. Defaults to cwd.
         config: Override configuration. Loaded from .lackpy/config.toml if not provided.
+        path_policy_loader: Builds the ``PathPolicy`` from the workspace, once per
+            run (settings may change between runs). Defaults to
+            ``load_policy(workspace)``, which reads the managed settings, the
+            user's ``~/.claude/settings.json`` and the workspace's settings.
+            Tests pass a loader with a temporary home and ``managed=None``.
     """
 
     def __init__(self, workspace: Path | None = None, config: LackpyConfig | None = None,
-                 harness_resolver: Any = None) -> None:
+                 harness_resolver: Any = None,
+                 path_policy_loader: Callable[[Path], PathPolicy] | None = None) -> None:
         self._workspace = workspace or Path.cwd()
         self._config = config or load_config(self._workspace)
         # Optional host/harness resolver for virtual tools: name -> callable | None.
         self._harness_resolver = harness_resolver
+        self._path_policy_loader = path_policy_loader
         self._runner = RestrictedRunner()
         # Single-flight execution: serializes the process-global os.chdir in
-        # _execute so concurrent delegations can't race on cwd once an execution
-        # runs off the loop thread (the threaded/async path below).
+        # _execute so concurrent runs can't race on cwd.
         self._exec_lock = asyncio.Lock()
-        # Bridge for execution-loop-local async tools. NB: MCP tools do NOT use
-        # this — they marshal to their own client-loop bridge (McpClient.bridge);
-        # this one is set per threaded run for any tool bound to the exec loop.
-        self._bridge = AsyncBridge()
         self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
-        # Resolution mechanisms for directly-registered specs (tools themselves
-        # come from sources, not these). Kept for back-compat with callers that
-        # register their own provider="builtin"/"python" specs.
-        self.toolbox.register_provider(BuiltinProvider())
+        # The toolbox is internal machinery since the kit was removed from the
+        # runtime (stepy100 Task 7): no run binds its tools. It still feeds
+        # kibitzer's tool registry and lackpyctl's toolbox listing.
         self.toolbox.register_provider(PythonProvider())
         for source, precedence in self._build_tool_sources():
             self.toolbox.add_source(source, precedence)
@@ -343,99 +429,123 @@ class LackpyService:
         except Exception:
             pass
 
-    def _resolve_profile(self, profile: "Profile | str | list[str] | dict | None",
-                         extra_tools: list[str] | None = None) -> ResolvedProfile:
-        """Resolve a profile (name, bundle, or bare tool selection) to a ResolvedProfile.
+    def _resolve_profile(self, profile: "Profile | str | list[str] | dict | None") -> ResolvedProfile:
+        """Resolve a profile to its model, mode, rules and execution axis.
 
-        Composes the source-populated toolbox + the configured ``[profiles.<name>]``
-        tables; ``None`` → the configured default profile. The degenerate (tools-only)
-        case is exactly the former kit resolution — ``.tools`` is the same ResolvedTools.
+        ``None`` is the configured default profile (``[profile] default``) when a
+        ``[profiles.<name>]`` table defines it, and no profile otherwise. A
+        ``str`` must name a ``[profiles.<name>]`` table. The resolved tool set is
+        always empty: the kit was removed from the runtime (stepy100 Task 7).
+
+        Raises:
+            ProfileError: The profile names tools (a list, a dict, a ``.kit`` or
+                ``.profile`` file, or a ``tools``/``extra_tools`` key), or the
+                name is not configured; the message carries ``KIT_REMOVED``. Or
+                the profile selects ``execution = "literate"``; the message is
+                ``LITERATE_PENDING``.
         """
+        profiles = self._config.profiles
+        if profile is None:
+            name = self._config.profile_default
+            prof = self._configured_profile(name) if name in profiles else Profile()
+        elif isinstance(profile, Profile):
+            prof = profile
+        elif isinstance(profile, str):
+            if profile not in profiles:
+                kits_dir = self._config.config_dir / "kits"
+                files = [kits_dir / f"{profile}{ext}" for ext in (".profile", ".kit")]
+                found = next((f for f in files if f.is_file()), None)
+                if found is not None:
+                    raise ProfileError(f"profile {profile!r} is a tool kit file ({found}): {KIT_REMOVED}")
+                raise ProfileError(f"unknown profile {profile!r} (no [profiles.{profile}] table): "
+                                   f"{KIT_REMOVED}")
+            prof = self._configured_profile(profile)
+        else:
+            raise ProfileError(KIT_REMOVED)
+        if prof.tools or prof.extra_tools:
+            raise ProfileError(KIT_REMOVED)
+        if prof.execution == "literate":
+            # Review C1: that axis runs a document with no restricted-Python
+            # validator and no PathPolicy. Refused until the literate interpreter
+            # migrates onto the runtime namespace.
+            raise ProfileError(LITERATE_PENDING)
+        _check_mode(prof.mode)
+        return ResolvedProfile(
+            tools=_no_tools(), model=prof.model, mode=prof.mode, order=prof.order,
+            temperature=prof.temperature, rules=prof.rules, language=prof.language,
+            execution=prof.execution, sandbox=prof.sandbox, policy=prof.policy,
+        )
+
+    def _configured_profile(self, name: str) -> Profile:
+        try:
+            return Profile.from_config(self._config.profiles[name])
+        except ValueError as e:
+            raise ProfileError(f"profile {name!r}: {e}") from None
+
+    def _resolve_tool_selection(self, profile: Any, extra_tools: list[str] | None = None) -> ResolvedTools:
+        """The retired kit resolution, for the internal toolbox views only
+        (``profile_info``, ``docs_index``). No run uses it."""
         if profile is None:
             profile = self._config.profile_default
         kits_dir = self._config.config_dir / "kits"
         return resolve_profile(profile, self.toolbox, profiles=self._config.profiles,
-                               kits_dir=kits_dir, extra_tools=extra_tools)
+                               kits_dir=kits_dir, extra_tools=extra_tools).tools
 
-    def _gate_tools(self, resolved: ResolvedTools) -> ResolvedTools:
-        """Generation gate: drop virtual tools the harness can't currently supply.
+    def _resolve_params(self, params: dict[str, Any] | None) -> tuple[dict[str, Any], str | None]:
+        """The passed values and the prompt's description of the params literal.
 
-        Keeps the model from composing against an absent tool. (The call-time
-        proxy still raises if a tool is withdrawn between generation and call.)
-        Non-virtual tools are never gated.
-        """
-        drop = {
-            n for n, s in resolved.tools.items()
-            if s.provider == "virtual"
-            and (self._harness_resolver is None or self._harness_resolver(n) is None)
-        }
-        if not drop:
-            return resolved
-        from .lang.grader import compute_grade
-        tools = {n: s for n, s in resolved.tools.items() if n not in drop}
-        callables = {n: c for n, c in resolved.callables.items() if n not in drop}
-        grade = compute_grade(
-            {n: {"grade_w": s.grade_w, "effects_ceiling": s.effects_ceiling} for n, s in tools.items()}
-        )
-        return ResolvedTools(
-            tools=tools, callables=callables, grade=grade,
-            description=self.toolbox.format_description(list(tools.keys())),
-            docs=resolved.docs,
-        )
-
-    def _resolve_params(self, params: dict[str, Any] | None, resolved: ResolvedTools) -> tuple[dict[str, Any], str | None, set[str]]:
+        Params bind no bare names (stepy100 Task 5), so no param name is ever
+        allowed to the validator (Task 8)."""
         if not params:
-            return {}, None, set()
+            return {}, None
         values: dict[str, Any] = {}
         for name, val in params.items():
-            if isinstance(val, dict) and "value" in val:
+            # Only the single-key {"value": x} wrapper; any other dict is a dict param (review M7).
+            if isinstance(val, dict) and val.keys() == {"value"}:
                 values[name] = val["value"]
             else:
                 values[name] = val
-        collisions = set(values.keys()) & (set(resolved.tools.keys()) | ALLOWED_BUILTINS)
-        if collisions:
-            raise ValueError(f"Param names collide with tool/builtin names: {collisions}")
-        params_desc = format_params_description(params)
-        return values, params_desc, set(values.keys())
+        # No name-collision check: params replace the values of the program's own
+        # ``params`` literal and bind no bare names (stepy100 Task 5).
+        return values, format_params_description(values)
 
-    def validate(self, program: str, profile: Profile | str | list[str] | dict | None = None,
-                 rules: list | None = None, param_names: set[str] | None = None,
-                 extra_tools: list[str] | None = None) -> ValidationResult:
-        """Validate a lackpy program against a kit's allowed names.
+    def validate(self, program: str, profile: Profile | str | None = None,
+                 rules: list | None = None) -> ValidationResult:
+        """Validate a lackpy program. No kit tool names are allowed.
 
         Args:
             program: The lackpy program source to validate.
-            profile: Profile name, bundle, tool list, or dict mapping. Defaults to config default.
+            profile: A profile name or ``Profile``. A profile that names tools
+                gives an invalid result carrying ``KIT_REMOVED``.
             rules: Additional validation rules to apply beyond core checks.
-            param_names: Extra names (e.g. parameter names) to allow in the program.
 
         Returns:
             A ValidationResult indicating whether the program is valid.
         """
-        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
-        allowed = set(resolved.tools.keys())
-        if param_names:
-            allowed |= param_names
-        return validate(program, allowed_names=allowed, extra_rules=rules)
+        try:
+            self._resolve_profile(profile)
+            rules = resolve_rules(rules)
+        except (ProfileError, ValueError) as e:
+            return ValidationResult(valid=False, errors=[str(e)])
+        return validate(program, allowed_names=set(), extra_rules=rules)
 
-    async def generate(self, intent: str, profile: Profile | str | list[str] | dict | None = None,
+    async def generate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None,
                        mode: str | None = None, interpreter: Any = None,
-                       extra_tools: list[str] | None = None,
                        model: str | None = None,
                        temperature: float | None = None) -> GenerationResult:
         """Generate a lackpy program from a natural language intent.
 
         Args:
             intent: Natural language description of the desired program.
-            profile: Profile name, bundle, tool list, or dict mapping.
+            profile: A profile name or ``Profile`` (model, mode, rules).
             params: Named input values available to the generated program.
             rules: Additional validation rules the generated program must satisfy.
             mode: Inference strategy mode (e.g. '1-shot', 'spm'). Defaults to config or '1-shot'.
             interpreter: An interpreter instance whose ``system_prompt_hint()``
-                is forwarded to the prompt builder. When present, the inference
-                prompt uses interpreter-specialized framing instead of the
-                generic Jupyter-cell template.
+                is forwarded to the prompt builder: the intro of the lackpy
+                prompt for the python interpreter, the whole framing for an
+                interpreter of another language.
             model: Per-call LLM model override (``"<provider>/<model>"``). When set, the
                 woollama tier is cloned to this model for this call only; when omitted,
                 the service-configured model is used (identical to prior behavior). This
@@ -446,14 +556,16 @@ class LackpyService:
             A GenerationResult with the generated program and provider metadata.
 
         Raises:
+            ProfileError: If the profile names tools (``KIT_REMOVED``) or is unknown.
             RuntimeError: If all inference providers fail to produce a valid program.
         """
         from .infer.strategy import STRATEGIES
         from .infer.context import StepContext
 
-        rp = self._resolve_profile(profile, extra_tools=extra_tools)
-        resolved = self._gate_tools(rp.tools)
-        _, params_desc, param_names = self._resolve_params(params, resolved)
+        rp = self._resolve_profile(profile)
+        resolved = rp.tools
+        rules = resolve_rules(rules)
+        _, params_desc = self._resolve_params(params)
 
         # Inference selections: an explicit call arg wins over the profile's; both fall
         # back to the service config (woollama tier / inference_mode) downstream.
@@ -470,6 +582,7 @@ class LackpyService:
             return await self._generate_literate(intent, providers, resolved, params_desc, rules)
 
         effective_mode = mode or rp.mode or self._config.inference_mode
+        _check_mode(effective_mode)
 
         if effective_mode and effective_mode in STRATEGIES:
             strategy_cls = STRATEGIES[effective_mode]
@@ -505,7 +618,8 @@ class LackpyService:
 
         # Default: legacy dispatcher path
         dispatcher = InferenceDispatcher(providers=providers)
-        allowed = set(resolved.tools.keys()) | param_names
+        # No kit tools and no param names: params bind no bare names (Task 5).
+        allowed: set[str] = set()
 
         # Resolve policy — kit baseline + optional kibitzer hints + optional umwelt.
         # The active model is known explicitly (per-call override or the configured LLM
@@ -529,77 +643,59 @@ class LackpyService:
             interpreter=interpreter, kibitzer_session=self._kibitzer,
         )
 
-    async def _execute(self, program: str, callables: dict[str, Any],
-                       param_values: dict[str, Any], kibitzer_session: Any = None) -> ExecutionResult:
-        """Run a (already validated) program through the restricted runner.
+    async def _execute(self, program: str, param_values: dict[str, Any]) -> ExecutionResult:
+        """Run an (already validated) program through the restricted runner.
 
         The single execution path shared by ``run_program`` and ``delegate``.
         Held under ``_exec_lock`` so the process-global ``os.chdir`` is
-        single-flight regardless of which path runs.
-
-        - **Inline** (default): no loop-bound tools in the kit — run the sync
-          runner directly, exactly as before.
-        - **Threaded**: a tool is flagged loop-bound (e.g. an MCP proxy) — run the
-          sync runner via ``run_in_executor`` so the event loop stays free to
-          service coroutines those tools marshal back via :class:`AsyncBridge`.
+        single-flight. No tool callables are bound (stepy100 Task 7), so no
+        run needs the event loop and the runner runs inline.
         """
-        needs_loop = any(is_async_callable(fn) for fn in callables.values())
         async with self._exec_lock:
-            if not needs_loop:
-                return self._run_sync(program, callables, param_values, kibitzer_session)
-            loop = asyncio.get_running_loop()
-            self._bridge.loop = loop
-            try:
-                return await loop.run_in_executor(
-                    None,
-                    lambda: self._run_sync(program, callables, param_values, kibitzer_session),
-                )
-            finally:
-                self._bridge.loop = None
+            return self._run_sync(program, param_values)
 
-    def _run_sync(self, program: str, callables: dict[str, Any],
-                  param_values: dict[str, Any], kibitzer_session: Any = None) -> ExecutionResult:
-        """Switch into the workspace, run the program, restore cwd. Always sync."""
+    def _run_sync(self, program: str, param_values: dict[str, Any]) -> ExecutionResult:
+        """Load the PathPolicy, switch into the workspace, run, restore cwd.
+
+        The policy is loaded on every run, so a settings change takes effect on
+        the next run. A malformed settings file gives a failed result whose
+        error names the file; it never raises.
+        """
+        loader = self._path_policy_loader or load_policy
+        try:
+            policy = loader(self._workspace)
+        except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
+            return ExecutionResult(success=False, error=_policy_error(e))
         prev_cwd = os.getcwd()
         try:
             os.chdir(self._workspace)
-            return self._runner.run(
-                program, callables, params=param_values,
-                kibitzer_session=kibitzer_session,
-            )
+            return self._runner.run(program, params=param_values, path_policy=policy)
         finally:
             os.chdir(prev_cwd)
 
     async def _execute_program(
-        self, program: str, rp: ResolvedProfile, resolved: Any,
-        param_values: dict[str, Any], *, allowed: set[str] | None = None,
-        rules: list | None = None, kibitzer_session: Any = None,
+        self, program: str, rp: ResolvedProfile, param_values: dict[str, Any],
+        *, rules: list | None = None,
     ) -> ExecutionResult:
         """Route a program to the execution model named by the profile's ``execution``
-        axis -- the shared seam for ``run_program`` (and, next, ``delegate``).
+        axis -- the shared seam for ``run_program`` and ``delegate``.
 
         Validation lives ABOVE the branch: a literate document is NOT restricted
         Python, so it must not pass through the restricted-Python validator (which
         would reject its fences/prose as a syntax error and never reach the gate).
         ``execution == "literate"`` validates and runs the program through the
         LiterateInterpreter, whose ceiling gate + write journal enforce the granted
-        toolset's grade; any other axis is restricted Python -- validated against
-        the allowed names, then run through the restricted runner (unchanged).
+        toolset's grade (empty since the kit was removed, so w=0); any other axis
+        is restricted Python -- always validated with no allowed names (parked
+        item 1: there is no skip), then run through the restricted runner.
         """
         if rp.execution == "literate":
-            return await self._execute_literate(program, resolved, param_values)
+            return await self._execute_literate(program, rp.tools, param_values)
 
-        if allowed is not None:
-            validation = validate(program, allowed_names=allowed, extra_rules=rules)
-            if not validation.valid:
-                return ExecutionResult(
-                    success=False,
-                    error=f"Validation failed: {'; '.join(validation.errors)}",
-                )
-        return await self._execute(
-            program, resolved.callables, param_values,
-            kibitzer_session=kibitzer_session,
-        )
+        validation = validate(program, allowed_names=set(), extra_rules=rules)
+        if not validation.valid:
+            return ExecutionResult(success=False, error=validation_error(validation))
+        return await self._execute(program, param_values)
 
     async def _execute_literate(
         self, program: str, resolved: Any, param_values: dict[str, Any],
@@ -679,9 +775,7 @@ class LackpyService:
             errors[provider.name] = validation.errors
         raise RuntimeError(f"Literate generation failed. Errors: {errors}")
 
-    def _planned_tool_calls(
-        self, program: str, rp: ResolvedProfile, allowed: set[str],
-    ) -> list[str]:
+    def _planned_tool_calls(self, program: str, rp: ResolvedProfile) -> list[str]:
         """Tool names a generated program will call, for the kibitzer mode-policy
         pre-check (Python builtins excluded).
 
@@ -692,7 +786,9 @@ class LackpyService:
         AST walk regardless of whether other rules pass, so an off-lattice doc's
         tool calls are still surfaced). One-shot programs are unchanged: calls are
         taken only when the program validates. Returns ``[]`` when nothing can be
-        analyzed (execution will surface the real error).
+        analyzed (execution will surface the real error). Since the kit was
+        removed no name is allowed, so a valid one-shot program calls only
+        builtins, imports and its own defs, and gives ``[]``.
 
         COOPERATIVE, not a security boundary -- the same limitation as the effect
         gate. This enumerates *direct, named* calls only. An attribute call
@@ -715,51 +811,53 @@ class LackpyService:
             # writer-planned tool calls -- filter them so mode policy doesn't
             # see phantom tools.
             calls = [
-                c for c in validate(program, allowed_names=allowed).calls
+                c for c in validate(program, allowed_names=set()).calls
                 if c not in LITERATE_RUNTIME_INTERNALS
             ]
         else:
-            vr = validate(program, allowed_names=allowed)
+            vr = validate(program, allowed_names=set())
             if not vr.valid:
                 return []
             calls = vr.calls
         return [c for c in calls if c not in ALLOWED_BUILTINS]
 
-    async def run_program(self, program: str, profile: Profile | str | list[str] | dict | None = None,
+    async def run_program(self, program: str, profile: Profile | str | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
-                          rules: list | None = None,
-                          extra_tools: list[str] | None = None) -> ExecutionResult:
+                          rules: list | None = None) -> ExecutionResult:
         """Validate and execute a lackpy program.
 
-        Validates the program before running it; returns a failed ExecutionResult
-        immediately if validation fails rather than raising.
+        The program runs in the runtime namespace (builtins, approved modules,
+        the ``Path`` stand-in) under ``load_policy(workspace)``, loaded for
+        this run. It is validated with no allowed names first. Every failure,
+        including a profile that names tools and a malformed settings file,
+        is a failed ExecutionResult, never a raise.
 
         Args:
             program: The lackpy program source to execute.
-            profile: Profile name, bundle, tool list, or dict mapping.
-            params: Named input values injected into the execution namespace.
+            profile: A profile name or ``Profile`` (model, mode, rules, execution).
+            params: Values for the program's ``params`` literal.
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules to apply before execution.
 
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
-        rp = self._resolve_profile(profile, extra_tools=extra_tools)
-        resolved = self._gate_tools(rp.tools)
-        param_values, _, param_names = self._resolve_params(params, resolved)
-        allowed = set(resolved.tools.keys()) | param_names
+        try:
+            rp = self._resolve_profile(profile)
+            rules = resolve_rules(rules)
+        except (ProfileError, ValueError) as e:
+            return ExecutionResult(success=False, error=str(e))
+        param_values, _ = self._resolve_params(params)
         # The execution axis (one-shot restricted-Python vs literate) decides both
         # validation and execution; the seam keeps them paired (see _execute_program).
-        return await self._execute_program(
-            program, rp, resolved, param_values, allowed=allowed, rules=rules)
+        return await self._execute_program(program, rp, param_values, rules=rules)
 
-    async def delegate(self, intent: str, profile: Profile | str | list[str] | dict | None = None,
+    async def delegate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
                        rules: list | None = None,
                        _program_override: str | None = None,
                        mode: str | None = None,
                        interpreter: Any = None,
-                       extra_tools: list[str] | None = None,
                        model: str | None = None,
                        temperature: float | None = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
@@ -769,16 +867,17 @@ class LackpyService:
 
         Args:
             intent: Natural language description of the desired program.
-            profile: Profile name, bundle, tool list, or dict mapping.
+            profile: A profile name or ``Profile`` (model, mode, rules). A profile
+                that names tools gives a failed result carrying ``KIT_REMOVED``.
             params: Named input values available to the program.
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules for generation and execution.
             interpreter: An interpreter instance whose ``system_prompt_hint()``
-                is forwarded to the prompt builder for interpreter-specialized
-                framing. When omitted, the default Jupyter-cell prompt is used.
+                is forwarded to the prompt builder. When omitted, the default
+                lackpy prompt is used (pre-prompt, style guide, skeleton).
 
         Returns:
-            A dict with keys: success, program, grade, generation_tier,
+            A dict with keys: success, program, generation_tier,
             generation_time_ms, execution_time_ms, total_time_ms, trace,
             files_read, files_modified, output, error.
 
@@ -786,19 +885,25 @@ class LackpyService:
             RuntimeError: If all inference providers fail to produce a valid program.
         """
         start = time.perf_counter()
-        rp = self._resolve_profile(profile, extra_tools=extra_tools)
-        resolved = self._gate_tools(rp.tools)
+        try:
+            rp = self._resolve_profile(profile)
+            if not _program_override:  # only generation runs the strategy
+                _check_mode(mode or rp.mode or self._config.inference_mode)
+            rules = resolve_rules(rules)
+        except (ProfileError, ValueError) as e:
+            return {"success": False, "program": _program_override, "output": None,
+                    "stdout": "", "error": str(e), "trace": []}
         # The model actually used (per-call override or the profile's, else configured) —
         # the same value `generate` uses, so kibitzer logs the real model, not a reflection.
         effective_model = (model if model is not None else rp.model) or self._llm_model
-        param_values, params_desc, param_names = self._resolve_params(params, resolved)
+        param_values, _ = self._resolve_params(params)
 
         # Kibitzer: register context for this delegation
         if self._kibitzer:
             self._kibitzer.register_context({
                 "source": "lackpy",
                 "intent": intent,
-                "tools": list(resolved.tools.keys()),
+                "tools": [],
             })
 
         if _program_override:
@@ -810,7 +915,7 @@ class LackpyService:
             )
         else:
             gen_result = await self.generate(intent, profile, params, rules, mode=mode,
-                                            interpreter=interpreter, extra_tools=extra_tools,
+                                            interpreter=interpreter,
                                             model=model, temperature=temperature)
 
         # Kibitzer: validate planned calls before execution. A literate document is
@@ -818,8 +923,7 @@ class LackpyService:
         # applies to literate calls too, instead of self-skipping on the markdown.
         kibitzer_suggestions: list[str] = []
         if self._kibitzer:
-            planned_names = self._planned_tool_calls(
-                gen_result.program, rp, set(resolved.tools.keys()) | param_names)
+            planned_names = self._planned_tool_calls(gen_result.program, rp)
             if planned_names:  # only ever validate a non-empty call set
                 planned = [{"tool": call, "input": {}} for call in planned_names]
                 violations = self._kibitzer.validate_calls(planned)
@@ -827,25 +931,24 @@ class LackpyService:
                     return {
                         "success": False,
                         "program": gen_result.program,
-                        "grade": {"w": resolved.grade.w, "d": resolved.grade.d},
                         "generation_tier": gen_result.provider_name,
                         "error": "Kibitzer mode policy violation: " + "; ".join(v.reason for v in violations),
+                        # The keys every other delegate result has (review M4).
+                        "output": None, "stdout": "", "trace": [],
                         "correction_strategy": gen_result.correction_strategy,
                         "correction_attempts": gen_result.correction_attempts,
                     }
 
         # Dispatch by the profile's execution axis (literate vs restricted Python),
         # the same seam run_program uses. Defense-in-depth (GHSA-hpcj-3c97-43jm):
-        # re-validate the generated program against the same allowed names at the
+        # re-validate the generated program (with no allowed names) at the
         # execution boundary, rather than trusting the generation-time gate alone.
         # The restricted-Python path parses the identical source deterministically,
         # so this closes the validate/execute gap without a differential; the
         # literate path validates internally by parsing.
-        exec_result = await self._execute_program(
-            gen_result.program, rp, resolved, param_values,
-            allowed=set(resolved.tools.keys()) | param_names,
-            kibitzer_session=self._kibitzer,
-        )
+        # Review M5: the caller's rules are re-applied here too.
+        exec_result = await self._execute_program(gen_result.program, rp, param_values,
+                                                  rules=rules)
 
         # Kibitzer: get coaching suggestions after execution
         if self._kibitzer:
@@ -854,10 +957,7 @@ class LackpyService:
             failure_mode = None
             if not exec_result.success:
                 from .infer.failure_modes import classify_failure
-                validation_result = validate(
-                    gen_result.program,
-                    allowed_names=set(resolved.tools.keys()) | param_names,
-                )
+                validation_result = validate(gen_result.program, allowed_names=set())
                 failure_mode = classify_failure(
                     gate_passed=validation_result.valid,
                     gate_errors=list(validation_result.errors),
@@ -884,7 +984,6 @@ class LackpyService:
         result = {
             "success": exec_result.success,
             "program": gen_result.program,
-            "grade": {"w": resolved.grade.w, "d": resolved.grade.d},
             "generation_tier": gen_result.provider_name,
             "generation_time_ms": gen_result.generation_time_ms,
             "execution_time_ms": total_ms - gen_result.generation_time_ms,
@@ -892,8 +991,10 @@ class LackpyService:
             "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
                         "duration_ms": e.duration_ms, "success": e.success, "error": e.error}
                        for e in exec_result.trace.entries],
-            "files_read": exec_result.trace.files_read,
-            "files_modified": exec_result.trace.files_modified,
+            # Review M3: from the Path stand-in's successful trace entries.
+            "files_read": _traced_paths(exec_result.trace, ("Path.read_text", "Path.read_bytes")),
+            "files_modified": _traced_paths(exec_result.trace,
+                                            ("Path.write_text", "Path.write_bytes")),
             # Prefer the typed last-expression value; if the program instead
             # printed its answer (a common small-model habit), fall back to the
             # captured stdout so the result isn't silently dropped. stdout is
@@ -924,30 +1025,54 @@ class LackpyService:
         params: dict[str, Any] | None = None,
         sandbox: Any = None,
     ) -> dict[str, Any]:
-        """Load and run a Lackey file."""
+        """Load and run a Lackey file.
+
+        The run body reads each param as a bare name (``self.path`` becomes
+        ``path``), and params bind no bare names since stepy100 Task 5. So the
+        body runs behind a prepended ``params = {...}`` literal of the
+        Lackey's defaults and one ``name = params["name"]`` binding per param
+        (parked item 4). Passed ``params`` replace the literal's values, with
+        the runner's type check. A param with no default holds ``None`` in the
+        literal and must be passed. A Lackey that declares ``Tool()``
+        attributes gives a failed result carrying ``KIT_REMOVED``.
+        """
         from .lackey.parser import parse_lackey as _parse
-        import ast as _ast
 
         info = _parse(path)
+        if info.tools:
+            return {"success": False, "program": info.run_body, "output": None,
+                    "stdout": "", "error": KIT_REMOVED, "trace": []}
+        passed = dict(params or {})
+        missing = [n for n, spec in info.params.items() if "default" not in spec and n not in passed]
+        if missing:
+            return {"success": False, "program": info.run_body, "output": None, "stdout": "",
+                    "error": f"Lackey param {missing[0]!r} has no default and was not passed",
+                    "trace": []}
 
-        merged_params: dict[str, Any] = {}
-        for name, spec in info.params.items():
-            if params and name in params:
-                merged_params[name] = params[name]
-            elif "default" in spec:
-                merged_params[name] = spec["default"]
-
-        tools = info.tools
-
+        defaults = {n: spec.get("default") for n, spec in info.params.items()}
         # Convert top-level `return X` to bare expression `X` so the runner can
         # execute the body as a flat program (return is only valid inside a function).
         run_body = _strip_top_level_return(info.run_body)
+        # Review M5: the prefix below owns the name `params`.
+        if "params" in defaults:
+            return {"success": False, "program": info.run_body, "output": None, "stdout": "",
+                    "error": "Lackey param 'params' collides with the params literal that "
+                             "run_lackey adds; rename the param", "trace": []}
+        import ast as _ast
+        if defaults and any(_binds_params(n) for n in _ast.walk(_ast.parse(run_body))):
+            return {"success": False, "program": info.run_body, "output": None, "stdout": "",
+                    "error": "Lackey run body binds 'params', but run_lackey adds the params "
+                             "literal for the Lackey's params; rename the body's variable",
+                    "trace": []}
+        prefix = ""
+        if defaults:
+            prefix = f"params = {defaults!r}\n" + "".join(
+                f"{n} = params[{n!r}]\n" for n in defaults)
 
         return await self.delegate(
             intent="",
-            profile=tools,
-            params=merged_params if merged_params else None,
-            _program_override=run_body,
+            params=passed or None,
+            _program_override=prefix + run_body,
         )
 
     async def create_lackey(
@@ -973,14 +1098,14 @@ class LackpyService:
             returns=returns, creation_log=creation_log,
         )
 
-    async def create(self, program: str, profile: Profile | str | list[str] | dict | None = None,
-                     name: str = "", pattern: str | None = None,
-                     extra_tools: list[str] | None = None) -> dict[str, Any]:
+    async def create(self, program: str, profile: Profile | str | None = None,
+                     name: str = "", pattern: str | None = None) -> dict[str, Any]:
         """Validate a program and save it as a named template.
 
         Args:
             program: The lackpy program source to save.
-            kit: Kit name, list of tool names, or dict mapping used for validation.
+            profile: A profile name or ``Profile``. A profile that names tools
+                gives ``{"success": False, "errors": [KIT_REMOVED]}``.
             name: Template name (used as the filename stem).
             pattern: Optional intent pattern string for template matching.
 
@@ -988,8 +1113,16 @@ class LackpyService:
             A dict with keys: success (bool), path (str) on success,
             or errors (list) on validation failure.
         """
-        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
-        validation = validate(program, allowed_names=set(resolved.tools.keys()))
+        try:
+            self._resolve_profile(profile)
+        except ProfileError as e:
+            return {"success": False, "errors": [str(e)]}
+        # Review M7: the name is a file name stem, never a path.
+        if any(c in name for c in ("/", "\\", "\x00", "..")) or name == ".":
+            return {"success": False,
+                    "errors": [f"template name {name!r} must be a plain file name: "
+                               "no '/', '\\', NUL, '.' or '..'"]}
+        validation = validate(program, allowed_names=set())
         if not validation.valid:
             return {"success": False, "errors": validation.errors}
         templates_dir = self._config.config_dir / "templates"
@@ -1017,7 +1150,7 @@ class LackpyService:
             KeyError: If the kit references an unknown tool.
             FileNotFoundError: If a named kit file does not exist.
         """
-        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
+        resolved = self._resolve_tool_selection(profile, extra_tools)
         return {
             "tools": {name: {"description": spec.description, "grade_w": spec.grade_w,
                              "effects_ceiling": spec.effects_ceiling}
@@ -1068,7 +1201,7 @@ class LackpyService:
         and ``kit_docs`` (list of kit-level doc paths). Paths are relative
         to the package/workspace root — callers resolve them on demand.
         """
-        resolved = self._resolve_profile(profile, extra_tools=extra_tools).tools
+        resolved = self._resolve_tool_selection(profile, extra_tools)
         tool_docs = {name: spec.docs for name, spec in resolved.tools.items() if spec.docs}
         return {
             "tool_docs": tool_docs,

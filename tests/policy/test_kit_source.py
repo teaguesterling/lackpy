@@ -8,14 +8,12 @@ from lackpy.policy.types import PolicyResult, PolicyContext
 from lackpy.policy.sources.tools import ToolsPolicySource
 from lackpy.tools.registry import ResolvedTools, resolve_tools
 from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
-from lackpy.tools.providers.builtin import BuiltinProvider
 from lackpy.lang.grader import Grade
 
 
 @pytest.fixture
 def toolbox():
     tb = Toolbox()
-    tb.register_provider(BuiltinProvider())
     for name, desc, grade in [
         ("read_file", "Read file contents", 1),
         ("find_files", "Find files matching pattern", 1),
@@ -35,12 +33,14 @@ def tools(toolbox):
 
 
 class TestToolsPolicySource:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_sets_allowed_tools_from_kit(self, toolbox, tools):
         source = ToolsPolicySource(toolbox)
         context: PolicyContext = {"tools": tools}
         result = source.resolve(PolicyResult(), context)
         assert result.allowed_tools == frozenset({"read_file", "find_files"})
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_sets_grade_from_kit(self, toolbox, tools):
         source = ToolsPolicySource(toolbox)
         context: PolicyContext = {"tools": tools}
@@ -48,6 +48,7 @@ class TestToolsPolicySource:
         assert result.grade.w == 1
         assert result.grade.d == 1
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_sets_namespace_desc(self, toolbox, tools):
         source = ToolsPolicySource(toolbox)
         context: PolicyContext = {"tools": tools}
@@ -55,6 +56,7 @@ class TestToolsPolicySource:
         assert result.namespace_desc is not None
         assert "read_file" in result.namespace_desc
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_never_marks_resolved(self, toolbox, tools):
         source = ToolsPolicySource(toolbox)
         context: PolicyContext = {"tools": tools}
@@ -69,6 +71,7 @@ class TestToolsPolicySource:
         source = ToolsPolicySource(toolbox)
         assert source.name == "tools"
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_high_grade_kit(self, toolbox):
         tools = resolve_tools(["read_file", "edit_file"], toolbox)
         source = ToolsPolicySource(toolbox)

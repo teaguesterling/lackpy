@@ -77,3 +77,40 @@ def test_parser_render_execute_and_output():
     args = parser.parse_args(["render", "doc.md", "--execute", "-o", "out.md"])
     assert args.execute is True
     assert args.output == "out.md"
+
+
+# --- Task 7 fix round 2, N1: `render --execute` ran the literate axis unvalidated ---
+
+def _escape_doc(tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("SECRET-RENDER")
+    doc = tmp_path / "doc" / "doc.md"
+    doc.parent.mkdir()
+    doc.write_text("```lackpy\ng = (lambda: 0).__globals__\n"
+                   f"t = g['read_file']('{outside}')\n```\n\nT={{t}}\n")
+    return doc
+
+
+def test_render_execute_is_refused(tmp_path, capsys):
+    from lackpy.ctl import main
+    from lackpy.profiles import LITERATE_PENDING
+    code = main(["render", "--execute", str(_escape_doc(tmp_path))])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert LITERATE_PENDING in captured.err
+    assert "SECRET-RENDER" not in captured.out + captured.err
+
+
+def test_render_execute_writes_no_output_file(tmp_path, capsys):
+    from lackpy.ctl import main
+    out = tmp_path / "out.md"
+    assert main(["render", "--execute", str(_escape_doc(tmp_path)), "-o", str(out)]) == 1
+    assert not out.exists()
+
+
+def test_render_without_execute_still_renders_and_runs_nothing(tmp_path, capsys):
+    from lackpy.ctl import main
+    assert main(["render", str(_escape_doc(tmp_path))]) == 0
+    out = capsys.readouterr().out
+    assert "g['read_file']" in out          # the source is shown
+    assert "SECRET-RENDER" not in out        # nothing ran

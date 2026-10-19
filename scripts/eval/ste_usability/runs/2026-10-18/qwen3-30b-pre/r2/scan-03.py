@@ -1,0 +1,17 @@
+# /// intent
+# goal   = "Print the total number of lines across all files under the src directory"
+# reads  = ["src/*.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+total_lines = 0
+paths = Path("src").glob("*.cpp")
+for p in sorted(paths):
+    text = p.read_text()
+    lines = text.splitlines()
+    total_lines += len(lines)
+
+print(total_lines)

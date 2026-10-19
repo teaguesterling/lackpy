@@ -1,0 +1,24 @@
+```python
+# /// intent
+# goal   = "Mark log error codes by wrapping them in brackets."
+# reads  = ["logs/app.log"]
+# writes = ["logs/app.marked.log"]
+# output = "none"
+# ///
+
+import re
+from pathlib import Path
+
+
+def mark_code(text):
+    return re.sub(r'code=([A-Z]\d{2})', r'code=[\1]', text)
+
+
+path = Path("logs/app.log")
+text = path.read_text()
+assert text, "log file must not be empty"
+marked = mark_code(text)
+
+out = Path("logs/app.marked.log")
+out.write_text(marked)
+```

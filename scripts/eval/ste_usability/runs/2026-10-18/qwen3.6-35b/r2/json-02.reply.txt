@@ -1,0 +1,51 @@
+```python
+# /// intent
+# goal   = "Count rows in data/rows.jsonl by status, skipping invalid JSON lines, and print counts sorted by status."
+# reads  = ["data/rows.jsonl"]
+# writes = []
+# output = "printed"
+# ///
+
+# imports. Approved: pathlib (Path), json, re, collections, math,
+#          statistics, hashlib, datetime
+
+from collections import Counter
+import json
+
+def parse_rows(path):
+    """Read the JSONL file and return a list of parsed row dicts."""
+    text = path.read_text()
+    rows = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    return rows
+
+def count_by_status(rows):
+    """Count rows by 'status' key."""
+    counts = Counter()
+    for row in rows:
+        status = row.get('status')
+        if status is not None:
+            counts[status] += 1
+    return counts
+
+def print_sorted_counts(counts):
+    """Print status and count, sorted by status."""
+    for status in sorted(counts.keys()):
+        print(f"{status}: {counts[status]}")
+
+def main():
+    from pathlib import Path
+    path = Path("data/rows.jsonl")
+    rows = parse_rows(path)
+    counts = count_by_status(rows)
+    print_sorted_counts(counts)
+
+main()
+```

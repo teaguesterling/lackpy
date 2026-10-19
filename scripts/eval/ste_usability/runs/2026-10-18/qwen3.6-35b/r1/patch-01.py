@@ -1,0 +1,62 @@
+# /// intent
+# goal   = "Replace a specific comment in registry.cpp, ensuring the old text exists exactly once."
+# reads  = ["registry.cpp"]
+# writes = ["registry.cpp"]
+# output = "value"
+# ///
+
+from pathlib import Path
+
+CONFIG = {
+    "target": "docx",
+    "old_note": "images and footnotes are not read yet",
+    "new_note": "footnotes are not read yet",
+}
+
+def read_content(path: str) -> str:
+    """Read a file and ensure it is found."""
+    p = Path(path)
+    try:
+        text = p.read_text(encoding="utf-8")
+        return text
+    except FileNotFoundError:
+        print(f"Error: {path} not found.")
+        return ""
+
+def update_registry(text: str, config: dict) -> str:
+    """Replace the target note if it appears exactly once."""
+    old = config["old_note"]
+    new = config["new_note"]
+    
+    # Count occurrences to ensure exactly one
+    # We look for the specific string within the line context if possible,
+    # but the prompt implies the full sentence. 
+    # Checking if the old string is in the content.
+    if text.count(old) != 1:
+        raise ValueError(f"Old note '{old}' does not occur exactly once.")
+    
+    # Replace the specific instance
+    return text.replace(old, new)
+
+def write_content(path: str, content: str) -> bool:
+    """Write content to a file."""
+    p = Path(path)
+    p.write_text(content, encoding="utf-8")
+    return True
+
+def main() -> str:
+    file_path = "registry.cpp"
+    text = read_content(file_path)
+    
+    if not text:
+        return "FAILED: File empty or not found"
+    
+    try:
+        new_text = update_registry(text, CONFIG)
+    except ValueError as e:
+        return f"FAILED: {e}"
+    
+    write_content(file_path, new_text)
+    return "SUCCESS: Registry updated"
+
+result = main()

@@ -22,8 +22,9 @@ def test_forbidden_names_not_in_builtins():
 
 
 def test_key_forbidden_nodes_present():
-    assert ast.Import in FORBIDDEN_NODES
-    assert ast.FunctionDef in FORBIDDEN_NODES
+    assert ast.Import not in FORBIDDEN_NODES  # Task 4: approved imports are allowed
+    assert ast.FunctionDef not in FORBIDDEN_NODES  # Task 7: top-level def is allowed
+    assert ast.AsyncFunctionDef in FORBIDDEN_NODES
     assert ast.While in FORBIDDEN_NODES
     assert ast.ClassDef in FORBIDDEN_NODES
 
@@ -56,8 +57,8 @@ def test_key_builtins_present():
     assert "range" in ALLOWED_BUILTINS
 
 
-def test_sort_by_in_builtins():
-    assert "sort_by" in ALLOWED_BUILTINS
+def test_sort_by_not_in_builtins():
+    assert "sort_by" not in ALLOWED_BUILTINS
 
 
 def test_denied_attributes_cover_non_underscore_frame_internals():

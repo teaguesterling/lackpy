@@ -10,3 +10,23 @@ cmd = "ruff check src tests"
 description = "Lint source and tests with ruff"
 format = "generic_lint"
 sandbox = "none"
+
+[commands.test-lang]
+cmd = ".venv/bin/python -m pytest tests/lang -q"
+description = "Run the lackpy-lang tests in the repo venv"
+format = "pytest_text"
+
+[commands.test-all]
+cmd = ".venv/bin/python -m pytest tests/ -q"
+description = "Run the full pytest suite in the repo venv"
+format = "pytest_text"
+
+[commands.corpus]
+cmd = ".venv/bin/python scripts/corpus/coverage.py --json"
+description = "Measure validator coverage over the frozen heredoc corpus"
+format = "auto"
+
+[commands.test-mcp]
+cmd = "uv run --no-project --python 3.12 --with mcp==1.* --with pytest --with pytest-asyncio --with-editable . --with-editable packages/lackpy-lang python -m pytest -q -p no:cacheprovider tests/test_mcp_contract.py tests/test_mcp_tools.py tests/test_mcp_cli.py"
+description = "MCP surface tests in an ephemeral env with mcp 1.x (the repo venv has no mcp)"
+format = "pytest_text"

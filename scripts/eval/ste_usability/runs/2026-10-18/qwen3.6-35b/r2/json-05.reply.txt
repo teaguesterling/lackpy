@@ -1,0 +1,35 @@
+```python
+# /// intent
+# goal   = "Write data/ok.json: a JSON list of the ids of rows in data/rows.jsonl with status ok. Skip invalid lines."
+# reads  = ["data/rows.jsonl"]
+# writes = ["data/ok.json"]
+# output = "none"
+# ///
+
+import json
+from pathlib import Path
+
+def read_rows():
+    """Read rows from JSONL file, skipping invalid lines."""
+    path = Path("data") / "rows.jsonl"
+    text = path.read_text()
+    ids = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                row = json.loads(line)
+                if row.get("status") == "ok":
+                    ids.append(row["id"])
+            except json.JSONDecodeError:
+                pass
+    return ids
+
+def write_ids(ids):
+    """Write the list of ids to data/ok.json."""
+    path = Path("data") / "ok.json"
+    path.write_text(json.dumps(ids))
+
+ids = read_rows()
+write_ids(ids)
+```

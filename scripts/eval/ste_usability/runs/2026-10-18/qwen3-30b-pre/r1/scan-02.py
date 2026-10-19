@@ -1,0 +1,14 @@
+# /// intent
+# goal   = "Print the names of files under src (any extension) that contain no TODO, sorted."
+# reads  = ["src/*.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+paths = Path("src").glob("*.cpp")
+for p in sorted(paths):
+    text = p.read_text()
+    if "TODO" not in text:
+        print(p.name)

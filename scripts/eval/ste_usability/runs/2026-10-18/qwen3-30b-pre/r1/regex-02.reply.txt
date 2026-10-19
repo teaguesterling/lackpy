@@ -1,0 +1,28 @@
+```python
+# /// intent
+# goal   = "Print the time (HH:MM:SS) of the first and last line of logs/app.log, separated by a space."
+# reads  = ["logs/app.log"]
+# writes = []
+# output = "printed"
+# ///
+
+from datetime import datetime
+from pathlib import Path
+
+# Read the log file
+text = Path("logs/app.log").read_text()
+
+# Split into lines
+lines = text.splitlines()
+
+# Extract timestamps from first and last lines
+first_line = lines[0]
+last_line = lines[-1]
+
+# Parse timestamps
+first_time_str = first_line[11:19]
+last_time_str = last_line[11:19]
+
+# Print first and last times separated by space
+print(f"{first_time_str} {last_time_str}")
+```

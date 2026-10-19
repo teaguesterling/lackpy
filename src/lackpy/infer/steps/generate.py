@@ -36,13 +36,13 @@ class GenerateStep:
             example_pool=example_pool,
         )
 
-        # Pass the retrieval-augmented system prompt to the provider.
-        # Providers that ignore system_prompt_override (e.g. rules, templates)
-        # fall back to their own generation path, which is fine — they don't
-        # use system prompts anyway.
+        # Pass the system prompt (params literal, retrieved examples) to the
+        # provider. Providers that ignore system_prompt_override (e.g. rules,
+        # templates) fall back to their own generation path, which is fine —
+        # they don't use system prompts anyway.
         raw = await self._provider.generate(
             ctx.intent, namespace_desc,
-            system_prompt_override=system_prompt if example_pool else None,
+            system_prompt_override=system_prompt,
         )
         elapsed = (time.perf_counter() - start) * 1000
 

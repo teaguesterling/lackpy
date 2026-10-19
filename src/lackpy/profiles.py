@@ -24,6 +24,33 @@ from .tools.registry import ResolvedTools, resolve_tools
 from .tools.toolbox import Toolbox
 from .lang.grader import Grade
 
+# Teague's ruling 5 (stepy100 Plan 2, 2026-10-18): the kit is removed from the
+# runtime. A profile selects a model, its parameters and rules only; the
+# service refuses a profile that names tools with this message.
+KIT_REMOVED = ("tool kits were removed in lackpy stepy100; "
+               "use pathlib.Path (docs/concepts/paths.md)")
+
+
+# Ruling (Task 7 fix round 1, review C1): the literate axis ran a document with no
+# restricted-Python validator and no PathPolicy, and a document reached host
+# classes and read a file outside the workspace. It is refused until it migrates.
+LITERATE_PENDING = ("the literate execution axis is disabled until the literate "
+                    "interpreter migrates to the stepy100 runtime (Path stand-in and "
+                    "PathPolicy); use a one-shot profile")
+
+
+# Ruling (Task 7 fix round 2, review N2): inference mode "staged-dsl" ran the
+# ast-select interpreter over the process cwd at generation time, with no
+# PathPolicy, and returned the matched source as the program.
+STAGED_DSL_PENDING = ("inference mode 'staged-dsl' is disabled until the ast-select "
+                      "interpreter it runs migrates under the stepy100 PathPolicy; "
+                      "use mode '1-shot' or 'spm'")
+
+
+class ProfileError(ValueError):
+    """A profile lackpy cannot use: it names tools, or no such profile is configured."""
+
+
 DEFAULT_LANGUAGE = "restricted-python"
 DEFAULT_EXECUTION = "one-shot"
 

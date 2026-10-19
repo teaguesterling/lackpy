@@ -1,0 +1,21 @@
+# /// intent
+# goal   = "Update the version in data/config.json to 1.3.0 and save it with 2-space indentation"
+# reads  = ["data/config.json"]
+# writes = ["data/config.json"]
+# output = "none"
+# ///
+
+import json
+from pathlib import Path
+
+# Read the config file
+config_path = Path("data/config.json")
+text = config_path.read_text()
+config_data = json.loads(text)
+
+# Update the version
+config_data["version"] = "1.3.0"
+
+# Write the updated config back with 2-space indentation
+json_text = json.dumps(config_data, indent=2)
+config_path.write_text(json_text)

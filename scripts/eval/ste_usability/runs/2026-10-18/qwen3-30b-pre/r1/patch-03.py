@@ -1,0 +1,27 @@
+# /// intent
+# goal   = "Replace '// TODO: remove' with '// done' in every .cpp file under src and print the names of files that were changed"
+# reads  = ["src/*.cpp"]
+# writes = ["src/*.cpp"]
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+# Find all .cpp files in the src directory
+paths = Path("src").glob("*.cpp")
+
+# Process each .cpp file
+for p in sorted(paths):
+    # Read the file content
+    text = p.read_text()
+    
+    # Check if the line '// TODO: remove' exists
+    if "// TODO: remove" in text:
+        # Replace the line
+        new_text = text.replace("// TODO: remove", "// done")
+        
+        # Write the modified content back
+        p.write_text(new_text)
+        
+        # Print the file name that was changed
+        print(p.name)

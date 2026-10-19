@@ -208,3 +208,33 @@ class TestAttemptHistory:
         )
         assert result is not None
         assert result.attempts == 1
+
+
+class TestFeedbackNamesThePathForm:
+    """stepy100 Task 8: correction feedback takes its hints from
+    dictionary.UNAPPROVED; the kit-era table mapped open to read_file."""
+
+    @pytest.mark.asyncio
+    async def test_open_feedback_carries_the_dictionary_hint(self):
+        from lackpy.lang.dictionary import UNAPPROVED
+        seen = {}
+
+        class _Provider(FakeProvider):
+            async def generate(self, intent, namespace_desc, config=None, error_feedback=None, **kw):
+                seen["feedback"] = error_feedback
+                seen["system"] = kw.get("system_prompt_override")
+                return None
+
+        chain = CorrectionChain()
+        await chain.correct(
+            program="text = open('a').read(1)",
+            errors=["Forbidden name: 'open' at line 1"],
+            namespace_desc="",
+            intent="read a",
+            allowed_names=set(),
+            provider=_Provider("p", []),
+            system_prompt="SYSTEM",
+        )
+        assert any(UNAPPROVED["open"] in h for h in seen["feedback"])
+        assert not any("read_file" in h for h in seen["feedback"])
+        assert seen["system"] == "SYSTEM"

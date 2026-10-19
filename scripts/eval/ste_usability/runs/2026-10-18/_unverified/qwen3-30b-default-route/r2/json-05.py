@@ -1,0 +1,31 @@
+# /// intent
+# goal   = "Write data/ok.json as a JSON list of IDs from data/rows.jsonl where status is 'ok', skipping invalid lines"
+# reads  = ["data/rows.jsonl"]
+# writes = ["data/ok.json"]
+# output = "printed"          # none | printed | value
+# ///
+
+import json
+from pathlib import Path
+
+ok_ids = []
+file_path = Path("data/rows.jsonl")
+
+try:
+    with file_path.open('r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                if row.get("status") == "ok":
+                    ok_ids.append(row["id"])
+            except json.JSONDecodeError:
+                continue
+except FileNotFoundError:
+    pass
+
+# Write the result to data/ok.json
+output_path = Path("data/ok.json")
+output_path.write_text(json.dumps(ok_ids, indent=2))

@@ -1,12 +1,21 @@
-"""Tests for the fixer prompt builder."""
+"""Tests for the fixer prompt builder.
+
+stepy100 Task 8: the fixer teaches the lackpy language (the pre-prompt). The
+kit-era test pinned "Rewrite the code using ONLY these functions: read_file(path)".
+"""
 
 from lackpy.infer.fixer import build_fixer_prompt, build_fixer_messages
+from lackpy.lang.spec import format_preprompt
 
 
 class TestBuildFixerPrompt:
-    def test_contains_namespace(self):
+    def test_teaches_the_lackpy_lesson(self):
+        assert format_preprompt() in build_fixer_prompt("")
+
+    def test_namespace_desc_is_not_taught(self):
         prompt = build_fixer_prompt("  read_file(path) -> str: Read file contents")
-        assert "read_file(path)" in prompt
+        assert "read_file" not in prompt
+        assert "ONLY these functions" not in prompt
 
     def test_has_fixer_framing(self):
         prompt = build_fixer_prompt("")

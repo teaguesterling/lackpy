@@ -1,0 +1,6 @@
+{"id": 1, "status": "ok", "size": 120, "tags": ["x"]}
+{"id": 2, "status": "fail", "size": 40, "tags": []}
+{"id": 3, "status": "ok", "size": 300, "tags": ["x", "y"]}
+not json at all
+{"id": 4, "status": "skip", "size": 0, "tags": ["y"]}
+{"id": 5, "status": "fail", "size": 75, "tags": ["x"]}

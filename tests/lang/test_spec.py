@@ -14,6 +14,7 @@ def test_get_spec_has_required_keys():
     assert "forbidden_nodes" in spec
     assert "forbidden_names" in spec
     assert "allowed_builtins" in spec
+    assert "rules" in spec
 
 
 def test_get_spec_values_are_lists():
@@ -27,6 +28,7 @@ def test_get_spec_values_are_lists():
 def test_get_spec_contains_known_entries():
     spec = get_spec()
     assert "Module" in spec["allowed_nodes"]
-    assert "Import" in spec["forbidden_nodes"]
+    assert "ClassDef" in spec["forbidden_nodes"]
+    assert "Import" in spec["allowed_nodes"]
     assert "__import__" in spec["forbidden_names"]
     assert "len" in spec["allowed_builtins"]

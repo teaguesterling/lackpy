@@ -7,7 +7,7 @@ name = "lackpy"
 version = "0.15.1"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
 readme = "README.md"
-license = { text = "AGPL-3.0-or-later" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Teague Sterling" }]
 requires-python = ">=3.11"
 # lackpy is the runtime dist; lackpy-lang is the pure-language leaf. They share the
@@ -40,7 +40,7 @@ fledgling = ["fledgling"]
 blq = ["blq-cli"]
 kibitzer = ["kibitzer>=0.3"]
 full = ["lackpy[sandbox,mcp,fledgling,blq,kibitzer]"]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "duckdb>=1.1"]
 docs = [
     "mkdocs-material>=9",
     "mkdocstrings[python]>=0.24",

@@ -10,16 +10,16 @@ class TestForbiddenNodes:
         result = validate("import os")
         assert not result.valid
         assert any("Import" in e for e in result.errors)
+        assert "safety.import" in [v.rule_id for v in result.violations]
 
     def test_rejects_import_from(self):
         result = validate("from os import path")
         assert not result.valid
         assert any("Import" in e for e in result.errors)
+        assert "safety.import" in [v.rule_id for v in result.violations]
 
-    def test_rejects_function_def(self):
-        result = validate("def foo():\n    pass")
-        assert not result.valid
-        assert any("FunctionDef" in e for e in result.errors)
+    def test_accepts_top_level_function_def(self):
+        assert validate("def foo():\n    pass").valid
 
     def test_rejects_async_function_def(self):
         result = validate("async def foo():\n    pass")
@@ -32,8 +32,10 @@ class TestForbiddenNodes:
         assert any("ClassDef" in e for e in result.errors)
 
     def test_rejects_standalone_lambda(self):
-        """Lambda is only allowed as key= argument, not standalone."""
-        assert not validate("x = lambda: 1", allowed_names=set()).valid
+        """A lambda assigned to a name stays rejected (style.lambda-assign)."""
+        result = validate("x = lambda: 1", allowed_names=set())
+        assert not result.valid
+        assert "style.lambda-assign" in [v.rule_id for v in result.violations]
 
     def test_rejects_while(self):
         result = validate("while True:\n    pass")
@@ -41,9 +43,10 @@ class TestForbiddenNodes:
         assert any("While" in e for e in result.errors)
 
     def test_rejects_try(self):
+        # Task 8: Try is an allowed node; a bare except stays rejected by safety.except-base.
         result = validate("try:\n    x = 1\nexcept:\n    pass")
         assert not result.valid
-        assert any("Try" in e for e in result.errors)
+        assert "safety.except-base" in {v.rule_id for v in result.violations}
 
     def test_rejects_raise(self):
         result = validate("raise ValueError('bad')")
@@ -56,9 +59,10 @@ class TestForbiddenNodes:
         assert any("Global" in e for e in result.errors)
 
     def test_rejects_assert(self):
+        """An assert needs a message (style.assert-message)."""
         result = validate("assert True")
         assert not result.valid
-        assert any("Assert" in e for e in result.errors)
+        assert "style.assert-message" in [v.rule_id for v in result.violations]
 
     def test_rejects_delete(self):
         result = validate("del x")
@@ -190,10 +194,10 @@ class TestValidPrograms:
         assert not result.valid
         assert any("Parse error" in e for e in result.errors)
 
-    def test_sort_by_allowed(self):
+    def test_sort_by_rejected(self):
         result = validate("sort_by([{'a': 1}], 'a')")
-        assert result.valid
-        assert "sort_by" in result.calls
+        assert not result.valid
+        assert any(v.rule_id == "safety.unknown-call" for v in result.violations)
 
 
 class TestLambdaRestriction:
@@ -204,12 +208,13 @@ class TestLambdaRestriction:
         )
         assert result.valid
 
-    def test_allows_lambda_in_sort_by(self):
+    def test_sort_by_with_lambda_rejected(self):
         result = validate(
             "sort_by([{'a': 1}], key=lambda x: x['a'])",
             allowed_names=set(),
         )
-        assert result.valid
+        assert not result.valid
+        assert any(v.rule_id == "safety.unknown-call" for v in result.violations)
 
     def test_allows_lambda_with_min_max(self):
         result = validate(
@@ -223,9 +228,17 @@ class TestLambdaRestriction:
         assert not result.valid
         assert any("key= argument" in e for e in result.errors)
 
-    def test_rejects_lambda_as_positional_arg(self):
-        result = validate("sorted([1, 2], lambda x: x)", allowed_names=set())
-        assert not result.valid
+    def test_lambda_positions_are_key_defaultdict_and_re_sub_only(self):
+        def ids(src):
+            return [v.rule_id for v in validate(src, allowed_names=set()).violations]
+        # positional lambda to sorted is a runtime TypeError (key is keyword-only)
+        assert "style.lambda-position" in ids("xs = [1]\nsorted(xs, lambda r: r)")
+        assert "style.lambda-position" in ids("list(lambda: 1)")
+        assert validate("from collections import defaultdict\nd = defaultdict(lambda: 0)").valid
+        assert validate("import collections\nd = collections.defaultdict(lambda: 0)").valid
+        assert validate('import re\ns = re.sub("a", lambda m: m.group(0), "abc")').valid
+        assert validate('import re\np = re.compile("a")\ns = p.sub(lambda m: m.group(0), "abc")').valid
+        assert "style.lambda-position" in ids('import re\ns = re.sub(lambda m: 1, "a", "abc")')
 
     def test_rejects_lambda_in_non_key_kwarg(self):
         result = validate(
@@ -233,3 +246,54 @@ class TestLambdaRestriction:
             allowed_names=set(),
         )
         assert not result.valid
+
+
+# Final review I2(a): break and continue compile only inside a loop of their own scope.
+# They validated at top level and directly in a def, and then compile() raised SyntaxError.
+@pytest.mark.parametrize("program", [
+    "break",
+    "continue",
+    "if True:\n    break",
+    "def f():\n    break\n    return 1\nx = f()",
+    "def f():\n    continue",
+    # a def body inside a for is its own scope
+    "for i in [1]:\n    def f():  # ste: style.def-top-level, test\n        break",
+    # a for's else clause is not its body
+    "for i in [1]:\n    print(i)\nelse:\n    break",
+])
+def test_break_continue_outside_a_for_body_rejected(program):
+    result = validate(program)
+    assert any(v.rule_id == "safety.node" and ("Break" in v.message or "Continue" in v.message)
+               for v in result.violations), result.violations
+
+
+@pytest.mark.parametrize("program", [
+    "for i in [1]:\n    break",
+    "for i in [1]:\n    if i:\n        continue\n    print(i)",
+    "for i in [1]:\n    with open_thing() as t:\n        break",
+    "d = {}\nfor k in ['a']:\n    try:\n        x = d[k]\n    except KeyError:\n        continue\n    print(x)",
+    "for i in [1]:\n    for j in [2]:\n        print(j)\n    else:\n        break",
+    "def f(xs):\n    for x in xs:\n        if x:\n            break\n    return 1",
+])
+def test_break_continue_inside_a_for_body_allowed(program):
+    result = validate(program, allowed_names={"open_thing"})
+    assert not any("Break" in v.message or "Continue" in v.message for v in result.violations), \
+        result.violations
+
+
+# Final review I2(b): a program that passes every rule but fails to compile is invalid.
+@pytest.mark.parametrize("program", [
+    "a, *b, *c = [1, 2, 3]",
+    "def f(a, a):\n    return a",
+    "print(sep='', sep='')",
+])
+def test_program_that_does_not_compile_is_invalid(program):
+    result = validate(program)
+    assert not result.valid
+    assert any(v.rule_id == "safety.parse" and "Compile error" in v.message
+               for v in result.violations), result.violations
+
+
+def test_calls_is_documented_as_advisory():
+    # Final review I3: calls is best-effort, not a soundness boundary.
+    assert "advisory" in ValidationResult.__doc__

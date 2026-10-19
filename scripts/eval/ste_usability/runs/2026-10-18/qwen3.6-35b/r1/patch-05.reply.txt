@@ -1,0 +1,36 @@
+```python
+# /// intent
+# goal   = "Add '- release notes' after '- changelog' in notes.md, failing if the marker is missing or duplicated."
+# reads  = ["notes.md"]
+# writes = ["notes.md"]
+# output = "none"
+# ///
+
+import json
+
+def load_config():
+    with open('data/config.json', 'r') as fh:
+        return json.loads(fh.read())
+
+def main():
+    p = Path('notes.md')
+    text = p.read_text()
+    lines = text.splitlines()
+    
+    found = None
+    for i, line in enumerate(lines):
+        if line == '- changelog':
+            if found is not None:
+                raise ValueError("marker appears more than once")
+            found = i
+    
+    if found is None:
+        raise ValueError("marker is missing")
+    
+    lines.insert(found + 1, '- release notes')
+    new_text = '\n'.join(lines)
+    p.write_text(new_text)
+
+if __name__ == '__main__':
+    main()
+```

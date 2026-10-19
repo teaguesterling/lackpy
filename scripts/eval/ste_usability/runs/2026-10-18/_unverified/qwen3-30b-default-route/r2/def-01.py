@@ -1,0 +1,37 @@
+# /// intent
+# goal   = "Count the number of TODO markers in each .cpp file under src and print the counts sorted by filename"
+# reads  = ["src/*.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+def count_todo_lines(text: str) -> int:
+    """Count the number of lines containing 'TODO' in the given text."""
+    lines = text.strip().split('\n')
+    return sum(1 for line in lines if re.search(r'\bTODO\b', line, re.IGNORECASE))
+
+def main():
+    # Get all .cpp files in src directory
+    src_dir = Path('src')
+    cpp_files = sorted(src_dir.glob('*.cpp'))
+    
+    # Count TODOs in each file and store results
+    todo_counts = []
+    for file_path in cpp_files:
+        try:
+            content = file_path.read_text()
+            todo_count = count_todo_lines(content)
+            todo_counts.append((file_path.name, todo_count))
+        except (OSError, UnicodeDecodeError) as e:
+            # Catch specific exceptions instead of Exception
+            print(f"Error reading {file_path}: {e}")
+    
+    # Sort by filename and print results
+    for filename, count in sorted(todo_counts):
+        print(f"{filename}: {count}")
+
+if __name__ == '__main__':
+    main()

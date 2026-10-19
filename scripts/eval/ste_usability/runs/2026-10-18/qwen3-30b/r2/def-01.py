@@ -1,0 +1,34 @@
+# /// intent
+# goal   = "Count the number of TODO markers in each .cpp file under src and print the counts sorted by filename"
+# reads  = ["src/*.cpp"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+import re
+
+# Define a function to count TODO markers in a text
+def count_todos(text):
+    # Use re.findall to find all occurrences of TODO (case-insensitive)
+    todos = re.findall(r'TODO', text, re.IGNORECASE)
+    return len(todos)
+
+# Get all .cpp files in the src directory
+src_dir = Path('src')
+file_paths = sorted(src_dir.glob('*.cpp'))
+
+# Process each .cpp file
+for file_path in file_paths:
+    # Read the file content
+    try:
+        content = file_path.read_text()
+    except (OSError, UnicodeDecodeError):
+        continue
+
+    # Count TODO markers
+    todo_count = count_todos(content)
+
+    # Print the result
+    print(f"{file_path.name}: {todo_count}")

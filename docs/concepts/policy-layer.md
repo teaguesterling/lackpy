@@ -1,5 +1,11 @@
 # Policy Layer
 
+!!! note "The policy layer does not control file access"
+    The policy layer decides which **tools** a request can call. Since lackpy
+    removed tool kits, every request resolves to an empty tool set. File access
+    goes through `pathlib.Path`, under the [path policy](paths.md). The path
+    policy is separate from the policy layer.
+
 ## What it is
 
 The **PolicyLayer** consolidates tool-access policy into a single resolution chain. Instead of scattered `if kibitzer` / `if umwelt` conditionals, the service builds a context, calls `policy.resolve()`, and gets back an immutable result describing what tools are allowed, what constraints apply, and what hints to inject into prompts.
@@ -27,11 +33,11 @@ The output of policy resolution. Frozen — sources produce new instances via `r
 
 ## PolicyContext
 
-A `TypedDict` describing the request. Only `kit` is required — all other fields are optional and sources degrade gracefully when they're absent.
+A `TypedDict` describing the request. Only `tools` is required — all other fields are optional and sources degrade gracefully when they're absent.
 
 | Field | Type | VSM Level | Description |
 |-------|------|-----------|-------------|
-| `kit` | `ResolvedTools` | S1 (operations) | Tools available for this request |
+| `tools` | `ResolvedTools` | S1 (operations) | Tools available for this request |
 | `principal` | `Principal` | S5 (identity) | Who is requesting — human, agent, or subagent |
 | `model` | `ModelSpec` | S4 (inferencer) | Model name, temperature, tier |
 | `session_id` | `str` | S2 (coordination) | Lets sources correlate internal state |
@@ -54,16 +60,19 @@ Sources are registered with a priority. The chain runs lowest-priority-first, th
 
 Each source receives the current result and the context, and returns a new `PolicyResult`. If a source sets `resolved=True`, the chain stops early.
 
-```python
-from lackpy.policy import PolicyLayer, PolicyResult
+```python title="Python API: resolve a policy"
+from lackpy.policy import PolicyLayer
+from lackpy.policy.sources.tools import ToolsPolicySource
+from lackpy.service import LackpyService
+from lackpy.tools.registry import ResolvedTools
 
+svc = LackpyService()
 layer = PolicyLayer()
-layer.add_source(kit_source)      # priority 0
-layer.add_source(kibitzer_source)  # priority 50
+layer.add_source(ToolsPolicySource(svc.toolbox))  # priority 0
 
-result = layer.resolve({"kit": resolved_kit})
-# result.allowed_tools → frozenset({"read_file", "find_files"})
-# result.prompt_hints → ("Use read_file() instead of open()",)
+no_tools = ResolvedTools(tools={}, callables={}, grade=None, description="")
+result = layer.resolve({"tools": no_tools})
+print(result.allowed_tools)  # frozenset(): every request has an empty tool set
 ```
 
 ---
@@ -105,4 +114,4 @@ These are separate concerns that happen at different points:
 
 2. **Policy resolution** (`PolicyLayer.resolve()`) takes the resolved kit and determines what constraints apply. This is S3 — what's allowed given the current context.
 
-The service calls `resolve_tools()` first, then passes the result into the policy layer via `PolicyContext["kit"]`.
+The service calls `resolve_tools()` first, then passes the result into the policy layer via `PolicyContext["tools"]`.

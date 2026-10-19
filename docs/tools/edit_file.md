@@ -1,43 +1,16 @@
-# edit_file
+# edit_file → read, check, write
 
-Replace the first occurrence of a string in a file.
-
-## Signature
-
-```python
-edit_file(path: str, old_str: str, new_str: str) -> bool
-```
-
-## Parameters
-
-| Name | Type | Description |
-|------|------|-------------|
-| `path` | `str` | File path relative to the workspace root |
-| `old_str` | `str` | The text to find and replace |
-| `new_str` | `str` | The replacement text |
-
-## Returns
-
-`True` if the replacement was made, `False` if `old_str` was not found.
-
-## Grade
-
-- **World coupling (w):** 3 — writes to the filesystem
-- **Effects ceiling (d):** 3 — modifies existing files
-
-## Examples
+The `edit_file` tool was removed with the tool kits. A program edits a file in
+three steps: read it, assert that the change applies once, then write it.
 
 ```python
-edit_file("config.toml", 'debug = false', 'debug = true')
+from pathlib import Path
+
+path = Path("notes.md")
+text = path.read_text()
+assert text.count("Status: draft") == 1, "the status line occurs once"
+path.write_text(text.replace("Status: draft", "Status: final"))
 ```
 
-```python
-success = edit_file("main.py", "old_function()", "new_function()")
-```
-
-## Notes
-
-- Only replaces the **first** occurrence of `old_str`.
-- Returns `False` without modifying the file if `old_str` is not found.
-- The match is exact (case-sensitive, whitespace-sensitive).
-- Including this tool in a kit raises the kit grade to w=3, d=3.
+If the `assert` fails, the program stops before it writes. The
+[tutorial](../tutorial.md#2-patch-one-occurrence-in-a-file) runs this example.

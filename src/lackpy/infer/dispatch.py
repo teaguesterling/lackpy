@@ -9,6 +9,7 @@ from typing import Any
 from ..lang.validator import validate
 from .cleanup import deterministic_cleanup
 from .correction import CorrectionChain
+from .prompt import build_system_prompt
 from .sanitize import sanitize_output
 
 
@@ -74,7 +75,8 @@ class InferenceDispatcher:
             intent: Natural language description of the desired program.
             namespace_desc: Formatted tool namespace string for the prompt.
             allowed_names: Set of allowed callable names for validation.
-            params_desc: Optional description of pre-set parameter variables.
+            params_desc: Optional description of the program's ``params`` literal
+                (``format_params_description``); it reaches the prompt.
             extra_rules: Additional validation rules beyond the core checks.
             interpreter: An interpreter instance whose ``system_prompt_hint()``
                 is forwarded to ``build_system_prompt()``. When present, the
@@ -88,12 +90,17 @@ class InferenceDispatcher:
         """
         start = time.perf_counter()
         errors_by_provider: dict[str, list[str]] = {}
+        # One system prompt for every provider and the few-shot retry, so the
+        # params literal reaches the model (stepy100 Task 8). Rules and
+        # templates ignore it.
+        system_prompt = build_system_prompt(namespace_desc, params_desc, interpreter=interpreter)
 
         for provider in self._providers:
             if not provider.available():
                 continue
 
-            raw = await provider.generate(intent, namespace_desc, interpreter=interpreter)
+            raw = await provider.generate(intent, namespace_desc, interpreter=interpreter,
+                                          system_prompt_override=system_prompt)
             if raw is None:
                 continue
 
@@ -116,6 +123,7 @@ class InferenceDispatcher:
                 provider=provider,
                 extra_rules=extra_rules,
                 kibitzer_session=kibitzer_session,
+                system_prompt=system_prompt,
             )
             if correction is not None:
                 elapsed = (time.perf_counter() - start) * 1000

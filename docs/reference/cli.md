@@ -5,9 +5,9 @@ lackpy ships **two** command-line entry points:
 | Command | Purpose |
 |---------|---------|
 | `lackpy` | Run inference: delegate / generate / validate / create from intent, and run program files. |
-| `lackpyctl` | Manage the workspace: init, status, kits, toolbox, templates, providers, MCP server. |
+| `lackpyctl` | Manage the workspace: init, status, toolbox, templates, providers, MCP server. |
 
-```
+```bash
 lackpy    [--workspace PATH] -c "<intent>" [flags]      # or: lackpy <file> [flags]
 lackpyctl [--workspace PATH] <command> [args]
 ```
@@ -18,6 +18,11 @@ Both accept `--workspace PATH` to set the project root (default: current directo
 > flags on a single intent (`-c`): the default is *delegate* (generate + run);
 > `--generate`, `--validate`, and `--create` select the other modes.
 
+A program is plain Python. It reads and writes files only through `pathlib.Path`,
+under the workspace's permission rules (see [Paths](../concepts/paths.md)). There
+are no tool kits: the `--tools` flag and the kit forms of `--profile` (a tool name
+or a comma-separated tool list) were removed in lackpy stepy100, and give an error.
+
 ---
 
 # `lackpy` — inference
@@ -27,7 +32,7 @@ Both accept `--workspace PATH` to set the project root (default: current directo
 Generate a program from a natural-language intent and run it immediately.
 
 ```bash
-lackpy -c "<intent>" [--profile KIT] [--tools TOOLS] [--param k=v ...] [--mode MODE]
+lackpy -c "<intent>" [--profile NAME] [--param k=v ...] [--mode MODE]
 ```
 
 **Arguments**
@@ -35,15 +40,16 @@ lackpy -c "<intent>" [--profile KIT] [--tools TOOLS] [--param k=v ...] [--mode M
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `-c "<intent>"` | yes | Natural-language description of the task |
-| `--profile` | no | Kit name, comma-separated tool list, or `@file` |
-| `--tools` | no | Extra tool names (comma-separated) to add on top of the kit |
-| `--param` | no | Parameter `key=value` (repeatable) |
+| `--profile` | no | A `[profiles.<name>]` table in `.lackpy/config.toml` (model, mode, rules) |
+| `--param` | no | Parameter `key=value` (repeatable). See [Params](#params). |
 | `--mode` | no | Inference mode: `1-shot`, `spm` (default: from config) |
 
-**Output:** JSON with `success`, `program`, `grade`, `generation_tier`, timing fields,
-`trace`, `output`, `stdout`, and `error`. (`output` falls back to captured `stdout`
-when the generated program `print()`s its answer instead of leaving a bare final
-expression.)
+**Output:** JSON with `success`, `program`, `generation_tier`, timing fields,
+`trace`, `files_read`, `files_modified`, `output`, `stdout`, and `error`. (`output`
+falls back to captured `stdout` when the generated program `print()`s its answer
+instead of leaving a bare final expression.) `files_read` and `files_modified`
+list the paths of the program's successful `Path.read_text`/`read_bytes` and
+`Path.write_text`/`write_bytes` calls, as the program wrote them.
 
 **Exit code:** 0 on success, 1 on failure.
 
@@ -62,8 +68,8 @@ stderr to learn why a run failed.
 **Examples:**
 
 ```bash
-lackpy -c "read the file README.md" --profile read_file
-lackpy -c "find all Python files" --profile read_file,find_files
+lackpy -c "count the lines in README.md"
+lackpy -c "list the python files under src" --profile fast
 ```
 
 ---
@@ -73,7 +79,7 @@ lackpy -c "find all Python files" --profile read_file,find_files
 Run the inference pipeline and print the generated program **without executing it**.
 
 ```bash
-lackpy -c "<intent>" --generate [--profile KIT]
+lackpy -c "<intent>" --generate [--profile NAME]
 ```
 
 **Output:** The program text (not JSON).
@@ -91,19 +97,19 @@ with exit 1 is the unambiguous "no program" signal.
 **Example:**
 
 ```bash
-lackpy -c "find all Python files" --generate --profile find_files
+lackpy -c "list the python files under src" --generate
 ```
 
 ---
 
 ## validate (`--validate`)
 
-Validate a program against the AST whitelist without running it. Validate either an
-inline code string (with `-c`) or a file (as a positional argument).
+Validate a program against the lackpy validator without running it. Validate either
+an inline code string (with `-c`) or a file (as a positional argument).
 
 ```bash
-lackpy -c "<program source>" --validate [--profile KIT]
-lackpy <file> --validate [--profile KIT]
+lackpy -c "<program source>" --validate [--profile NAME]
+lackpy <file> --validate [--profile NAME]
 ```
 
 **Output:** JSON with `valid` (bool), `errors` (list), `calls` (list).
@@ -113,8 +119,9 @@ lackpy <file> --validate [--profile KIT]
 **Examples:**
 
 ```bash
-lackpy my_program.py --validate --profile read_file
-lackpy -c "read_file('x.py')" --validate --profile read_file
+lackpy my_program.py --validate
+lackpy -c "from pathlib import Path
+len(Path('x.py').read_text())" --validate
 ```
 
 ---
@@ -125,7 +132,7 @@ Generate a program from an intent and save it as a reusable **Lackey file**
 (a Python class wrapping the program) under `.lackpy/templates/`.
 
 ```bash
-lackpy -c "<intent>" --create --name NAME [--profile KIT] [--tools TOOLS]
+lackpy -c "<intent>" --create --name NAME [--profile NAME]
 ```
 
 **Arguments**
@@ -135,7 +142,7 @@ lackpy -c "<intent>" --create --name NAME [--profile KIT] [--tools TOOLS]
 | `-c "<intent>"` | yes | Intent to generate the saved program from |
 | `--create` | yes | Select create mode |
 | `--name` | no | Class name for the Lackey file (default: `Generated`) |
-| `--profile` / `--tools` | no | Tools available to the generated program |
+| `--profile` | no | A `[profiles.<name>]` table (model, mode, rules) |
 
 **Output:** `Created <path>` (plain text).
 
@@ -144,31 +151,57 @@ lackpy -c "<intent>" --create --name NAME [--profile KIT] [--tools TOOLS]
 **Example:**
 
 ```bash
-lackpy -c "read the file README.md" --create --name ReadReadme --profile read_file
+lackpy -c "read the file README.md" --create --name ReadReadme
 ```
 
 ---
 
 ## Running a program file
 
-Pass a file path as the first positional argument. Lackey files (a `Lackey` class with
-a `run` method) are detected and run directly; plain program files need `--profile` or
-`--tools` to supply a namespace.
+Pass a file path as the first positional argument. A Lackey file (a `Lackey` class
+with a `run` method) is detected and run. A plain program file runs as it is.
 
 ```bash
-lackpy <file.py> --profile KIT          # run a plain program file
-lackpy <file.py> --tools read_file  # ...with ad-hoc tools
-lackpy my_lackey.py                 # run a Lackey file (tools come from the file)
+lackpy prog.py                      # run a plain program file
+lackpy prog.py --param n=5          # ...with a param
+lackpy my_lackey.py                 # run a Lackey file
 ```
 
-**Output:** JSON with `success`, `output`, `error`.
+**Output:** JSON with `success`, `output`, `stdout`, `error`.
 
 **Exit code:** 0 on success, 1 on failure or validation error.
+
+**`__file__`:** a program file runs with `__file__ == "<stdin>"`, the same value as
+a program on stdin. `python3 prog.py` gives the script path. So a program that
+builds paths from `__file__` gives a different result in lackpy. Use paths relative
+to the workspace instead.
 
 You can also pipe a program on stdin:
 
 ```bash
-echo "find_files('*.py')" | lackpy --profile find_files
+echo "from pathlib import Path
+sorted(str(p) for p in Path('.').glob('*.py'))" | lackpy
+```
+
+## Params
+
+A program declares its params as one top-level `params = {"name": <literal>, ...}`
+dict and reads `params["name"]`. Each `--param key=value` replaces one default.
+
+The CLI types the value text like the default:
+
+- When the default is a `str`, the value stays the raw text: `--param name=5`
+  gives `"5"`.
+- Otherwise the text is read as a Python literal: `--param n=5` gives `5`,
+  `--param flag=True` gives `True`, `--param xs=[1,2]` gives `[1, 2]`.
+- Text that is not a literal stays a string: `--param p=src/*.py`.
+
+The runner then checks the type against the default (an `int` is accepted for a
+`float` default). A Lackey file's typed attributes (`n: int = 3`) are its params,
+with the same rules.
+
+```bash
+lackpy count.py --param n=5 --param name=report
 ```
 
 ---
@@ -193,9 +226,9 @@ lackpyctl init [--ollama-url URL] [--ollama-model MODEL]
 **Creates:**
 
 - `.lackpy/config.toml` — inference order (`templates`, `rules`, `local`), the `local`
-  woollama tier (`model = "ollama/<model>"`), kit default, sandbox settings
+  woollama tier (`model = "ollama/<model>"`), sandbox settings
 - `.lackpy/templates/` — directory for saved Lackey files / `.tmpl` files
-- `.lackpy/kits/` — directory for `.kit` files
+- `.lackpy/kits/` — kept for the internal toolbox views; no program run reads it
 
 The generated config wires the Ollama provider into the inference order, so
 compositional intents work out of the box once a model is served. The model choice is
@@ -238,80 +271,18 @@ lackpyctl spec
 
 ---
 
-## `lackpyctl profile`
-
-Manage kit files.
-
-### `lackpyctl profile list`
-
-List all `.kit` files in `.lackpy/kits/`.
-
-```bash
-lackpyctl profile list
-```
-
-**Output:** JSON array of `{name, path}`.
-
-### `lackpyctl profile info`
-
-Show the tools and grade for a kit.
-
-```bash
-lackpyctl profile info <name> [--tools TOOL ...]
-```
-
-| Argument | Description |
-|----------|-------------|
-| `name` | Kit name, or comma-separated tool list |
-| `--tools` | Explicit list of tool names (overrides `name`) |
-
-**Output:** JSON with `tools`, `grade`, `description`.
-
-### `lackpyctl profile create`
-
-Create a new kit file.
-
-```bash
-lackpyctl profile create <name> --tools TOOL [TOOL ...] [--description TEXT]
-```
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `name` | yes | Kit name (filename: `{name}.kit`) |
-| `--tools` | yes | One or more tool names |
-| `--description` | no | Human-readable description |
-
-**Example:**
-
-```bash
-lackpyctl profile create readonly --tools read_file find_files --description "Read-only filesystem tools"
-```
-
----
-
 ## `lackpyctl toolbox`
 
-Inspect the registered tool catalog.
-
-### `lackpyctl toolbox list`
-
-List all registered tools.
+Inspect the internal tool catalog. No program run uses it: since lackpy stepy100,
+programs use `pathlib.Path` and the approved modules, not tools.
 
 ```bash
 lackpyctl toolbox list
-```
-
-**Output:** JSON array of `{name, provider, description, grade_w, effects_ceiling}`.
-
-### `lackpyctl toolbox show`
-
-Show details for a single tool.
-
-```bash
 lackpyctl toolbox show <name>
 ```
 
-**Output:** JSON object for the tool.
+**Output:** JSON: a list of `{name, provider, description, grade_w, effects_ceiling}`,
+or one tool's object.
 
 ---
 
@@ -375,42 +346,3 @@ lackpyctl mcp init [--name NAME] [--force]
 |----------|---------|-------------|
 | `--name` | `lackpy` | Server name in `.mcp.json` |
 | `--force` | off | Overwrite an existing entry |
-
----
-
-## Kit argument format
-
-Any command that accepts `--profile` supports these forms:
-
-| Form | Example | Resolved as |
-|------|---------|-------------|
-| Named kit | `--profile filesystem` | Loads `.lackpy/kits/filesystem.kit` |
-| Comma-separated | `--profile read_file,find_files,write_file` | Ad-hoc list of tool names |
-| Single tool | `--profile read_file` | Single-tool kit |
-| Empty kit | `--profile none` | No base tools (use with `--tools`) |
-
----
-
-## Extra tools (`--tools`)
-
-Any inference invocation that accepts `--profile` also accepts `--tools` to add individual
-tools on top of the kit:
-
-```bash
-# Add edit_file to a named kit
-lackpy -c "fix the typo" --profile debug --tools edit_file
-
-# Multiple extra tools
-lackpy -c "reorganize" --profile debug --tools edit_file,write_file
-
-# Standalone — no kit, just tools
-lackpy -c "read the README" --tools read_file
-
-# Explicit empty kit + tools
-lackpy -c "read the README" --profile none --tools read_file
-```
-
-**Behaviour:**
-- Extra tools are merged into the resolved kit. Duplicates are ignored.
-- The kit grade is recomputed after merging (e.g., adding `write_file` raises the grade).
-- `--tools` without `--profile` uses the config default kit as the base. Use `--profile none` for no base tools.

@@ -1,0 +1,36 @@
+```python
+# /// intent
+# goal   = "Print the names of the files under src (any extension) that contain no TODO, sorted."
+# reads  = ["src/*.cpp", "src/util.h"]
+# writes = []
+# output = "printed"
+# ///
+
+import re
+from pathlib import Path
+
+# Find all files under src with .cpp or .h extension
+src_dir = Path("src")
+files = []
+for file_path in src_dir.rglob("*"):
+    if file_path.is_file() and file_path.suffix in (".cpp", ".h"):
+        files.append(file_path)
+
+# Filter files that do not contain "TODO"
+files_without_todo = []
+for file_path in files:
+    try:
+        text = file_path.read_text()
+        if "TODO" not in text:
+            files_without_todo.append(file_path.name)
+    except Exception:
+        # Skip any file that cannot be read
+        continue
+
+# Sort the list of filenames
+files_without_todo.sort()
+
+# Print the sorted filenames
+for filename in files_without_todo:
+    print(filename)
+```

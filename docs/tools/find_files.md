@@ -1,41 +1,17 @@
-# find_files
+# find_files → Path.glob
 
-Find files matching a glob pattern.
-
-## Signature
-
-```python
-find_files(pattern: str) -> list[str]
-```
-
-## Parameters
-
-| Name | Type | Description |
-|------|------|-------------|
-| `pattern` | `str` | Glob pattern (e.g. `"*.py"`, `"src/**/*.toml"`) |
-
-## Returns
-
-A sorted list of matching file paths as strings, relative to the workspace root.
-
-## Grade
-
-- **World coupling (w):** 1 — reads filesystem metadata
-- **Effects ceiling (d):** 1 — no side effects
-
-## Examples
+The `find_files` tool was removed with the tool kits. A program lists files
+with `Path(d).glob(pattern)` or `Path(d).rglob(pattern)`. The
+[path policy](../concepts/paths.md) checks each entry.
 
 ```python
-py_files = find_files("*.py")
+from pathlib import Path
+
+paths = Path("src").rglob("*.py")
+for p in sorted(paths):
+    print(p)
 ```
 
-```python
-all_configs = find_files("**/*.toml")
-```
-
-## Notes
-
-- Uses `pathlib.Path.glob()` under the hood.
-- Returns an empty list if no files match.
-- Results are sorted lexicographically.
-- Recursive patterns use `**` (e.g. `"**/*.md"`).
+A listing omits each entry that the path policy refuses for read. A pattern
+that is absolute or that contains `..` refuses. `iterdir()` lists one
+directory.

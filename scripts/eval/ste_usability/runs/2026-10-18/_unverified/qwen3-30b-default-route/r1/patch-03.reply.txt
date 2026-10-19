@@ -1,0 +1,42 @@
+```python
+# /// intent
+# goal   = "Replace '// TODO: remove' with '// done' in every .cpp file under src and print the file names that were changed"
+# reads  = ["src/*.cpp"]
+# writes = ["src/*.cpp"]
+# output = "printed"
+# ///
+
+import json
+import re
+from pathlib import Path
+
+# Ensure we are in the workspace directory
+workspace = Path(".")
+
+# List to store the names of files that were changed
+changed_files = []
+
+# Iterate over all .cpp files in the src directory
+for cpp_file in workspace.glob("src/*.cpp"):
+    # Read the content of the file
+    try:
+        content = cpp_file.read_text()
+    except (OSError, UnicodeDecodeError):
+        continue  # Skip files that can't be read
+
+    # Check if the file contains '// TODO: remove'
+    if '// TODO: remove' in content:
+        # Replace '// TODO: remove' with '// done'
+        new_content = content.replace('// TODO: remove', '// done')
+        
+        # Write the modified content back to the file
+        try:
+            cpp_file.write_text(new_content)
+            changed_files.append(cpp_file.name)
+        except (OSError, UnicodeDecodeError):
+            continue  # Skip files that can't be written
+
+# Print the names of the files that were changed
+for filename in changed_files:
+    print(filename)
+```

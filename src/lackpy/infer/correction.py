@@ -10,32 +10,6 @@ from .fixer import build_fixer_messages
 from .hints import enrich_errors
 from .sanitize import sanitize_output
 
-_STDLIB_TO_TOOL: dict[str, str] = {
-    "open": "read_file",
-    "glob": "find_files",
-    "os": "find_files",
-    "pathlib": "find_files",
-}
-
-
-def _infer_relevant_tool(
-    failure_mode: str | None,
-    errors: list[str],
-    allowed_names: set[str],
-) -> str | None:
-    """Guess which tools tool is relevant to a failure, for doc lookup."""
-    error_text = " ".join(errors).lower()
-    if failure_mode in ("stdlib_leak", "implement_not_orchestrate"):
-        for stdlib_name, tool_name in _STDLIB_TO_TOOL.items():
-            if stdlib_name in error_text and tool_name in allowed_names:
-                return tool_name
-    # Fall back to first allowed name that looks like a tool
-    for name in allowed_names:
-        if "_" in name:
-            return name
-    return None
-
-
 @dataclass
 class CorrectionAttempt:
     """Record of a single correction attempt.
@@ -106,7 +80,7 @@ class CorrectionChain:
     """Three-stage error correction chain.
 
     Tries strategies in order:
-    1. Deterministic cleanup — strip imports and apply AST rewrites
+    1. Deterministic cleanup — strip unapproved imports and apply AST rewrites
     2. Few-shot correction — re-invoke ``provider.generate()`` with enriched errors
     3. Fresh fixer — invoke the provider's low-level API with a specialised fixer prompt
 
@@ -127,6 +101,7 @@ class CorrectionChain:
         provider=None,
         extra_rules: list | None = None,
         kibitzer_session=None,
+        system_prompt: str | None = None,
     ) -> CorrectionResult | None:
         """Attempt to correct an invalid program using three strategies in order.
 
@@ -141,6 +116,9 @@ class CorrectionChain:
             kibitzer_session: Optional KibitzerSession for correction hints.
                 When present, get_correction_hints() is called to inform
                 error enrichment with model-specific signal.
+            system_prompt: The system prompt of the first attempt (it carries
+                the params literal), passed to the few-shot retry as
+                ``system_prompt_override``. None lets the provider build its own.
 
         Returns:
             A CorrectionResult if any strategy succeeds, or None if all fail.
@@ -164,7 +142,8 @@ class CorrectionChain:
 
         # Strategy 2: Few-shot correction via provider.generate() with error feedback
         if provider is not None:
-            enriched = enrich_errors(validation.errors, namespace_desc)
+            enriched = enrich_errors(validation.errors, namespace_desc,
+                                     violations=validation.violations)
 
             # Kibitzer: get correction hints to strengthen enrichment
             if kibitzer_session is not None:
@@ -179,14 +158,13 @@ class CorrectionChain:
                             sanitized_program=cleaned,
                         )
                         model_name = getattr(provider, "_model", None)
-                        failed_tool = _infer_relevant_tool(
-                            failure_mode, validation.errors, allowed_names,
-                        )
+                        # No tool to name since the kit was removed (stepy100);
+                        # the unapproved-word hints come from enrich_errors.
                         signal = get_hints(
                             failure_mode=failure_mode,
                             model=model_name,
                             attempt=len(self.attempts),
-                            tool=failed_tool,
+                            tool=None,
                         )
                         if isinstance(signal, dict):
                             doc_context = signal.get("doc_context")
@@ -206,7 +184,8 @@ class CorrectionChain:
                     except Exception:
                         pass  # kibitzer errors must not break correction
             raw = await provider.generate(
-                intent, namespace_desc, error_feedback=enriched
+                intent, namespace_desc, error_feedback=enriched,
+                system_prompt_override=system_prompt,
             )
             if raw is not None:
                 few_shot_program = sanitize_output(raw)

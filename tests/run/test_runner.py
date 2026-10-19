@@ -1,8 +1,13 @@
 """Tests for the v1 restricted runner."""
 
+import json
+import pathlib
+import sys
+
 import pytest
 
 from lackpy.run.base import ExecutionResult
+from lackpy.run.paths import PathPolicy
 from lackpy.run.runner import RestrictedRunner
 
 
@@ -33,174 +38,272 @@ def runner():
 
 
 @pytest.fixture
-def mock_namespace():
-    return {
-        "read_file": lambda path: f"contents of {path}",
-        "find_files": lambda pattern: ["a.py", "b.py"],
-    }
+def ws(tmp_path):
+    w = tmp_path / "ws"
+    w.mkdir()
+    (w / "test.py").write_text("print('x')\n")
+    (w / "a.py").write_text("")
+    return w
+
+
+def _run(program, ws, **kw):
+    return RestrictedRunner().run(program, path_policy=PathPolicy(ws, []), **kw)
+
+
+READ = "from pathlib import Path\n"
+
+
+class TestNoToolNamespace:
+    """stepy100 Task 7: the runner binds no tool callables."""
+
+    def test_run_takes_no_namespace(self, runner):
+        # Retired kit model: run(program, namespace) bound kit tools as traced globals.
+        with pytest.raises(TypeError):
+            runner.run("x = 1", {"read_file": lambda p: p})
+        with pytest.raises(TypeError):
+            runner.run("x = 1", namespace={"read_file": lambda p: p})
+
+    def test_kit_names_are_unbound(self, runner):
+        result = runner.run("read_file('x')")
+        assert not result.success
+        assert "read_file" in result.error
 
 
 class TestBasicExecution:
-    def test_simple_assignment_and_output(self, runner, mock_namespace):
-        result = runner.run("x = read_file('test.py')\nlen(x)", mock_namespace)
-        assert result.success
-        assert result.output == len("contents of test.py")
+    def test_simple_assignment_and_output(self, ws):
+        result = _run(READ + "x = Path('test.py').read_text()\nlen(x)", ws)
+        assert result.success, result.error
+        assert result.output == len("print('x')\n")
 
-    def test_captures_trace(self, runner, mock_namespace):
-        result = runner.run("x = read_file('f.py')", mock_namespace)
-        assert result.success
-        assert len(result.trace.entries) == 1
-        assert result.trace.entries[0].tool == "read_file"
+    def test_captures_trace(self, ws):
+        result = _run(READ + "x = Path('test.py').read_text()", ws)
+        assert result.success, result.error
+        assert [e.tool for e in result.trace.entries] == ["Path.read_text"]
 
-    def test_captures_variables(self, runner, mock_namespace):
-        result = runner.run("x = read_file('f.py')\ny = len(x)", mock_namespace)
+    def test_captures_variables(self, ws):
+        result = _run(READ + "x = Path('test.py').read_text()\ny = len(x)", ws)
         assert result.success
         assert "x" in result.variables
         assert "y" in result.variables
 
-    def test_last_expression_captured(self, runner, mock_namespace):
-        result = runner.run("files = find_files('*.py')\nlen(files)", mock_namespace)
-        assert result.success
+    def test_last_expression_captured(self, ws):
+        result = _run(READ + "files = sorted(Path('.').glob('*.py'))\nlen(files)", ws)
+        assert result.success, result.error
         assert result.output == 2
 
-    def test_no_last_expression(self, runner, mock_namespace):
-        result = runner.run("x = read_file('f.py')", mock_namespace)
+    def test_no_last_expression(self, ws):
+        result = _run(READ + "x = Path('test.py').read_text()", ws)
         assert result.success
         assert result.output is None
 
 
 class TestPrintCapture:
-    def test_print_captured_to_stdout(self, runner, mock_namespace):
-        result = runner.run("print('hello')", mock_namespace)
+    def test_print_captured_to_stdout(self, runner):
+        result = runner.run("print('hello')")
         assert result.success
         assert result.stdout == "hello\n"
 
-    def test_print_does_not_escape_as_output(self, runner, mock_namespace):
+    def test_print_does_not_escape_as_output(self, ws):
         # A trailing print(...) is a call returning None, so the typed output
         # stays None — the value is recoverable from stdout instead.
-        result = runner.run("x = find_files('*.py')\nprint(len(x))", mock_namespace)
+        result = _run(READ + "x = list(Path('.').glob('*.py'))\nprint(len(x))", ws)
         assert result.success
         assert result.output is None
         assert result.stdout == "2\n"
 
-    def test_print_multiple_args_and_calls(self, runner, mock_namespace):
-        result = runner.run("print('a', 'b')\nprint('c')", mock_namespace)
+    def test_print_multiple_args_and_calls(self, runner):
+        result = runner.run("print('a', 'b')\nprint('c')")
         assert result.success
         assert result.stdout == "a b\nc\n"
 
-    def test_no_print_means_empty_stdout(self, runner, mock_namespace):
-        result = runner.run("files = find_files('*.py')\nlen(files)", mock_namespace)
+    def test_sep_and_end_none_mean_the_defaults(self, runner):
+        # Review M2: python3 prints "1 2\n" for sep=None and end=None.
+        result = runner.run("print(1, 2, sep=None)\nprint(3, end=None)\nprint(4, 5, sep=None, end=None)")
+        assert result.success, result.error
+        assert result.stdout == "1 2\n3\n4 5\n"
+
+    def test_no_print_means_empty_stdout(self, runner):
+        result = runner.run("files = [1, 2]\nlen(files)")
         assert result.success
         assert result.stdout == ""
 
-    def test_partial_stdout_on_runtime_error(self, runner):
-        def bad_read(path):
-            raise FileNotFoundError("no such file")
-        ns = {"read_file": bad_read}
-        result = runner.run("print('before')\nread_file('missing.py')", ns)
+    def test_partial_stdout_on_runtime_error(self, ws):
+        result = _run(READ + "print('before')\nPath('missing.py').read_text()", ws)
         assert not result.success
         assert result.stdout == "before\n"
 
 
 class TestParams:
-    def test_params_available_as_variables(self, runner, mock_namespace):
-        result = runner.run("len(content)", mock_namespace, params={"content": "hello world"})
-        assert result.success
+    # Task 5: params replace the program's own params literal; no bare names (tests/run/test_params.py).
+    def test_params_reach_the_program_through_its_literal(self, runner):
+        result = runner.run('params = {"content": ""}\nlen(params["content"])',
+                            params={"content": "hello world"})
+        assert result.success, result.error
         assert result.output == 11
 
-    def test_params_not_in_output_variables(self, runner, mock_namespace):
-        result = runner.run("x = len(content)", mock_namespace, params={"content": "hello"})
+    def test_params_bind_no_variable_of_their_own(self, runner):
+        result = runner.run('params = {"content": ""}\nx = len(params["content"])',
+                            params={"content": "hello"})
         assert "content" not in result.variables
-        assert "x" in result.variables
+        assert result.variables == {"params": {"content": "hello"}, "x": 5}
 
 
 class TestErrorHandling:
-    def test_runtime_error_captured(self, runner, mock_namespace):
-        def bad_read(path):
-            raise FileNotFoundError("no such file")
-        ns = {"read_file": bad_read}
-        result = runner.run("x = read_file('missing.py')", ns)
+    def test_runtime_error_captured(self, ws):
+        result = _run(READ + "x = Path('missing.py').read_text()", ws)
         assert not result.success
-        assert "no such file" in result.error
+        assert "missing.py" in result.error
 
 
 class TestSecurity:
-    def test_builtins_restricted(self, runner, mock_namespace):
-        result = runner.run("compile('1', '', 'eval')", mock_namespace)
+    def test_builtins_restricted(self, runner):
+        result = runner.run("compile('1', '', 'eval')")
         assert not result.success
 
 
-class TestSortByBuiltin:
-    def test_sort_by_dict_key(self, runner, mock_namespace):
-        result = runner.run(
-            "items = [{'name': 'b', 'val': 2}, {'name': 'a', 'val': 1}]\nsort_by(items, 'name')",
-            mock_namespace,
+class TestBuiltinsAtRuntime:
+    def test_sort_by_is_no_longer_injected(self, runner):
+        result = runner.run("sort_by([{'a': 1}], 'a')")
+        assert not result.success
+
+    def test_exception_class_is_available(self, runner):
+        # Naming the class in an expression is enough. The instance is not data,
+        # so the output is its repr (parked item 2).
+        result = runner.run("KeyError('k')")
+        assert result.success, result.error
+        assert result.output == "KeyError('k')"
+
+
+class TestOutputNeverRaisesOnTheHost:
+    """Parked item 2: output and variables hold only what a host serializer can take."""
+
+    @pytest.mark.parametrize("program, expected", [
+        ("type(3)", "<class 'int'>"),
+        ("from collections import Counter\nCounter('aab')", "Counter({'a': 2, 'b': 1})"),
+        ("def f():\n    return 1\nf", None),
+    ])
+    def test_non_data_output_is_its_repr(self, runner, program, expected):
+        result = runner.run(program)
+        assert result.success, result.error
+        assert isinstance(result.output, str)
+        if expected is not None:
+            assert result.output == expected
+        json.dumps(result.output)
+
+    def test_path_output_is_its_repr(self, ws):
+        result = _run(READ + "Path('a')", ws)
+        assert result.success, result.error
+        assert result.output == repr(pathlib.Path("a"))
+
+    def test_module_proxy_output_is_text(self, runner):
+        result = runner.run("import json\njson")
+        assert result.success, result.error
+        assert isinstance(result.output, str)
+
+    @pytest.mark.parametrize("program", ["10 ** 5000", "[1, 10 ** 5000]", "{'k': (10 ** 5000,)}"])
+    def test_output_whose_text_cannot_be_made_is_a_failed_result(self, runner, program):
+        result = runner.run(program)
+        assert not result.success
+        assert result.output is None
+        assert "cannot be converted to text" in result.error
+
+    def test_data_output_is_unchanged(self, runner):
+        result = runner.run("x = {'a': [1, 2.5, None, True, b'x', ('t',)]}\nx")
+        assert result.output == {"a": [1, 2.5, None, True, b"x", ("t",)]}
+
+    def test_huge_int_is_not_a_variable(self, runner):
+        result = runner.run("x = 10 ** 5000\ny = [x]\nz = 1")
+        assert result.success, result.error
+        assert result.variables == {"z": 1}
+
+    def test_int_at_the_text_limit_is_kept(self, runner):
+        digits = sys.get_int_max_str_digits()
+        result = runner.run(f"x = 10 ** {digits - 1}")
+        assert result.variables == {"x": 10 ** (digits - 1)}
+
+
+class TestCompileFailure:
+    def test_compile_error_is_a_failed_result_not_an_exception(self, runner):
+        # Final review I2(b): any drift between validate() and compile() must not raise out of run().
+        result = runner.run("a, *b, *c = [1, 2, 3]")
+        assert not result.success
+        assert "Compile error" in result.error
+
+
+class TestRuntimeNamespace:
+    """stepy100 Task 2: the runner builds the namespace and never raises."""
+
+    def test_runs_without_a_kit_namespace(self, runner):
+        result = runner.run("x = [1, 2]\nlen(x)")
+        assert result.success, result.error
+        assert result.output == 2
+
+    def test_variables_exclude_namespace_names(self, runner):
+        result = runner.run("x = type(3).__name__")
+        assert result.success, result.error
+        assert result.variables == {"x": "int"}
+
+    def test_file_is_the_program_file(self, runner):
+        result = runner.run("__file__", program_file="/w/p.py")
+        assert result.output == "/w/p.py"
+
+    def test_refusal_is_a_failed_result(self, runner):
+        result = runner.run("type(3).mro")
+        assert not result.success
+        assert result.error == "type(...).mro is not allowed in lackpy"
+
+    def test_refusal_escapes_except_exception(self, runner):
+        result = runner.run("try:\n    type(3).mro\nexcept Exception:\n    pass")
+        assert not result.success
+        assert "not allowed in lackpy" in result.error
+
+    def test_deep_unary_expression_does_not_raise(self, runner):
+        # Design §8, gate 4: a 3,000-deep expression is a failed result.
+        result = runner.run("-" * 3000 + "1")
+        assert not result.success
+        assert result.error
+
+    def test_params_cannot_replace_the_builtins(self, runner):
+        # A param or kit tool named like a namespace global must not replace it.
+        import builtins
+        # Since Task 5 a param binds no name at all; this program has no params
+        # literal, so the run fails before it starts, naming the key.
+        result = runner.run("open", params={"__builtins__": vars(builtins)})
+        assert not result.success
+        assert "'__builtins__'" in result.error
+        # With a literal, a dict of functions has no literal form (ruling c).
+        result = runner.run('params = {"__builtins__": {}}\nopen', params={"__builtins__": vars(builtins)})
+        assert not result.success
+        assert "'__builtins__'" in result.error
+
+    def test_unprintable_error_does_not_raise(self, runner):
+        # Review I1: str(KeyError(n)) raises ValueError for an int over 4,300 digits.
+        program = (
+            "n = 1\n"
+            "for i in range(5000):\n"
+            "    n = n * 10\n"
+            "d = {}\n"
+            "d[n]\n"
         )
-        assert result.success
-        assert result.output == [{'name': 'a', 'val': 1}, {'name': 'b', 'val': 2}]
-
-    def test_sort_by_reverse(self, runner, mock_namespace):
-        result = runner.run(
-            "items = [{'v': 1}, {'v': 3}, {'v': 2}]\nsort_by(items, 'v', reverse=True)",
-            mock_namespace,
-        )
-        assert result.success
-        assert result.output == [{'v': 3}, {'v': 2}, {'v': 1}]
+        result = runner.run(program)
+        assert not result.success
+        assert "KeyError" in result.error
 
 
-class TestSortByIsNotAnAttributeSink:
-    """sort_by takes an attribute name as DATA, so it is a string->getattr sink.
+_NAMESPACE_KEYS = ["type", "print", "__file__", "__name__", "__builtins__", "len", "KeyError"]
 
-    It has no static protection: the name never appears as an ast.Attribute, so
-    Step 3.5 cannot see it and `sort_by(items, "__class__")` validates fine.
-    The whole guard is the runtime check in _sort_by, and these pin it to the
-    same list the validator uses -- the two must not drift apart.
+
+class TestNameCollisions:
+    """A param cannot collide with a namespace name: it binds no name (Task 5).
+
+    Review M3's kit-tool collision check went with the kit (parked item 7):
+    there is no tool namespace left to collide (TestNoToolNamespace).
     """
 
-    def test_every_denied_attribute_is_refused(self):
-        """Not just underscore names: 17 DENIED_ATTRIBUTES have no underscore.
-
-        f_globals and f_builtins are among them -- the exact objects that list
-        exists to keep unreachable -- and a prefix-only guard passed all 17.
-        """
-        from lackpy.lang.grammar import DENIED_ATTRIBUTES
-        from lackpy.run.runner import _sort_by
-
-        def gen():
-            yield 1
-
-        g = gen()
-        next(g)
-
-        reachable = []
-        for attr in sorted(DENIED_ATTRIBUTES):
-            try:
-                _sort_by([g], attr)
-                reachable.append(attr)
-            except ValueError:
-                pass
-        assert not reachable, f"denied attributes reachable via sort_by: {reachable}"
-
-    def test_dunder_keys_are_refused(self):
-        from lackpy.run.runner import _sort_by
-
-        with pytest.raises(ValueError, match="refusing attribute"):
-            _sort_by([object()], "__class__")
-
-    def test_ordinary_keys_still_work(self):
-        """The guard must not cost the feature: dicts and plain attributes."""
-        from lackpy.run.runner import _sort_by
-
-        assert _sort_by([{"n": 2}, {"n": 1}], "n") == [{"n": 1}, {"n": 2}]
-        assert _sort_by([{"n": 1}, {"n": 2}], "n", reverse=True)[0] == {"n": 2}
-
-    def test_a_mapping_key_is_data_not_a_namespace(self):
-        """Dict subscripting is deliberately untouched by the guard.
-
-        Same reason printf-style `%` is not a sink of this class: "%(k)s" %
-        mapping resolves via __getitem__, not getattr.
-        """
-        from lackpy.run.runner import _sort_by
-
-        rows = [{"__class__": 2}, {"__class__": 1}]
-        assert _sort_by(rows, "__class__") == [{"__class__": 1}, {"__class__": 2}]
+    @pytest.mark.parametrize("name", _NAMESPACE_KEYS)
+    def test_param_named_like_a_namespace_name_binds_nothing(self, runner, name):
+        program = f'params = {{"{name}": "default"}}\nx = params["{name}"]\ny = len(str(type(1)))'
+        result = runner.run(program, params={name: "caller value"})
+        assert result.success, result.error
+        assert result.variables["x"] == "caller value"
+        assert result.variables["y"] == len("<class 'int'>")

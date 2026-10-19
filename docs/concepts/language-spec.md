@@ -1,214 +1,99 @@
 # Language Spec
 
-## Design philosophy
+A lackpy program is a plain Python 3 program. It runs unchanged under CPython
+with only the standard library, from the workspace directory. It gives the same
+output there as inside lackpy. Inside lackpy it can only do less: a refusal is
+an error, never a different result.
 
-lackpy programs are Jupyter notebook cells, not scripts. They:
+This page is a summary. Two generated sources hold the full rules, so this page
+does not copy them:
 
-- Use pre-loaded names from the kit (tools) and builtins — there is no import system.
-- Assign tool results to variables and compose them using expressions.
-- Return a value by placing an expression on the last line.
-- Are validated entirely at the AST level before any code runs.
-
-The guiding principle is: **make the dangerous things impossible, not just forbidden**. A string `"import os"` is forbidden by the AST check — not by a blacklist scan of the source text.
-
----
-
-## Allowed constructs
-
-### Structural
-
-| Construct | AST nodes |
-|-----------|-----------|
-| Assignments | `Assign`, `AugAssign` |
-| `if` / `elif` / `else` | `If` |
-| `for` loops (restricted) | `For` |
-| `with` blocks | `With` |
-| Expression statements | `Expr` |
-
-### Expressions
-
-| Construct | AST nodes |
-|-----------|-----------|
-| Function calls | `Call` |
-| Name lookups | `Name` |
-| Attribute access | `Attribute` |
-| Subscript / slice | `Subscript`, `Slice` |
-| Literals | `Constant` |
-| Lists, dicts, tuples, sets | `List`, `Dict`, `Tuple`, `Set` |
-| List / dict / set comprehensions | `ListComp`, `DictComp`, `SetComp` |
-| Generator expressions | `GeneratorExp` |
-| Conditional expression | `IfExp` |
-| f-strings | `JoinedStr`, `FormattedValue` |
-| Binary ops | `BinOp` with `Add`, `Sub`, `Mult`, `Div`, `Mod`, `FloorDiv` |
-| Comparisons | `Compare` with `Eq`, `NotEq`, `Lt`, `LtE`, `Gt`, `GtE`, `Is`, `IsNot`, `In`, `NotIn` |
-| Boolean ops | `BoolOp` with `And`, `Or` |
-| Unary ops | `UnaryOp` with `Not`, `USub`, `UAdd` |
-| Starred args | `Starred` |
-
-### Allowed builtins
-
-```python
-len, sorted, reversed, enumerate, zip, range, next,
-min, max, sum, any, all, abs, round,
-str, int, float, bool, list, dict, set, tuple,
-isinstance, print
-```
-
-These are the only names available from the standard `builtins` module at runtime.
+- The [style guide](../reference/style-guide.md) lists every rule, with its
+  tier, the reason for it, and an approved and a not-approved example.
+  `lackpy.lang.spec.format_style_guide()` generates it from the rule registry.
+- The pre-prompt is the page that teaches a model to write lackpy.
+  `lackpy.lang.spec.format_preprompt()` generates it. The
+  [tutorial](../tutorial.md) runs its three worked examples.
 
 ---
 
-## Forbidden constructs
+## The two tiers
 
-| Construct | AST node | Why |
-|-----------|----------|-----|
-| `import` | `Import` | Arbitrary module access |
-| `from ... import` | `ImportFrom` | Arbitrary module access |
-| `def` | `FunctionDef` | Code definition escapes namespace control |
-| `async def` | `AsyncFunctionDef` | Same as `def` |
-| `class` | `ClassDef` | Object system bypasses namespace |
-| `lambda` | `Lambda` | Anonymous function, same issue as `def` |
-| `while` | `While` | Unbounded loops |
-| `try` / `except` | `Try`, `ExceptHandler` | Error suppression can mask violations |
-| `raise` | `Raise` | Exception injection |
-| `global` | `Global` | Scope escape |
-| `nonlocal` | `Nonlocal` | Scope escape |
-| `yield` / `yield from` | `Yield`, `YieldFrom` | Generator creation |
-| `await` | `Await` | Async context bypass |
-| `async for` | `AsyncFor` | Async context bypass |
-| `async with` | `AsyncWith` | Async context bypass |
-| `assert` | `Assert` | Inconsistent in optimized mode |
-| `del` | `Delete` | Namespace mutation |
-| `match` | `Match` | Not in allowed set (Python 3.10+) |
+Each rule has one of two tiers:
+
+- A **safety** rule protects the sandbox. Nothing waives it.
+- A **style** rule keeps programs short and uniform. A waiver can lift it.
+
+A waiver is a comment, `# ste: <rule-id>, <why>`, on one statement. The why is
+required. A waiver that names a safety rule is an error.
+
+Without the waiver, this program breaks `style.call-nesting` (a call nests at
+most 3 deep). With it, the program is valid:
+
+```python
+words = ["a", "b", "a"]
+print(len(sorted(set(words))))  # ste: style.call-nesting, a short count
+```
 
 ---
 
-## Forbidden names
+## What a program can use
 
-The following names are rejected even if they appear as a `Name` node (i.e. as a plain variable reference, not just a call):
+- **Imports:** `pathlib` (`Path`), `json`, `re`, `collections`, `math`,
+  `statistics`, `hashlib`, `datetime`. Only some members of each module are
+  approved. The style guide has the list.
+- **Files:** `pathlib.Path` only, under the [path policy](paths.md). `open()`
+  and `os` are not approved.
+- **Control flow:** `if`, `for`, `break`, `continue`, `assert`, top-level
+  `def`, and `try` with a named error.
+- **Builtins:** an approved set, such as `len`, `sorted`, `print`, `range`,
+  `enumerate`, `zip`, `min`, `max`, `sum`. The style guide has the list.
 
-```python
-__import__, open,
-globals, locals, vars, dir,
-getattr, setattr, delattr, hasattr,
-__builtins__, __build_class__,
-breakpoint, exit, quit,
-type, super, classmethod, staticmethod, property,
-memoryview, bytearray, bytes,
-map, filter, reduce,
-input
+## What a program cannot use
+
+| Not in the language | Use instead |
+| --- | --- |
+| `while`, `class`, `global`, `nonlocal` | a `for` loop, a dict, a returned value |
+| `except Exception:`, a bare `except:` | name the error: `except KeyError:` |
+| `finally:`, `else:` on a `try` | put cleanup code after the `try` block |
+| `raise`, `exit()` | `assert cond, "why it must hold"` |
+| `open(p)`, `json.load(f)` | `Path(p).read_text()`, `json.loads(text)` |
+| `map`, `filter`, `format` | a comprehension, an f-string |
+| `getattr`, `eval`, `exec`, `__import__` | nothing: reflection is not in the language |
+
+This program shows a handler that the validator refuses:
+
+```python title="Refused: except Exception"
+import json
+
+try:
+    data = json.loads("x")
+except Exception:
+    data = None
+print(data)
 ```
 
-`open` is forbidden because file I/O should go through kit tools (which are traced and namespaced). `getattr` / `setattr` and friends are forbidden because they provide a reflection escape hatch. `map`, `filter`, and `reduce` encourage a functional style that is harder to trace; use list comprehensions instead.
-
-### Generator expressions and `next`
-
-`GeneratorExp` is allowed and `next` is a permitted builtin, so the idiomatic
-"first match" forms work:
-
-```python
-next(x for x in items if x["name"] == target)
-any(x["failed"] for x in runs)
-sum(len(f) for f in files)
+```text
+Forbidden except of 'Exception' at line 5 (catch a subclass of Exception that is not a limit signal, for example KeyError)
 ```
-
-Previously only `[x for x in items if …][0]` was legal, which was inconsistent —
-`any`, `all`, `sum`, `min`, `max` and `sorted` are all permitted builtins and a
-generator expression is the idiomatic argument to every one of them.
-
-**Loops still cannot break.** `Break`, `Continue`, `While` and `Try` remain
-forbidden, so `for … if … break` is not an alternative; use `next(...)` or a
-comprehension.
-
-!!! warning "`DENIED_ATTRIBUTES` is load-bearing, not defense-in-depth"
-
-    A generator object *can* now be constructed, so `gi_frame`, `gi_code`,
-    `f_globals` and `f_builtins` are reachable by name. They are rejected by the
-    attribute guard, and that guard is the only thing keeping
-    `(x for x in y).gi_frame.f_globals` out of reach — it is no longer merely a
-    second line of defence. `TestGeneratorFrameEscapes` asserts each of those
-    rejections. Do not prune the list.
-
----
-
-## Additional checks
-
-### Namespace check
-
-Every function call of the form `name(...)` (where `name` is an `ast.Name` node) must be either in the kit's tool names or in `ALLOWED_BUILTINS`. Method calls (`obj.method(...)`) are not namespace-checked — they are allowed if the receiver is a valid expression.
-
-### For-loop iterator
-
-```python
-# Valid
-for item in read_lines(path):
-    ...
-
-for item in items:
-    ...
-
-# Invalid — literal list as iterator
-for item in [1, 2, 3]:
-    ...
-```
-
-The iterator expression in a `for` loop must be either a `Call` or a `Name`. This prevents programs from embedding arbitrary data as loop iterators. If you need to iterate over a literal, assign it first:
-
-```python
-items = [1, 2, 3]
-for item in items:
-    ...
-```
-
-### Dunder strings are permitted
-
-A string constant containing `__` is ordinary data:
-
-```python
-write_file("src/pkg/__init__.py", "")
-write_file("m.py", 'if __name__ == "__main__":\n    pass\n')
-```
-
-lackpy previously rejected every such string, which meant a program could neither
-create nor read a Python package, emit a `__main__` guard, nor generate a class
-with a `def __init__`.
-
-The rule existed to stop `getattr(obj, "__class__")` → `__bases__` →
-`__subclasses__()`. That chain is closed independently and more completely:
-`getattr`, `setattr`, `vars`, `globals`, `type` and `__import__` are all forbidden
-names, `eval`/`exec`/`compile` are not permitted builtins, so **no call can turn a
-string into an attribute lookup**; and direct `obj.__class__` is rejected by the
-underscore-prefix rule regardless of any string. The old rule was also bypassable
-by splitting the literal (`"_" + "_class_" + "_"`), so it never carried the weight
-it appeared to.
-
-Attribute access is unchanged — `obj.__class__` is still rejected. Only the
-blanket rejection of dunder *strings* is gone. `TestDunderStringsAreNotASink`
-asserts each step of the reflection chain remains closed.
 
 ---
 
 ## Machine-readable spec
 
-The current grammar is also available as JSON:
+`lackpyctl spec` prints the spec as JSON. It holds the allowed node types, the
+allowed builtins and the rules:
 
 ```bash
 lackpyctl spec
 ```
 
-```json
-{
-  "allowed_nodes": ["Module", "Expr", "Assign", "..."],
-  "forbidden_nodes": ["Import", "FunctionDef", "..."],
-  "forbidden_names": ["__import__", "open", "..."],
-  "allowed_builtins": ["len", "sorted", "..."]
-}
-```
+The MCP server gives the same data as the resource `lackpy://language-spec`.
 
 ---
 
 ## Custom rules
 
-The built-in checks can be supplemented with custom rules. A rule is a callable `(ast.Module) -> list[str]` — return an empty list to pass, or one or more error strings to fail.
-
-See [Extending: Custom Rules](../extending/custom-rules.md) for details.
+A custom rule makes the validator stricter. A rule is a callable that takes an
+`ast.Module` and returns a list of error strings. See
+[Extending: Custom Rules](../extending/custom-rules.md).

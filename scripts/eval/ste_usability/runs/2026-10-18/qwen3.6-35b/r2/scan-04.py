@@ -1,0 +1,28 @@
+# /// intent
+# goal   = "Print every file suffix used under src with the number of files that have it, sorted by suffix."
+# reads  = ["src"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+from collections import Counter
+
+config_path = Path('data/config.json')
+config_text = config_path.read_text()
+config = json.loads(config_text)
+
+src_dir = Path('src')
+suffixes = Counter()
+
+for entry in src_dir.iterdir():
+    if entry.is_file():
+        suffix = entry.suffix.lstrip('.')
+        if suffix:
+            suffixes[suffix] += 1
+
+sorted_suffixes = sorted(suffixes.items())
+
+for suffix, count in sorted_suffixes:
+    print(f"{suffix} {count}")

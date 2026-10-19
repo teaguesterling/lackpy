@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from .trace import Trace
 
@@ -43,6 +43,6 @@ class ExecutionResult:
 
 class Executor(Protocol):
     def run(
-        self, program: str, namespace: dict[str, Callable],
-        params: dict[str, Any] | None = None,
+        self, program: str, *, params: dict[str, Any] | None = None,
+        program_file: str | None = None, path_policy: Any = None,
     ) -> ExecutionResult: ...

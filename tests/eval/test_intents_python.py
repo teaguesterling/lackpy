@@ -30,11 +30,15 @@ def test_every_intent_has_nonempty_text():
 
 def test_gates_accept_known_good_programs():
     # A minimal valid program should pass every python gate
-    good = "files = find_files('**/*.py')\nfiles"
+    good_programs = [
+        "files = find_files('**/*.py')\nfiles",
+        "def foo():\n    return 1\nfoo()",  # top-level def is valid (Task 7)
+    ]
     for i in PYTHON_INTENTS:
-        result = i.structural_gate(good)
-        assert isinstance(result, GateResult)
-        assert result.passed, f"{i.id} unexpectedly rejected known-good program: {result.errors}"
+        for good in good_programs:
+            result = i.structural_gate(good)
+            assert isinstance(result, GateResult)
+            assert result.passed, f"{i.id} unexpectedly rejected known-good program: {result.errors}"
 
 
 def test_gates_reject_invalid_programs():
@@ -44,7 +48,6 @@ def test_gates_reject_invalid_programs():
     """
     bad_programs = [
         "import os\nos.listdir('.')",           # import forbidden
-        "def foo():\n    return 1\nfoo()",        # def forbidden
         "class Foo:\n    pass\nFoo()",            # class forbidden
         "getattr(read_file, '__code__')",         # dunder access forbidden
         "unknown_tool('x')",                      # name not in kit

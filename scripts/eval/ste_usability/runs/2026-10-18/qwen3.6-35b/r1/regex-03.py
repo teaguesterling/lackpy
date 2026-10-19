@@ -1,0 +1,17 @@
+# /// intent
+# goal   = "Replace every 'code=XNN' with 'code=[XNN]' in logs/app.log and write the result to logs/app.marked.log."
+# reads  = ["logs/app.log"]
+# writes = ["logs/app.marked.log"]
+# output = "none"
+# ///
+
+import re
+from pathlib import Path
+
+def process_log(source, target):
+    """Read log, replace code patterns, write result."""
+    text = Path(source).read_text()
+    result = re.sub(r'code=([A-Z])(\d+)', lambda m: f"code=[{m.group(1)}{m.group(2)}]", text)
+    Path(target).write_text(result)
+
+process_log("logs/app.log", "logs/app.marked.log")

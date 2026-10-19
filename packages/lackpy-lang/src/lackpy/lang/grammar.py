@@ -2,10 +2,17 @@
 
 import ast
 
+from .builtins_policy import allowed_builtin_names
+
 ALLOWED_NODES: set[type] = {
     # Structural
     ast.Module, ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign,
     ast.For, ast.If, ast.With, ast.withitem,
+    ast.Assert, ast.Continue, ast.Break, ast.Pass,
+    # Top-level def, with the style.def-* rules (Yield, Global and Nonlocal stay forbidden)
+    ast.FunctionDef, ast.Return,
+    # try with named errors, with the style.try-* rules and safety.except-base (TryStar stays forbidden)
+    ast.Try, ast.ExceptHandler,
     # Expressions
     ast.Call, ast.Name, ast.Attribute, ast.Subscript,
     ast.List, ast.Dict, ast.Tuple, ast.Set,
@@ -20,29 +27,33 @@ ALLOWED_NODES: set[type] = {
     ast.Lambda, ast.arguments, ast.arg,
     # Keyword arguments
     ast.keyword,
+    # Imports (only dictionary modules, in the approved forms — safety.import)
+    ast.Import, ast.ImportFrom, ast.alias,
     # Context nodes
     ast.Load, ast.Store, ast.Del,
     # Operators
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.FloorDiv,
+    ast.BitAnd, ast.BitOr, ast.BitXor,
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
     ast.Is, ast.IsNot, ast.In, ast.NotIn,
     ast.And, ast.Or, ast.Not, ast.USub, ast.UAdd,
 }
 
 FORBIDDEN_NODES: set[type] = {
-    ast.Import, ast.ImportFrom,
-    ast.FunctionDef, ast.AsyncFunctionDef,
+    ast.AsyncFunctionDef,
     ast.ClassDef,
     ast.While,
-    ast.Try, ast.ExceptHandler,
     ast.Raise,
     ast.Global, ast.Nonlocal,
     ast.Yield, ast.YieldFrom,
     ast.Await, ast.AsyncFor, ast.AsyncWith,
-    ast.Assert,
     ast.Delete,
     ast.Match,
 }
+
+# except* parses from Python 3.11; this package supports 3.10.
+if hasattr(ast, "TryStar"):
+    FORBIDDEN_NODES.add(ast.TryStar)
 
 FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "__import__", "open",
@@ -50,12 +61,14 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
     "getattr", "setattr", "delattr", "hasattr",
     "__builtins__", "__build_class__",
     "breakpoint", "exit", "quit",
-    "type", "super", "classmethod", "staticmethod", "property",
+    # `type` is not here: safety.type-form owns every use of that name.
+    "super", "classmethod", "staticmethod", "property",
     "memoryview", "bytearray", "bytes",
     "map", "filter", "reduce",
     "input",
-    # stdlib modules that models reach for instead of using kit tools (issue #4)
-    "os", "sys", "pathlib", "subprocess", "shutil",
+    # stdlib modules that models reach for instead of using kit tools (issue #4).
+    # pathlib is an approved module now (dictionary.MODULES).
+    "os", "sys", "subprocess", "shutil",
 })
 
 # Attribute names that are always denied, even without an underscore prefix.
@@ -66,13 +79,19 @@ FORBIDDEN_NAMES: frozenset[str] = frozenset({
 #
 # These names have NO leading underscore, so the prefix rule would miss them. They
 # are frame/generator/coroutine/traceback internals that expose a real namespace
-# (``f_globals``/``f_builtins``). They were previously unreachable by construction
-# (no GeneratorExp / Try / Raise / sys => no frame, generator, or traceback object
-# could be built). GeneratorExp is now in the subset, so a generator object CAN be
-# constructed and this list is the live guard rather than defense-in-depth: it is
-# what keeps ``(x for x in y).gi_frame.f_globals`` unreachable. Do not prune it.
-# Try / Raise / sys remain excluded, so frames and tracebacks still cannot be
-# obtained by any other route.
+# (``f_globals``/``f_builtins``). GeneratorExp is in the subset, so a generator
+# object CAN be constructed, and this list is what keeps
+# ``(x for x in y).gi_frame.f_globals`` unreachable. Do not prune it.
+#
+# Try is allowed now (Task 8), so ``except E as e`` gives a program an exception
+# object. The guards on that object are: ``__traceback__`` (and every other
+# underscore attribute) by the prefix rule, ``tb_frame`` and ``tb_next`` here for
+# a traceback reached by any route (``e.with_traceback(None)`` returns the
+# exception, not a traceback), ``mro`` here for the exception class, and ``obj``
+# here because ``AttributeError.obj`` holds the object that lacked the
+# attribute, which can be any object, a module included. ``name``, ``path`` and
+# ``args`` stay allowed: ``ImportError.name``/``.path`` are strings, and ``name``
+# is a ``Path`` member. Raise and sys remain excluded.
 DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     "f_globals", "f_builtins", "f_locals", "f_code", "f_back",
     "gi_frame", "gi_code", "cr_frame", "cr_code",
@@ -88,13 +107,10 @@ DENIED_ATTRIBUTES: frozenset[str] = frozenset({
     # reason format is not: their interpolations are real AST expressions and go
     # through the attribute rule like anything else.
     "format", "format_map",
+    # Class.mro() walks to `object` and from there to every subclass.
+    "mro",
+    # AttributeError.obj: the object that lacked the attribute (any object).
+    "obj",
 })
 
-ALLOWED_BUILTINS: frozenset[str] = frozenset({
-    "len", "sorted", "reversed", "enumerate", "zip", "range",
-    "min", "max", "sum", "any", "all", "abs", "round",
-    "str", "int", "float", "bool", "list", "dict", "set", "tuple",
-    "isinstance", "print",
-    "next",
-    "sort_by",
-})
+ALLOWED_BUILTINS: frozenset[str] = allowed_builtin_names()

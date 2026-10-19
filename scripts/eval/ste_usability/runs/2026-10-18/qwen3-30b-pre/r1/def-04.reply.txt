@@ -1,0 +1,19 @@
+```python
+# /// intent
+# goal   = "Extract and print the heading lines (those starting with '#') from notes.md"
+# reads  = ["notes.md"]
+# writes = []
+# output = "printed"
+# ///
+
+from pathlib import Path
+
+def get_headings(text):
+    return [line for line in text.splitlines() if line.strip().startswith('#')]
+
+path = Path("notes.md")
+text = path.read_text()
+headings = get_headings(text)
+for line in headings:
+    print(line)
+```

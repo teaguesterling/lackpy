@@ -1,0 +1,26 @@
+# /// intent
+# goal   = "Count characters in each .cpp file under src and write report.txt"
+# reads  = ["src/*.cpp"]
+# writes = ["report.txt"]
+# output = "none"
+# ///
+
+from pathlib import Path
+
+
+def char_count(path):
+    text = path.read_text()
+    return len(text)
+
+
+src_path = Path("src")
+paths = list(src_path.glob("*.cpp"))
+paths = sorted(paths, key=lambda p: p.name)
+
+lines = []
+for p in paths:
+    n = char_count(p)
+    lines.append(f"{p.name}: {n}")
+
+result = "\n".join(lines) + "\n"
+Path("report.txt").write_text(result)

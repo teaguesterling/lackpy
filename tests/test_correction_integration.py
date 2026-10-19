@@ -21,6 +21,7 @@ def service(workspace):
 
 
 class TestCorrectionInDelegate:
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; generation (correction chain) migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_delegate_returns_correction_info(self, service):
         result = await service.delegate("read file test.txt", profile=["read_file"])
@@ -28,12 +29,14 @@ class TestCorrectionInDelegate:
         assert "correction_strategy" in result
         assert "correction_attempts" in result
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; generation (correction chain) migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_correction_fields_have_correct_types(self, service):
         result = await service.delegate("read file test.txt", profile=["read_file"])
         assert result["correction_strategy"] is None or isinstance(result["correction_strategy"], str)
         assert isinstance(result["correction_attempts"], int)
 
+    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; generation (correction chain) migration pending", strict=True)
     @pytest.mark.asyncio
     async def test_program_override_has_correction_defaults(self, service):
         """_program_override path should have None/0 correction fields."""

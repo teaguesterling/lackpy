@@ -1,0 +1,31 @@
+```python
+# /// intent
+# goal   = "Print each distinct error code from ERROR lines in logs/app.log with its frequency, sorted by code."
+# reads  = ["logs/app.log"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from collections import Counter
+from pathlib import Path
+
+# Read the log file
+text = Path("logs/app.log").read_text()
+
+# Count error codes from lines that start with "ERROR"
+counts = Counter()
+for line in text.splitlines():
+    if line.startswith("ERROR"):
+        # Extract the error code (after 'code=')
+        start = line.find("code=")
+        if start != -1:
+            code = line[start + 5:]  # Skip "code="
+            # Extract the code until the next space or end of line
+            code = code.split()[0] if ' ' in code else code
+            counts[code] += 1
+
+# Print results sorted by error code
+for code in sorted(counts):
+    print(code, counts[code])
+```

@@ -35,7 +35,10 @@ async def test_generate_routes_model_and_params(calls):
     assert call["model"] == "ollama/qwen2.5-coder:1.5b"
     assert call["kw"]["params"] == {"temperature": 0.2}
     assert [m["role"] for m in call["messages"]] == ["system", "user"]
-    assert "kernel.select(x)" in call["messages"][0]["content"]
+    # stepy100 Task 8: the system prompt is the lackpy prompt; a namespace
+    # description is not taught (no run binds a tool). Kit-era: asserted it was.
+    from lackpy.infer.prompt import build_system_prompt
+    assert call["messages"][0]["content"] == build_system_prompt("")
     assert call["messages"][1]["content"] == "count rows"
 
 

@@ -1,0 +1,22 @@
+```python
+# /// intent
+# goal   = "Print the contents of missing.txt, or the word 'absent' if the file does not exist."
+# reads  = ["missing.txt"]
+# writes = []
+# output = "printed"
+# ///
+
+import json
+from pathlib import Path
+
+p = Path('missing.txt')
+try:
+    text = p.read_text()
+except FileNotFoundError:
+    text = None
+
+if text is None:
+    print('absent')
+else:
+    print(text)
+```

@@ -1,0 +1,21 @@
+```python
+# /// intent
+# goal   = "Replace every 'code=XNN' with 'code=[XNN]' in logs/app.log and write the result to logs/app.marked.log"
+# reads  = ["logs/app.log"]
+# writes = ["logs/app.marked.log"]
+# output = "none"
+# ///
+
+from pathlib import Path
+import re
+
+# Read the log file
+text = Path("logs/app.log").read_text()
+
+# Replace 'code=XNN' with 'code=[XNN]' using regex
+# X is a letter, NN are digits, and we want to preserve the original structure
+modified_text = re.sub(r'code=([A-Z][0-9]{2})', r'code=[\1]', text)
+
+# Write the modified content to the output file
+Path("logs/app.marked.log").write_text(modified_text)
+```
