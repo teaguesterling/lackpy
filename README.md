@@ -83,7 +83,13 @@ asyncio.run(main())
 ```
 
 The MCP server (`lackpyctl mcp serve`, with `pip install lackpy[mcp]`) gives the same
-two actions as the `run_program` and `delegate` tools.
+two actions as the `run_program` and `delegate` tools. It also has the tools
+`generate`, `validate` and `create`, and the resources `lackpy://config`,
+`lackpy://providers` and `lackpy://language-spec`.
+
+The kit-era MCP tools `profile_create`, `profile_info`, `docs_index` and
+`resolve_doc`, and the resources `lackpy://toolbox` and `lackpy://profiles`,
+were removed with the tool kits.
 
 ## Install
 
