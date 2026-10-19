@@ -12,10 +12,11 @@ import types
 
 import pytest
 
-from lackpy.lang import dictionary
+from lackpy.lang import dictionary, validate
 from lackpy.run.modules import ModuleProxy, make_restricted_import
 from lackpy.run.namespace import build_namespace
 from lackpy.run.refusal import LackpyRefusal
+from lackpy.run.runner import RestrictedRunner
 
 
 @pytest.fixture
@@ -108,30 +109,91 @@ class TestModuleProxy:
         assert repr(imp("json")) == repr(json)
 
 
+# Expressions over the collections classes, compared with plain Python (review M4, I1).
+COLLECTIONS_EXPRESSIONS = [
+    "repr(Counter())",
+    "repr(Counter('abca'))",
+    "repr(Counter('a') + Counter('b'))",
+    "repr(Counter('aab') - Counter('a'))",
+    "repr(Counter('ab') | Counter('a'))",
+    "repr(Counter('ab') & Counter('a'))",
+    "isinstance(Counter('a') + Counter('b'), Counter)",
+    "isinstance(Counter('aab') - Counter('a'), Counter)",
+    "isinstance(Counter('ab').copy(), Counter)",
+    "repr(defaultdict(int))",
+    "repr(defaultdict(Counter))",
+    "repr(defaultdict(list, {'a': [1]}))",
+    "isinstance(defaultdict(int) | {'a': 1}, defaultdict)",
+    "repr(deque())",
+    "repr(deque([1, 2, 3], maxlen=2))",
+    "repr(deque([1]) + deque([2]))",
+    "repr(OrderedDict())",
+    "repr(OrderedDict(a=1))",
+    "isinstance(OrderedDict(a=1) | {'b': 2}, OrderedDict)",
+    "repr(Counter)",
+    "repr(defaultdict)",
+]
+
+
 class TestCollectionsClasses:
     @pytest.mark.parametrize("name", ["Counter", "defaultdict", "deque", "OrderedDict"])
-    def test_fresh_subclass_per_run(self, name):
-        base = getattr(collections, name)
-        first = getattr(make_restricted_import()("collections"), name)
-        second = getattr(make_restricted_import()("collections"), name)
-        assert first is not base and first is not second
-        assert issubclass(first, base)
-        assert first.__name__ == base.__name__
-        assert first.__qualname__ == base.__qualname__
+    def test_serves_the_real_class(self, imp, name):
+        # Ruling (Review Focus 5 re-ruled): a subclass made Counter + Counter the
+        # base class, a different result from plain Python.
+        assert getattr(imp("collections"), name) is getattr(collections, name)
 
-    def test_reprs_match_plain_python(self, imp):
-        c = imp("collections")
-        assert repr(c.Counter("ab")) == repr(collections.Counter("ab"))
-        assert repr(c.deque([1])) == repr(collections.deque([1]))
-        assert repr(c.defaultdict(int)) == repr(collections.defaultdict(int))
-        assert repr(c.OrderedDict(a=1)) == repr(collections.OrderedDict(a=1))
+    @pytest.mark.parametrize("expression", COLLECTIONS_EXPRESSIONS)
+    def test_matches_plain_python(self, expression):
+        program = f"from collections import Counter, defaultdict, deque, OrderedDict\n{expression}"
+        result = RestrictedRunner().run(program, namespace={})
+        assert result.success, result.error
+        plain = eval(expression, {  # noqa: S307
+            "Counter": collections.Counter, "defaultdict": collections.defaultdict,
+            "deque": collections.deque, "OrderedDict": collections.OrderedDict,
+            "repr": repr, "isinstance": isinstance,
+        })
+        assert result.output == plain
 
-    def test_class_state_does_not_cross_runs(self):
-        first = make_restricted_import()("collections").Counter
-        first.marker = 1
-        second = make_restricted_import()("collections").Counter
-        assert not hasattr(second, "marker")
-        assert not hasattr(collections.Counter, "marker")
+    @pytest.mark.parametrize("program", [
+        "from collections import Counter\nCounter.x = 1",
+        "from collections import Counter\nC = Counter\nC.most_common = len",
+        "import collections\ncollections.Counter.x = 1",
+    ])
+    def test_class_attribute_store_is_rejected(self, program):
+        # The Review Focus 5 guard: the real class is shared by every run, so no
+        # validated program may store an attribute on it.
+        assert not validate(program).valid
+
+    @pytest.mark.parametrize("name", ["setattr", "delattr", "getattr", "vars"])
+    def test_no_reflection_builtin_can_store(self, name):
+        assert name not in build_namespace(program_file=None, print_fn=print)["__builtins__"]
+
+
+class TestNoRouteToTheRealModule:
+    # Review M1: no attribute of a proxy may reach the real module.
+    @pytest.mark.parametrize("name", [
+        "_lackpy_module", "_lackpy_name", "_lackpy_members", "_module", "_members",
+    ])
+    def test_internal_names_do_not_give_the_module(self, imp, name):
+        proxy = imp("json")
+        try:
+            value = getattr(proxy, name)
+        except (AttributeError, LackpyRefusal):
+            return
+        pytest.fail(f"proxy.{name} gave {value!r}")
+
+    @pytest.mark.parametrize("name", ["_lackpy_module", "_lackpy_name", "_lackpy_members"])
+    def test_from_import_of_an_internal_name_fails(self, name):
+        result = RestrictedRunner().run(f"from json import {name}\nrepr({name})", namespace={})
+        assert not result.success
+        assert "<module" not in str(result.output)
+
+    def test_proxy_holds_no_instance_state(self, imp):
+        proxy = imp("json")
+        for slot in type(proxy).__slots__:
+            if slot == "__weakref__":
+                continue
+            assert not hasattr(proxy, slot), slot
 
 
 class TestNamespace:
@@ -146,4 +208,4 @@ class TestNamespace:
         b = build_namespace(program_file=None, print_fn=print)
         exec("import collections", a)  # noqa: S102
         exec("import collections", b)  # noqa: S102
-        assert a["collections"].Counter is not b["collections"].Counter
+        assert a["collections"] is not b["collections"]
