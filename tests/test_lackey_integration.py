@@ -21,8 +21,6 @@ def service(workspace):
 
 class TestFullRoundtrip:
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="stepy100 Task 8 rewrites generation", strict=True)
     async def test_generate_create_parse_run(self, service, workspace):
         # 1. Generate a program via rules
         # Retired kit model: generated with profile=["read_file"] and asserted

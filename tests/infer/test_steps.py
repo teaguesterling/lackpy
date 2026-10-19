@@ -249,7 +249,10 @@ class TestSolveStep:
 
 class TestPickStep:
     @pytest.mark.asyncio
-    async def test_picks_glob_and_read(self):
+    async def test_picks_only_direct_calls(self):
+        # stepy100 Task 8: the kit-era test also picked find_files from the text
+        # "glob.find_files(" through a stdlib-to-kit pattern table. That table is
+        # retired; only a direct call of a granted name counts.
         ctx = _ctx_with_program(
             "import glob\nfiles = glob.find_files('**/*.py')\n"
             "for f in files:\n    content = read_file(f)\n    print(len(content))",
@@ -258,19 +261,20 @@ class TestPickStep:
         step = PickStep()
         ctx = await step.run(ctx)
         derived_tools = set(ctx.current.tools.tools.keys())
-        assert "find_files" in derived_tools
-        assert "read_file" in derived_tools
-        assert "write_file" not in derived_tools
+        assert derived_tools == {"read_file"}
 
     @pytest.mark.asyncio
-    async def test_picks_from_open_pattern(self):
+    async def test_open_does_not_imply_a_kit_tool(self):
+        # stepy100 Task 8: the kit-era test mapped open() to read_file. A program
+        # reads files through pathlib.Path, so stdlib I/O implies no tool.
         ctx = _ctx_with_program(
-            "with open('README.md') as f:\n    content = f.read_file()",
+            "from pathlib import Path\nwith open('README.md') as f:\n    content = f.read()\n"
+            "text = Path('a').read_text()",
             tools=_make_kit(["read_file", "find_files"]),
         )
         step = PickStep()
         ctx = await step.run(ctx)
-        assert "read_file" in ctx.current.tools.tools
+        assert ctx.current.tools.tools == {}
 
     @pytest.mark.asyncio
     async def test_preserves_program_text(self):

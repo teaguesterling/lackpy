@@ -20,7 +20,6 @@ REPO = Path(__file__).resolve().parents[1]
 
 READ = "from pathlib import Path\nx = Path('test.txt').read_text()\nlen(x)"
 
-_GENERATION = pytest.mark.xfail(reason="stepy100 Task 8 rewrites generation", strict=True)
 _LITERATE = pytest.mark.xfail(
     reason="kit removed in stepy100 Plan 2; literate migration pending", strict=True)
 
@@ -70,7 +69,6 @@ class TestValidate:
 
 
 class TestGenerate:
-    @_GENERATION
     @pytest.mark.asyncio
     async def test_generate_with_rules(self, service):
         # Retired kit model: asserted "read_file(" in the program.
@@ -225,7 +223,6 @@ class TestRunProgram:
 
 
 class TestDelegate:
-    @_GENERATION
     @pytest.mark.asyncio
     async def test_delegate_simple(self, service):
         # Retired kit model: asserted "read_file" in the program.
@@ -248,6 +245,49 @@ class TestDelegate:
         result = await service.delegate("x", _program_override="y = 1", params={"prefix": "hello"})
         assert not result["success"]
         assert "'prefix'" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_delegate_with_params_teaches_and_runs_the_literal(self, service):
+        # Task 8 (ruling b): the prompt teaches the params literal; the passed
+        # value replaces the default the generator wrote.
+        seen = {}
+
+        class _Model:
+            name = "fake"
+
+            def available(self):
+                return True
+
+            async def generate(self, intent, namespace_desc, system_prompt_override=None, **kw):
+                seen["system"] = system_prompt_override
+                return "params = {'prefix': 'hello'}\nprint(params['prefix'])"
+
+        service._inference_providers[:] = [_Model()]
+        result = await service.delegate("print the prefix", params={"prefix": "bye"})
+        assert result["success"], result["error"]
+        assert result["stdout"] == "bye\n"
+        assert "params = {'prefix': 'bye'}" in seen["system"]
+
+    @pytest.mark.asyncio
+    async def test_generate_does_not_admit_a_bare_param_name(self, service):
+        # Task 8 (ruling b): params bind no bare names, so the generator's
+        # validation must not allow them either.
+        class _Model:
+            name = "fake"
+
+            def available(self):
+                return True
+
+            async def generate(self, intent, namespace_desc, **kw):
+                return "prefix()"  # a call: only allowed names may be called
+
+        service._inference_providers[:] = [_Model()]
+        with pytest.raises(RuntimeError):
+            await service.generate("print the prefix", params={"prefix": "bye"})
+
+    def test_validate_takes_no_param_names(self, service):
+        import inspect
+        assert "param_names" not in inspect.signature(service.validate).parameters
 
     @pytest.mark.asyncio
     async def test_delegate_runs_a_path_program(self, service):
@@ -667,13 +707,9 @@ class TestLiterateGenerationRouting:
             raise AssertionError("_generate_literate must not run for a one-shot profile")
 
         monkeypatch.setattr(service, "_generate_literate", boom)
-        # Retired kit model: asserted "read_file(" in the program. Until Task 8
-        # the rules provider emits kit calls, which fail validation (RuntimeError);
-        # either way the literate path must not run.
-        try:
-            await service.generate("read file test.txt")
-        except RuntimeError:
-            pass
+        # Retired kit model: asserted "read_file(" in the program.
+        result = await service.generate("read file test.txt")
+        assert "Path(" in result.program
 
 
 class TestStripLiterateWrapper:
@@ -789,10 +825,10 @@ class TestResolveParams:
     """Review M7: only the single-key {"value": x} shape is unwrapped; dict params are data."""
 
     def test_single_key_value_shape_is_unwrapped(self, service):
-        values, _, _ = service._resolve_params({"n": {"value": 3}})
+        values, _ = service._resolve_params({"n": {"value": 3}})
         assert values == {"n": 3}
 
     def test_dict_param_with_a_value_key_is_kept(self, service):
         cfg = {"value": 1, "k": 2}
-        values, _, _ = service._resolve_params({"cfg": cfg})
+        values, _ = service._resolve_params({"cfg": cfg})
         assert values == {"cfg": cfg}

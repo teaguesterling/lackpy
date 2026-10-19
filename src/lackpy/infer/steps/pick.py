@@ -1,4 +1,4 @@
-"""Pick step: analyze solver output AST to derive which tools are needed."""
+"""Pick step: analyze solver output AST to derive which tools it calls."""
 
 from __future__ import annotations
 
@@ -10,37 +10,22 @@ from ...tools.registry import ResolvedTools
 from ...lang.grader import Grade
 
 
-# Patterns in standard Python that map to lackpy tools
-_TOOL_PATTERNS: dict[str, list[str]] = {
-    "find_files": ["glob.glob", "glob.iglob", "glob(", "find_files("],
-    "read_file": ["open(", ".read(", "readlines(", "read(", "read_file("],
-    "write_file": [".write(", "write(", "write_file("],
-    "edit_file": ["edit(", ".replace(", "edit_file("],
-}
-
-
 def _extract_tool_names(program: str, available_tools: dict) -> set[str]:
-    """Identify which available tools the program uses or implies."""
-    used = set()
+    """The available tools that the program calls directly by name.
 
-    # Check direct calls via AST
+    stepy100 Task 8: the stdlib-to-kit pattern table (open -> read_file,
+    glob -> find_files) is gone. A program reads files through pathlib.Path,
+    so stdlib I/O implies no tool.
+    """
+    used = set()
     try:
         tree = ast.parse(program)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id in available_tools:
-                    used.add(node.func.id)
     except SyntaxError:
-        pass
-
-    # Check standard Python patterns
-    for tool_name, patterns in _TOOL_PATTERNS.items():
-        if tool_name in available_tools:
-            for pattern in patterns:
-                if pattern in program:
-                    used.add(tool_name)
-                    break
-
+        return used
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in available_tools):
+            used.add(node.func.id)
     return used
 
 
@@ -49,7 +34,7 @@ class PickStep:
 
     Pushes a new ProgramState with the same program text but a
     derived tools containing only the tools the program actually uses.
-    Does not require an LLM -- pure AST and pattern analysis.
+    Does not require an LLM -- pure AST analysis.
     """
 
     name = "pick"

@@ -162,3 +162,20 @@ class TestPythonExecution:
         result = await run_interpreter(interp, "len([1, 2])", ExecutionContext(base_dir=ws))
         assert result.success
         assert "trace" in result.metadata
+
+
+class TestSystemPromptHint:
+    """stepy100 Task 8 (Task 7 review M3): the hint frames lackpy programs. The
+    kit-era hint said "Use read_file()", "ORCHESTRATE, DO NOT IMPLEMENT" and
+    "Do NOT define functions, classes, or use import"; the pre-prompt replaces them."""
+
+    def test_hint_drops_the_kit_framing(self):
+        hint = PythonInterpreter().system_prompt_hint()
+        for phrase in ("read_file", "ORCHESTRATE", "Do NOT define functions",
+                       "use import", "pre-loaded", "tool"):
+            assert phrase not in hint, phrase
+
+    def test_hint_names_the_language(self):
+        hint = PythonInterpreter().system_prompt_hint()
+        assert "lackpy" in hint
+        assert "Python 3" in hint

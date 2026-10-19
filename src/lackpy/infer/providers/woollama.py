@@ -92,7 +92,7 @@ class WoollamaProvider:
                 {"role": "user", "content": (
                     "That code won't work in this environment. "
                     + " ".join(h for h in error_feedback if h != "--- Suggestions ---")
-                    + " Rewrite using only the kernel namespace.")},
+                    + " Rewrite the program so that the validator accepts it.")},
             ]
         else:
             messages = [

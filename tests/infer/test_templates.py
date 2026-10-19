@@ -1,25 +1,30 @@
-"""Tests for the template inference provider."""
+"""Tests for the template inference provider.
+
+stepy100 Task 8: the fixture templates are Path programs. The kit-era fixtures
+held find_callers(...) and read_file(...) calls; the kit is gone (Plan 2, Task 7).
+"""
 
 import pytest
 
 from lackpy.infer.providers.templates import TemplatesProvider
+from lackpy.lang.validator import validate
 
 
 @pytest.fixture
 def templates_dir(tmp_path):
-    t = tmp_path / "find-callers.tmpl"
+    t = tmp_path / "count-lines.tmpl"
     t.write_text(
-        '---\nname: find-callers\n'
-        'pattern: "find (all )?(callers|usages|references) of {name}"\n'
+        '---\nname: count-lines\n'
+        'pattern: "count (the )?lines (in|of) {path}"\n'
         'success_count: 10\nfail_count: 0\n---\n'
-        'results = find_callers("{name}")\nresults\n'
+        'from pathlib import Path\n\nprint(len(Path("{path}").read_text().splitlines()))\n'
     )
     t2 = tmp_path / "read-file.tmpl"
     t2.write_text(
         '---\nname: read-file\n'
         'pattern: "read (the )?file {path}"\n'
         'success_count: 5\nfail_count: 1\n---\n'
-        "content = read_file('{path}')\ncontent\n"
+        'from pathlib import Path\n\ntext = Path("{path}").read_text()\nprint(text, end="")\n'
     )
     return tmp_path
 
@@ -31,18 +36,17 @@ def provider(templates_dir):
 
 class TestTemplateMatching:
     @pytest.mark.asyncio
-    async def test_matches_find_callers(self, provider):
-        result = await provider.generate("find all callers of validate_token", namespace_desc="")
+    async def test_matches_count_lines(self, provider):
+        result = await provider.generate("count the lines in notes.md", namespace_desc="")
         assert result is not None
-        assert "find_callers" in result
-        assert "validate_token" in result
+        assert 'Path("notes.md")' in result
 
     @pytest.mark.asyncio
     async def test_matches_read_file(self, provider):
         result = await provider.generate("read the file src/main.py", namespace_desc="")
         assert result is not None
-        assert "read_file" in result
-        assert "src/main.py" in result
+        assert 'Path("src/main.py").read_text()' in result
+        assert validate(result, allowed_names=set()).valid
 
     @pytest.mark.asyncio
     async def test_no_match_returns_none(self, provider):

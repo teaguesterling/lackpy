@@ -1,31 +1,70 @@
-"""System prompt construction for inference providers."""
+"""System prompt construction for inference providers.
+
+The default prompt teaches the lackpy language (stepy100): the pre-prompt, the
+style guide, the skeleton, then the task framing. That is the structure of the
+eval prompt that measured Qwen3-30B-A3B-Instruct at 27/30 valid
+(scripts/eval/ste_usability/prompts.py with PROMPT_VARIANT=pre; FINDINGS.md).
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from ..lang.grammar import ALLOWED_BUILTINS
+from ..lang.spec import format_preprompt, format_style_guide
 from .retrieval import (Example, expand_intent_keywords,
                         format_examples_for_prompt, retrieve_examples)
 
-_TEMPLATE = """\
-You are a Jupyter notebook cell generator. Write a single cell \
-using ONLY the pre-loaded kernel namespace below.
+# The skeleton every generated program starts from. Same text as the measured
+# eval's SKELETON (scripts/eval/ste_usability/prompts.py); keep the two equal.
+SKELETON = '''# /// intent
+# goal   = "<the task, one sentence>"
+# reads  = []
+# writes = []
+# output = "none"          # none | printed | value
+# ///
 
-Output ONLY the cell contents — no markdown, no explanation, no code fences.
+# imports. Approved: pathlib (Path), json, re, collections, math,
+#          statistics, hashlib, datetime
 
-Assign tool results to variables and reuse them. Never call the same function twice \
-when you can reuse a variable.
+# implementation
+'''
 
-You orchestrate tools to find and modify existing code. \
-Use read_file(path) to get file contents.
+INTRO = """\
+You write lackpy programs. A lackpy program is plain Python 3 that follows the
+lackpy style guide below. The validator rejects any program that breaks a rule."""
 
-Kernel namespace:
-{namespace_desc}
+_PROMPT = """\
+{intro}
 
-Builtins: {builtins_list}
-{params_section}{examples_section}"""
+=== LESSON ===
+{lesson}
+=== END LESSON ===
 
+=== STYLE GUIDE ===
+{guide}
+=== END STYLE GUIDE ===
+
+Start from this skeleton and fill in the intent block:
+
+{skeleton}
+{params_section}{examples_section}\
+The program runs with the workspace directory as its current directory.
+The next message is the task.
+
+Reply with the complete program in one ```python fenced block and nothing else.
+"""
+
+_PARAMS_SECTION = """\
+The program takes parameters. Put this literal at the top level, after the
+imports and before any use, exactly as shown. Read a value as params["{first}"].
+Do not assign to params again.
+
+{params_desc}
+
+"""
+
+# Interpreters for other languages (CSS selectors, SQL) keep their own framing.
 _SPECIALIZED_TEMPLATE = """\
 {interpreter_hint}
 
@@ -45,63 +84,65 @@ def build_system_prompt(
 ) -> str:
     """Build the system prompt for inference providers.
 
-    When ``interpreter`` is provided and has a ``system_prompt_hint()``
-    method, the prompt uses interpreter-specialized framing instead of
-    the generic Jupyter-cell template. This typically produces 3–5×
-    higher pass rates on local models (empirically validated across
-    qwen2.5 0.5b–7b, smollm2, and granite models).
+    For a lackpy program (no interpreter, or the ``python`` interpreter) the
+    prompt is: the intro (the interpreter's ``system_prompt_hint()`` when it
+    has one), ``format_preprompt()``, ``format_style_guide()``, the skeleton,
+    the params literal when params are given, retrieved examples, and the
+    task framing. ``namespace_desc`` is not taught: no run binds a tool since
+    the kit was removed (stepy100 Plan 2, Task 7).
 
-    When no interpreter is provided, falls back to the original
-    Jupyter-cell framing for backward compatibility.
+    An interpreter of another language (its ``name`` is not ``"python"``) with
+    a ``system_prompt_hint()`` keeps the specialized framing: its hint, the
+    namespace description and the builtins.
 
     Args:
-        namespace_desc: Formatted string of available tools and their signatures.
-        params_desc: Optional description of pre-set parameter variables.
+        namespace_desc: Tool namespace description; used only by the
+            specialized (non-Python) framing.
+        params_desc: Output of :func:`format_params_description`, or None.
         intent: Natural language intent. Required for example retrieval.
         example_pool: Candidate examples to retrieve from. If None or empty,
             no examples section is added.
-        n_examples: Maximum number of examples to include. Default 6 — tested
-            as the sweet spot for qwen2.5-coder models on structured output.
-        interpreter: An interpreter instance (or any object with a
-            ``system_prompt_hint()`` method). When present and the method
-            exists, the prompt uses interpreter-specialized framing.
+        n_examples: Maximum number of examples to include.
+        interpreter: An interpreter instance, or None.
 
     Returns:
         The complete system prompt string ready to send to an inference provider.
     """
-    builtins_list = ", ".join(sorted(ALLOWED_BUILTINS))
-    params_section = ""
-    if params_desc:
-        params_section = (
-            f"\nPre-set variables (already defined, use directly):\n"
-            f"{params_desc}\n\n"
-        )
-
     examples_section = ""
     if intent and example_pool:
         selected = retrieve_examples(intent, example_pool, n=n_examples)
         if selected:
-            examples_section = "\n" + format_examples_for_prompt(selected) + "\n"
+            examples_section = format_examples_for_prompt(selected) + "\n\n"
 
-    # Use interpreter-specialized framing when available
     hint = None
     if interpreter is not None:
         hint_fn = getattr(interpreter, "system_prompt_hint", None)
         if hint_fn is not None:
             hint = hint_fn()
 
-    if hint:
+    if hint and getattr(interpreter, "name", "python") != "python":
+        params_section = ""
+        if params_desc:
+            params_section = f"\nParameters:\n{params_desc}\n\n"
         return _SPECIALIZED_TEMPLATE.format(
             interpreter_hint=hint,
             namespace_desc=namespace_desc,
-            builtins_list=builtins_list,
+            builtins_list=", ".join(sorted(ALLOWED_BUILTINS)),
             params_section=params_section,
-            examples_section=examples_section,
+            examples_section="\n" + examples_section if examples_section else "",
         )
 
-    return _TEMPLATE.format(
-        namespace_desc=namespace_desc,
-        builtins_list=builtins_list,
+    params_section = ""
+    if params_desc:
+        # The second line is "# <first key>: <type>" (format_params_description).
+        lines = params_desc.splitlines()
+        key = lines[1].removeprefix("# ").rsplit(": ", 1)[0] if len(lines) > 1 else "name"
+        params_section = _PARAMS_SECTION.format(first=key, params_desc=params_desc)
+    return _PROMPT.format(
+        intro=hint or INTRO,
+        lesson=format_preprompt().rstrip(),
+        guide=format_style_guide().rstrip(),
+        skeleton=SKELETON,
         params_section=params_section,
         examples_section=examples_section,
     )
@@ -135,26 +176,26 @@ def collect_example_pool(tool_specs: list) -> list[Example]:
 
 
 def format_params_description(params: dict) -> str:
-    """Format a parameters dict into a human-readable description string.
+    """Describe the program's ``params`` literal for the prompt.
 
-    Each parameter is rendered as ``name: type`` optionally followed by a
-    description when the value is a metadata dict.
+    The first line is the literal itself, ``params = {...}``, built from the
+    passed values with ``repr``. The runner replaces the values of that literal
+    with the passed ones (stepy100 Task 5), so the program reads each one as
+    ``params["name"]``. One ``# name: type`` comment line per key follows,
+    so a model that copies the block still writes valid Python.
+
+    A value of the single-key form ``{"value": x}`` is unwrapped, as the
+    service does (review M7); any other dict is a dict parameter.
 
     Args:
-        params: Mapping of parameter name to either a raw value or a metadata
-            dict with ``"value"``, optional ``"type"``, and optional
-            ``"description"`` keys.
+        params: Mapping of parameter name to value. Each value must have a
+            literal form (the runner's rule).
 
     Returns:
-        A newline-joined string of parameter descriptions.
+        A newline-joined description, starting with the literal line.
     """
-    lines = []
-    for name, value in params.items():
-        if isinstance(value, dict) and "value" in value:
-            ptype = value.get("type", type(value["value"]).__name__)
-            desc = value.get("description", "")
-            lines.append(f"  {name}: {ptype}" + (f" — {desc}" if desc else ""))
-        else:
-            ptype = type(value).__name__
-            lines.append(f"  {name}: {ptype}")
+    values = {name: (v["value"] if isinstance(v, dict) and v.keys() == {"value"} else v)
+              for name, v in params.items()}
+    lines = [f"params = {values!r}"]
+    lines += [f"# {name}: {type(v).__name__}" for name, v in values.items()]
     return "\n".join(lines)

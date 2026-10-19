@@ -3,9 +3,20 @@
 All hints use positive language ("use X instead") rather than negative
 ("don't use Y"). Stress tests show 1.5B models respond better to
 positive redirection than negative restriction.
+
+The hint for an unapproved word (``open``, ``json.load``, ``os``, ...) is its
+entry in ``dictionary.UNAPPROVED``, the one source for those hints.
 """
 
 from __future__ import annotations
+
+import re
+
+from ..lang.dictionary import MODULES, hint_for
+
+# The quoted subject of a validator error: "Forbidden name: 'open' at line 3",
+# "Unknown module member: 'json.load' at line 2".
+_SUBJECT = re.compile(r"'([A-Za-z_][\w.]*)'")
 
 
 def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
@@ -13,7 +24,8 @@ def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
 
     Args:
         errors: Raw validation error strings.
-        namespace_desc: The namespace description (to check available tools).
+        namespace_desc: Unused since the kit was removed (stepy100); kept for
+            callers' signatures.
 
     Returns:
         Enriched error list with positive hints appended where patterns match.
@@ -21,38 +33,32 @@ def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
     enriched = list(errors)
     hints: list[str] = []
 
+    def add(hint: str) -> None:
+        if hint not in hints:
+            hints.append(hint)
+
+    for error in errors:
+        for subject in _SUBJECT.findall(error):
+            hint = hint_for(subject)
+            if hint is not None:
+                add(f"For {subject}: {hint}.")
+            elif subject == "Path" and error.startswith("Unknown function"):
+                add("Import Path first: from pathlib import Path.")
+
     error_text = " ".join(errors).lower()
 
-    # open() instead of read()
-    if "open" in error_text and "read_file(" in namespace_desc:
-        hints.append("Use read_file(path) to get file contents.")
-
-    # Model wrote a function definition instead of calling a tool
-    if "functiondef" in error_text:
-        hints.append(
-            "Use the tools to find and modify existing code. "
-            "Call find_definitions() to locate functions, edit() to modify them."
-        )
-
-    # Lambda usage outside key=
     if "lambda" in error_text:
-        hints.append("lambda is allowed only as key= for sorted, min or max.")
+        add("lambda is allowed only as key= for sorted, min or max.")
 
-    # Import attempts
-    if "import" in error_text:
-        hints.append("All needed functions are already available in the namespace.")
+    if "forbidden ast node: import" in error_text or "importfrom" in error_text:
+        modules = ", ".join(sorted(MODULES))
+        add(f"Import only these modules: {modules}. Use pathlib.Path for files.")
 
-    # While loop
     if "while" in error_text:
-        hints.append("Use for-loops with range() or iterate over a list variable.")
+        add("Use for-loops with range() or iterate over a list variable.")
 
-    # Class definition
     if "classdef" in error_text:
-        hints.append("Use the available tools and builtins directly.")
-
-    # Try/except
-    if "try" in error_text or "excepthandler" in error_text:
-        hints.append("Let errors propagate to the caller.")
+        add("Use a dict, or a top-level def, in place of a class.")
 
     if hints:
         enriched.append("--- Suggestions ---")

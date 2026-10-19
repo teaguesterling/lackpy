@@ -432,9 +432,13 @@ class LackpyService:
         return resolve_profile(profile, self.toolbox, profiles=self._config.profiles,
                                kits_dir=kits_dir, extra_tools=extra_tools).tools
 
-    def _resolve_params(self, params: dict[str, Any] | None) -> tuple[dict[str, Any], str | None, set[str]]:
+    def _resolve_params(self, params: dict[str, Any] | None) -> tuple[dict[str, Any], str | None]:
+        """The passed values and the prompt's description of the params literal.
+
+        Params bind no bare names (stepy100 Task 5), so no param name is ever
+        allowed to the validator (Task 8)."""
         if not params:
-            return {}, None, set()
+            return {}, None
         values: dict[str, Any] = {}
         for name, val in params.items():
             # Only the single-key {"value": x} wrapper; any other dict is a dict param (review M7).
@@ -444,11 +448,10 @@ class LackpyService:
                 values[name] = val
         # No name-collision check: params replace the values of the program's own
         # ``params`` literal and bind no bare names (stepy100 Task 5).
-        params_desc = format_params_description(params)
-        return values, params_desc, set(values.keys())
+        return values, format_params_description(values)
 
     def validate(self, program: str, profile: Profile | str | None = None,
-                 rules: list | None = None, param_names: set[str] | None = None) -> ValidationResult:
+                 rules: list | None = None) -> ValidationResult:
         """Validate a lackpy program. No kit tool names are allowed.
 
         Args:
@@ -456,8 +459,6 @@ class LackpyService:
             profile: A profile name or ``Profile``. A profile that names tools
                 gives an invalid result carrying ``KIT_REMOVED``.
             rules: Additional validation rules to apply beyond core checks.
-            param_names: Extra names to allow (the generator's param names;
-                stepy100 Task 8 retires this).
 
         Returns:
             A ValidationResult indicating whether the program is valid.
@@ -466,7 +467,7 @@ class LackpyService:
             self._resolve_profile(profile)
         except ProfileError as e:
             return ValidationResult(valid=False, errors=[str(e)])
-        return validate(program, allowed_names=set(param_names or ()), extra_rules=rules)
+        return validate(program, allowed_names=set(), extra_rules=rules)
 
     async def generate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, rules: list | None = None,
@@ -482,9 +483,9 @@ class LackpyService:
             rules: Additional validation rules the generated program must satisfy.
             mode: Inference strategy mode (e.g. '1-shot', 'spm'). Defaults to config or '1-shot'.
             interpreter: An interpreter instance whose ``system_prompt_hint()``
-                is forwarded to the prompt builder. When present, the inference
-                prompt uses interpreter-specialized framing instead of the
-                generic Jupyter-cell template.
+                is forwarded to the prompt builder: the intro of the lackpy
+                prompt for the python interpreter, the whole framing for an
+                interpreter of another language.
             model: Per-call LLM model override (``"<provider>/<model>"``). When set, the
                 woollama tier is cloned to this model for this call only; when omitted,
                 the service-configured model is used (identical to prior behavior). This
@@ -503,7 +504,7 @@ class LackpyService:
 
         rp = self._resolve_profile(profile)
         resolved = rp.tools
-        _, params_desc, param_names = self._resolve_params(params)
+        _, params_desc = self._resolve_params(params)
 
         # Inference selections: an explicit call arg wins over the profile's; both fall
         # back to the service config (woollama tier / inference_mode) downstream.
@@ -556,7 +557,8 @@ class LackpyService:
 
         # Default: legacy dispatcher path
         dispatcher = InferenceDispatcher(providers=providers)
-        allowed = set(resolved.tools.keys()) | param_names
+        # No kit tools and no param names: params bind no bare names (Task 5).
+        allowed: set[str] = set()
 
         # Resolve policy — kit baseline + optional kibitzer hints + optional umwelt.
         # The active model is known explicitly (per-call override or the configured LLM
@@ -786,7 +788,7 @@ class LackpyService:
             rp = self._resolve_profile(profile)
         except ProfileError as e:
             return ExecutionResult(success=False, error=str(e))
-        param_values, _, _ = self._resolve_params(params)
+        param_values, _ = self._resolve_params(params)
         # The execution axis (one-shot restricted-Python vs literate) decides both
         # validation and execution; the seam keeps them paired (see _execute_program).
         return await self._execute_program(program, rp, param_values, rules=rules)
@@ -812,8 +814,8 @@ class LackpyService:
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules for generation and execution.
             interpreter: An interpreter instance whose ``system_prompt_hint()``
-                is forwarded to the prompt builder for interpreter-specialized
-                framing. When omitted, the default Jupyter-cell prompt is used.
+                is forwarded to the prompt builder. When omitted, the default
+                lackpy prompt is used (pre-prompt, style guide, skeleton).
 
         Returns:
             A dict with keys: success, program, generation_tier,
@@ -834,7 +836,7 @@ class LackpyService:
         # The model actually used (per-call override or the profile's, else configured) —
         # the same value `generate` uses, so kibitzer logs the real model, not a reflection.
         effective_model = (model if model is not None else rp.model) or self._llm_model
-        param_values, _, _ = self._resolve_params(params)
+        param_values, _ = self._resolve_params(params)
 
         # Kibitzer: register context for this delegation
         if self._kibitzer:
