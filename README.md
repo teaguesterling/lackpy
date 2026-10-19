@@ -145,4 +145,4 @@ lackpy is part of the [Rigged](https://github.com/teaguesterling) developer tool
 
 ## License
 
-AGPL-3.0-or-later. See [LICENSE](LICENSE). Commercial licenses are available: see [COMMERCIAL.md](COMMERCIAL.md).
+Apache-2.0. See [LICENSE](LICENSE). Versions up to v0.9.0 were released under AGPL-3.0-or-later.
