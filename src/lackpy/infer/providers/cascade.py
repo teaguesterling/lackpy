@@ -8,8 +8,8 @@ Raw completion mode uses the ollama `/api/generate` endpoint with
 `raw: true`, bypassing the model's chat template. The prompt is
 formatted as pattern-completion examples:
 
-    find all functions -> find_names('src/**/*.py', '.fn')
-    find all classes -> find_names('src/**/*.py', '.class')
+    read the file README.md -> from pathlib import Path
+    Path('README.md').read_text()
     {user_intent} ->
 
 This produces 5-10x better results than chat-template prompting for
@@ -48,29 +48,33 @@ class Tier:
     timeout: int = 15
 
 
-# Default few-shot examples — pattern-completion format.
-# These are the core patterns that teach the model the tool-calling shape.
-# Additional examples come from ToolSpec.examples via the namespace_desc
-# parameter, but these bootstraps ensure the model always sees the format.
+# Default few-shot examples, in pattern-completion format: "intent -> program",
+# where a line without " -> " continues the program above it. They teach plain
+# Python that reads and writes files through pathlib.Path (stepy100 Plan 2: no
+# kit tools; final review M6). tests/test_docs_examples.py validates each one.
 _DEFAULT_EXAMPLES = """\
-find all function names -> find_names('src/**/*.py', '.fn')
-find all classes -> find_names('src/**/*.py', '.class')
-show me the main function -> view('src/**/*.py', '.fn#main')
-find methods of the Auth class -> find_names('src/auth.py', '.class#Auth .fn')
-count functions in cli.py -> n = len(find_names('squackit/cli.py', '.fn'))
-find the most complex functions -> complexity('src/**/*.py', '.fn')
-read lines 1-20 of server.py -> read_source('squackit/server.py', '1-20')
-get an overview of the codebase -> explore()
-tell me about validate_token -> investigate('validate_token')
-review changes since main -> review('main', 'HEAD')
-search for cache across the codebase -> search('cache')
-show docs about authentication -> doc_outline('docs/**/*.md', search='authentication')
-show recent commits -> recent_changes(10)
-what files changed since main -> file_changes('main', 'HEAD')
-find functions starting with test_ -> source = "tests/**/*.py"
-selector = ".fn[name^='test_']"
-result = find_names(source, selector)
-result"""
+read the file README.md -> from pathlib import Path
+Path('README.md').read_text()
+count the lines in setup.py -> from pathlib import Path
+len(Path('setup.py').read_text().splitlines())
+list the python files under src -> from pathlib import Path
+sorted(str(p) for p in Path('src').rglob('*.py'))
+does config.toml exist -> from pathlib import Path
+Path('config.toml').exists()
+find the files in docs that mention cache -> from pathlib import Path
+[str(p) for p in sorted(Path('docs').rglob('*.md')) if 'cache' in p.read_text()]
+count the TODO lines in each python file -> from pathlib import Path
+counts = {}
+for p in sorted(Path('.').rglob('*.py')):
+    counts[str(p)] = sum(1 for line in p.read_text().splitlines() if 'TODO' in line)
+counts
+write the word count of notes.md to count.txt -> from pathlib import Path
+n = len(Path('notes.md').read_text().split())
+Path('count.txt').write_text(str(n))
+n
+find the function names in cli.py -> import re
+from pathlib import Path
+re.findall(r'^def (\\w+)', Path('cli.py').read_text(), re.M)"""
 
 
 def _build_completion_prompt(intent: str, examples: str | None = None,

@@ -117,3 +117,32 @@ def test_refused_fence_is_refused(where, src, tmp_path):
 def test_tutorial_walks_through_each_preprompt_example(title, program):
     programs = [s for w, k, s in FENCES if w.startswith("docs/tutorial.md:") and k == "program"]
     assert program in programs, f"the tutorial lacks the pre-prompt example {title!r} verbatim"
+
+
+def test_cli_reference_teaches_no_kit_flags():
+    # Final review M6: --tools and kit-form --profile values now fail.
+    text = (ROOT / "docs" / "reference" / "cli.md").read_text()
+    fences = re.findall(r"^```bash\n(.*?)^```", text, re.M | re.S)
+    assert fences
+    for body in fences:
+        assert "--tools" not in body
+        assert "lackpyctl profile" not in body
+        for value in re.findall(r"--profile ([^\s\]]+)", body):
+            assert value in ("NAME", "fast"), value  # a [profiles.<name>] table, never a kit
+
+
+def test_cascade_default_examples_are_valid_programs():
+    # Final review M6: the cascade's few-shot examples taught squackit kit calls.
+    from lackpy.infer.providers.cascade import _DEFAULT_EXAMPLES
+
+    examples: list[list[str]] = []
+    for line in _DEFAULT_EXAMPLES.splitlines():
+        if " -> " in line:
+            examples.append([line.split(" -> ", 1)[1]])
+        else:
+            examples[-1].append(line)
+    assert len(examples) >= 5
+    for lines in examples:
+        program = "\n".join(lines)
+        result = validate(program, allowed_names=set())
+        assert result.valid, (program, result.errors)
