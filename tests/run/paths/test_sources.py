@@ -167,8 +167,17 @@ class TestManaged:
         assert allowed(policy, ws / "p")
         assert allowed(policy, ws / "q")
         assert not allowed(policy, tmp_path / "shared" / "a")
-        # Design call (Claude): additionalDirectories still define default-readable dirs.
+        # Security ruling (reverses the brief's design call): managed-only fixes the roots.
+        assert not allowed(policy, extra / "a")
+
+    def test_managed_only_keeps_managed_additional_directories(self, ws, home, managed, tmp_path):
+        extra, other = tmp_path / "mextra", tmp_path / "pextra"
+        write_settings(managed, {"additionalDirectories": [str(extra)]},
+                       allowManagedPermissionRulesOnly=True)
+        (ws / ".lackpy" / "config.toml").write_text(f'[paths]\nadditional_directories = ["{other}"]\n')
+        policy = load(ws, home, managed)
         assert allowed(policy, extra / "a")
+        assert not allowed(policy, other / "a")
 
     def test_managed_only_set_in_a_dropin(self, ws, home, managed):
         write_settings(managed.parent / "managed-settings.d" / "a.json", {},

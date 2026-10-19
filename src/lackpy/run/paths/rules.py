@@ -29,6 +29,11 @@ Semantics:
    normalized) and its ``resolve()``d target. A deny matches either. A write
    refuses when the final component is a symlink, and when any directory
    component is a symlink whose target is not writable.
+7. Policy sources are never writable (security ruling, Task 4 fix round 1):
+   ``<workspace>/.claude/**``, ``<workspace>/.lackpy/**``, ``<home>/.claude/**``,
+   the managed settings file and its ``managed-settings.d``. This is checked
+   first, on the lexical and resolved forms, case-insensitively; no rule or
+   default root lifts it. A write there would widen the policy of every later run.
 6. Matching is case-sensitive. Upstream does not document case sensitivity;
    case-sensitive is the stricter choice on a case-insensitive filesystem for
    allows, and is how Linux paths compare.
@@ -48,15 +53,31 @@ import fnmatch
 import os
 import posixpath
 import re
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
-from typing import Literal
+from pathlib import Path, PureWindowsPath
+from typing import Iterable, Literal
 
 from ..refusal import LackpyRefusal
 
 _RULE_RE = re.compile(r"^(Read|Edit)(?:\((.*)\))?$", re.DOTALL)
 _TOOL_RE = re.compile(r"^[A-Za-z_][\w-]*")
+
+
+def managed_settings_path(platform: str) -> Path:
+    """The managed settings file for ``platform`` (a ``sys.platform`` value)."""
+    if platform == "darwin":
+        return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
+    if platform == "win32":
+        # Not the legacy C:\ProgramData path.
+        return PureWindowsPath(r"C:\Program Files\ClaudeCode\managed-settings.json")  # type: ignore[return-value]
+    return Path("/etc/claude-code/managed-settings.json")  # Linux and WSL
+
+
+MANAGED_SETTINGS: Path = managed_settings_path(sys.platform)
+
+_GLOB_CHARS = frozenset("*?[")
 
 
 @dataclass(frozen=True)
@@ -174,6 +195,16 @@ def _compile(rule: PathRule, workspace: Path) -> list[tuple[str, ...]]:
     for base in bases:
         joined = posixpath.normpath(posixpath.join(base, rest)) if rest else base
         patterns.append(_segments(joined))
+    if deny:
+        # Review M1: a symlinked literal prefix (~/.ssh -> R/keys) must not let
+        # the target be read directly. Add the resolved prefix as another base.
+        for segs in list(patterns):
+            cut = next((i for i, seg in enumerate(segs) if _GLOB_CHARS & set(seg)), len(segs))
+            if cut == 0:
+                continue
+            resolved = _segments(_real("/" + "/".join(segs[:cut]))) + segs[cut:]
+            if resolved not in patterns:
+                patterns.append(resolved)
     return patterns
 
 
@@ -181,7 +212,14 @@ class PathPolicy:
     """Decides each file access a program makes. See the module docstring."""
 
     def __init__(self, workspace: Path, rules: list[PathRule],
-                 extra_dirs: list[Path] = []) -> None:  # noqa: B006 (never mutated)
+                 extra_dirs: list[Path] = [],  # noqa: B006 (never mutated)
+                 *, protected: Iterable[Path] = ()) -> None:
+        """``protected`` adds write-protected paths to the built-in ones.
+
+        Built in: ``<workspace>/.claude``, ``<workspace>/.lackpy``,
+        ``Path.home()/.claude``, ``MANAGED_SETTINGS`` and its
+        ``managed-settings.d``. ``load_policy`` adds its own home and managed path.
+        """
         self.workspace = Path(_norm(workspace))
         self.rules = list(rules)
         self.extra_dirs = [Path(_norm(self.workspace / d)) for d in extra_dirs]
@@ -189,6 +227,11 @@ class PathPolicy:
         roots = [self.workspace, *self.extra_dirs]
         self._roots_lexical = {b for r in roots for b in _bases(r)}
         self._roots_real = {_real(r) for r in roots}
+        managed = Path(os.fspath(MANAGED_SETTINGS))
+        builtin = [self.workspace / ".claude", self.workspace / ".lackpy", Path.home() / ".claude",
+                   managed, managed.parent / "managed-settings.d"]
+        self.protected = [Path(_norm(self.workspace / p)) for p in (*builtin, *protected)]
+        self._protected = {b.casefold() for p in self.protected for b in _bases(p)}
 
     def absolute(self, path: Path | str) -> Path:
         """``path`` joined to the workspace when relative, not normalized."""
@@ -213,6 +256,10 @@ class PathPolicy:
     def _decide(self, raw: Path, op: Literal["read", "write"]) -> str | None:
         """Return the refusal reason, or None when allowed."""
         lexical, real = _norm(raw), _real(raw)
+        if op == "write":
+            for form in (lexical, real):
+                if self._under(form.casefold(), self._protected):
+                    return "it is a permission settings location, which lackpy never writes"
         deny_kinds = ("read",) if op == "read" else ("read", "edit")
         for form in (lexical, real):
             rule = self._rules_match(form, deny_kinds, "deny")
@@ -249,6 +296,7 @@ class PathPolicy:
         """One line per effective rule, and one per default directory."""
         lines = [f"allow read, write: {d} (default directory)"
                  for d in (self.workspace, *self.extra_dirs)]
+        lines += [f"never write: {p} (permission settings)" for p in self.protected]
         for rule, patterns in self._compiled:
             ops = "read" if rule.kind == "read" else "write"
             if rule.kind == "read" and rule.effect == "deny":

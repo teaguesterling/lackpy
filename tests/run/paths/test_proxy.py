@@ -39,9 +39,17 @@ def run(program, policy, params=None):
 
 
 class TestShape:
-    def test_class_is_named_path(self, P):
-        assert P.__name__ == "Path"
-        assert repr(P) == "<class 'pathlib.Path'>"
+    def test_class_takes_the_platform_class_name(self, P):
+        # Ruling I2: type(p).__name__ and repr(type(p)) match plain Python.
+        real = type(pathlib.Path())
+        assert P.__name__ == real.__name__
+        assert P.__qualname__ == real.__qualname__
+        assert repr(P) == repr(real)
+
+    def test_type_name_in_a_program(self, ws):
+        result = run("from pathlib import Path\ntype(Path('a')).__name__", PathPolicy(ws, []))
+        assert result.success, result.error
+        assert result.output == type(pathlib.Path("a")).__name__
 
     def test_members_are_exactly_the_dictionary(self, P):
         public = {n for n in vars(P) if not n.startswith("_")}
@@ -91,6 +99,24 @@ class TestShape:
         assert hash(P("a")) == hash(P("a"))
         assert sorted([P("b"), P("a")]) == [P("a"), P("b")]
         assert len({P("a"), P("a"), P("b")}) == 2
+
+    def test_rtruediv(self, P):
+        # Ruling I3.
+        p = "a" / P("b")
+        assert isinstance(p, P)
+        assert str(p) == "a/b"
+        with pytest.raises(TypeError):
+            1 / P("b")
+
+    @pytest.mark.parametrize("a, b", [("a", "b"), ("b", "a"), ("a", "a")])
+    def test_full_ordering_matches_pathlib(self, P, a, b):
+        ra, rb = pathlib.Path(a), pathlib.Path(b)
+        assert (P(a) < P(b), P(a) <= P(b), P(a) > P(b), P(a) >= P(b)) == (ra < rb, ra <= rb, ra > rb, ra >= rb)
+
+    def test_ordering_against_str_is_type_error(self, P):
+        for op in ("<", "<=", ">", ">="):
+            with pytest.raises(TypeError):
+                eval(f"P('a') {op} 'a'", {"P": P})  # noqa: S307
 
     def test_eq_with_a_real_path_follows_pathlib(self, P):
         assert P("a") == pathlib.Path("a")
@@ -183,12 +209,138 @@ class TestIO:
         assert sorted(str(p) for p in P(".").glob("*")) == ["a.txt"]
         assert sorted(str(p) for p in P(".").rglob("*")) == ["a.txt"]
 
-    @pytest.mark.parametrize("pattern", ["/etc/*", "../*", "a/../../*", "..", "x..y"])
+    def test_dotdot_inside_a_name_is_a_plain_glob(self, ws, P):
+        # Review M2: only a ".." part refuses; "a..txt" is an ordinary name.
+        (ws / "a..txt").write_text("")
+        assert [str(p) for p in P(".").glob("a..txt")] == ["a..txt"]
+        assert [str(p) for p in P(".").glob("x..y")] == []
+
+    @pytest.mark.parametrize("pattern", ["/etc/*", "../*", "a/../../*", "..", "**/../*"])
     def test_glob_absolute_or_dotdot_pattern_refuses(self, P, pattern):
         with pytest.raises(LackpyRefusal):
             P(".").glob(pattern)
         with pytest.raises(LackpyRefusal):
             P(".").rglob(pattern)
+
+
+def _plain_error(ws, monkeypatch, fn):
+    """Run ``fn`` with plain pathlib from the workspace, and return the OSError."""
+    monkeypatch.chdir(ws)
+    try:
+        fn(pathlib.Path)
+    except OSError as e:
+        return e
+    pytest.fail("plain pathlib did not raise")
+
+
+class TestOSErrorFilename:
+    """Review I1: an OSError names the path as the program built it."""
+
+    @pytest.mark.parametrize("call", [
+        lambda P: P("nope.txt").read_text(),
+        lambda P: P("nope.bin").read_bytes(),
+        lambda P: P("missing/x.txt").write_text("x"),
+        lambda P: P("missing/x.bin").write_bytes(b"x"),
+        lambda P: P("d").mkdir(),
+        lambda P: P("missing/e").mkdir(),
+        lambda P: list(P("nodir").iterdir()),
+        lambda P: P("f").mkdir(parents=True),
+    ])
+    def test_matches_plain_python(self, ws, P, monkeypatch, call):
+        (ws / "d").mkdir()
+        (ws / "f").write_text("")
+        try:
+            call(P)
+        except OSError as e:
+            ours = (type(e), e.filename, str(e))
+        else:
+            pytest.fail("the stand-in did not raise")
+        plain = _plain_error(ws, monkeypatch, call)
+        assert ours == (type(plain), plain.filename, str(plain))
+
+    def test_program_prints_the_built_path(self, ws):
+        program = ("from pathlib import Path\n"
+                   "try:\n    Path('nope.txt').read_text()\nexcept FileNotFoundError as e:\n    print(e)\n")
+        result = run(program, PathPolicy(ws, []))
+        assert result.success, result.error
+        assert result.stdout == "[Errno 2] No such file or directory: 'nope.txt'\n"
+        assert str(ws) not in result.stdout
+
+
+class TestPolicySourcesAreNotWritable:
+    """Security ruling: a program must not rewrite the policy for the next run."""
+
+    @pytest.fixture
+    def home(self, tmp_path):
+        h = tmp_path / "home"
+        (h / ".claude").mkdir(parents=True)
+        return h
+
+    @pytest.fixture
+    def managed(self, tmp_path):
+        d = tmp_path / "etc" / "claude-code"
+        (d / "managed-settings.d").mkdir(parents=True)
+        return d / "managed-settings.json"
+
+    @pytest.fixture
+    def P(self, ws, home, managed, tmp_path):
+        # A broad Edit allow and Read allow must not lift the refusal.
+        (ws / ".claude").mkdir()
+        (ws / ".claude" / "settings.json").write_text(json.dumps({"permissions": {
+            "allow": ["Edit(//**)", "Read(//**)", "Edit(./.claude/**)", "Edit(~/.claude/**)"],
+            "additionalDirectories": [str(home), str(managed.parent)],
+        }}))
+        return make_path_class(load_policy(ws, home=home, managed=managed))
+
+    def _targets(self, ws, home, managed):
+        return [ws / ".claude" / "settings.json", ws / ".claude" / "settings.local.json",
+                ws / ".lackpy" / "config.toml", home / ".claude" / "settings.json",
+                managed, managed.parent / "managed-settings.d" / "z.json"]
+
+    def test_direct_write_refuses(self, ws, home, managed, P):
+        for target in self._targets(ws, home, managed):
+            for write in (lambda p: p.write_text("{}"), lambda p: p.write_bytes(b"{}")):
+                with pytest.raises(LackpyRefusal):
+                    write(P(str(target)))
+            assert not target.exists() or target == ws / ".claude" / "settings.json"
+        # Relative to the workspace, too.
+        with pytest.raises(LackpyRefusal):
+            P(".claude/settings.local.json").write_text("{}")
+        with pytest.raises(LackpyRefusal):
+            P(".lackpy/config.toml").write_text("")
+
+    def test_write_through_a_symlink_refuses(self, ws, home, managed, P):
+        for i, target in enumerate(self._targets(ws, home, managed)):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            (ws / f"dirlink{i}").symlink_to(target.parent)
+            with pytest.raises(LackpyRefusal):
+                P(f"dirlink{i}/{target.name}").write_text("{}")
+
+    def test_mkdir_refuses(self, ws, home, managed, P):
+        for target in [ws / ".lackpy" / "kits", home / ".claude" / "agents" / "x",
+                       managed.parent / "managed-settings.d" / "sub",
+                       ws / ".claude" / "commands" / "deep"]:
+            with pytest.raises(LackpyRefusal):
+                P(str(target)).mkdir(parents=True)
+            assert not target.exists()
+        with pytest.raises(LackpyRefusal):
+            P(".lackpy").mkdir(parents=True)
+        assert not (ws / ".lackpy").exists()
+
+    def test_case_variants_refuse(self, ws, P):
+        # A case-insensitive filesystem would reach the real file.
+        with pytest.raises(LackpyRefusal):
+            P(".Claude/settings.json").write_text("{}")
+
+    def test_reads_are_unaffected(self, ws, P):
+        assert P(".claude/settings.json").read_text().startswith("{")
+
+    def test_direct_policy_protects_the_workspace_sources(self, ws):
+        P = make_path_class(PathPolicy(ws, []))
+        with pytest.raises(LackpyRefusal):
+            P(".claude/settings.json").write_text("{}")
+        with pytest.raises(LackpyRefusal):
+            P(".lackpy/config.toml").write_text("")
 
 
 class TestReviewFocus1:
@@ -287,7 +439,7 @@ class TestWiring:
         proxy = imp("pathlib")
         assert isinstance(proxy, ModuleProxy)
         assert proxy.Path is not pathlib.Path
-        assert proxy.Path.__name__ == "Path"
+        assert proxy.Path.__name__ == type(pathlib.Path()).__name__  # ruling I2
         assert imp("pathlib").Path is proxy.Path
         with pytest.raises(LackpyRefusal):
             proxy.PurePath

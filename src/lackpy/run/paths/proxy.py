@@ -18,12 +18,20 @@ members in ``dictionary.PATH_MEMBERS`` and refuse everything else.
   a finalizer removes the entry (as ``ModuleProxy`` keeps state off the proxy).
   A stand-in compares equal to an equal stand-in, so a weak-key dictionary,
   which compares keys with ``==``, cannot be used.
+- An ``OSError`` names the path as the program built it (``filename``,
+  ``filename2`` and so ``str(e)``), as plain Python run from the workspace
+  would (review I1). The workspace path never reaches the program this way.
+- The class takes the platform class name (``PosixPath`` or ``WindowsPath``),
+  so ``type(p).__name__`` and ``repr(type(p))`` match plain Python (ruling I2).
+- ``/`` works from both sides, and ``<``, ``<=``, ``>``, ``>=`` order
+  stand-ins, as on ``pathlib`` (ruling I3).
 - The metaclass refuses every non-dunder class attribute, so ``Path.home()``
   and ``Path.cwd()`` refuse.
 """
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import weakref
 from typing import Any, Callable, Iterator
@@ -35,6 +43,7 @@ from .rules import PathPolicy
 _STATE: dict[int, pathlib.Path] = {}
 
 _ALLOWED = frozenset(dictionary.PATH_MEMBERS)
+_CLASS_NAME = type(pathlib.Path()).__name__
 
 
 def _is_dunder(name: str) -> bool:
@@ -69,6 +78,23 @@ def make_path_class(policy: PathPolicy) -> type:
     def unwrap(value: Any) -> Any:
         return raw(value) if isinstance(value, Path) else value
 
+    @contextlib.contextmanager
+    def as_built(p: "Path") -> Iterator[None]:
+        """Rewrite an OSError's paths from workspace-joined to as-built (review I1)."""
+        try:
+            yield
+        except OSError as e:
+            if not raw(p).is_absolute():
+                ws = str(policy.workspace)
+                for attr in ("filename", "filename2"):
+                    value = getattr(e, attr)
+                    if isinstance(value, str):
+                        if value == ws:
+                            setattr(e, attr, ".")
+                        elif value.startswith(ws.rstrip("/") + "/"):
+                            setattr(e, attr, value[len(ws.rstrip("/")) + 1:])
+            raise
+
     def target(p: "Path", op: str) -> pathlib.Path:
         absolute = policy.absolute(raw(p))
         policy.check(absolute, op)  # type: ignore[arg-type]
@@ -76,27 +102,33 @@ def make_path_class(policy: PathPolicy) -> type:
 
     def safe_pattern(pattern: Any, method: str) -> None:
         text = str(unwrap(pattern))
-        if text.startswith(("/", "\\")) or pathlib.PurePath(text).is_absolute() or ".." in text:
+        pure = pathlib.PurePath(text)
+        if text.startswith(("/", "\\")) or pure.is_absolute() or ".." in pure.parts:
             refuse(f"Path.{method}({text!r}) (a pattern that is absolute or contains '..')")
 
     def entries(p: "Path", found: Iterator[pathlib.Path], base: pathlib.Path) -> Iterator["Path"]:
         built = raw(p)
-        for entry in found:
-            try:
-                policy.check(entry, "read")
-            except LackpyRefusal:
-                continue  # ruling: omit, so a deny neither fails the listing nor reveals the entry
-            yield new(built / entry.relative_to(base))
+        with as_built(p):
+            for entry in found:
+                try:
+                    policy.check(entry, "read")
+                except LackpyRefusal:
+                    continue  # ruling: omit, so a deny neither fails the listing nor reveals the entry
+                yield new(built / entry.relative_to(base))
 
     def reader(name: str) -> Callable[..., Any]:
         def member(self: "Path", *args: Any, **kwargs: Any) -> Any:
-            return getattr(target(self, "read"), name)(*args, **kwargs)
+            absolute = target(self, "read")
+            with as_built(self):
+                return getattr(absolute, name)(*args, **kwargs)
         member.__name__ = name
         return member
 
     def writer(name: str) -> Callable[..., Any]:
         def member(self: "Path", *args: Any, **kwargs: Any) -> Any:
-            return getattr(target(self, "write"), name)(*args, **kwargs)
+            absolute = target(self, "write")
+            with as_built(self):
+                return getattr(absolute, name)(*args, **kwargs)
         member.__name__ = name
         return member
 
@@ -120,6 +152,9 @@ def make_path_class(policy: PathPolicy) -> type:
         # Pure members.
         def __truediv__(self, other: Any) -> "Path":
             return new(raw(self) / unwrap(other))
+
+        def __rtruediv__(self, other: Any) -> "Path":
+            return new(unwrap(other) / raw(self))
 
         def __str__(self) -> str:
             return str(raw(self))
@@ -145,6 +180,21 @@ def make_path_class(policy: PathPolicy) -> type:
         def __lt__(self, other: object) -> bool:
             if isinstance(other, Path):
                 return raw(self) < raw(other)
+            return NotImplemented
+
+        def __le__(self, other: object) -> bool:
+            if isinstance(other, Path):
+                return raw(self) <= raw(other)
+            return NotImplemented
+
+        def __gt__(self, other: object) -> bool:
+            if isinstance(other, Path):
+                return raw(self) > raw(other)
+            return NotImplemented
+
+        def __ge__(self, other: object) -> bool:
+            if isinstance(other, Path):
+                return raw(self) >= raw(other)
             return NotImplemented
 
         @property
@@ -208,8 +258,10 @@ def make_path_class(policy: PathPolicy) -> type:
                     if ancestor.exists():
                         break
                     policy.check(ancestor, "write")
-            absolute.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+            with as_built(self):
+                absolute.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
 
     type.__setattr__(Path, "__module__", "pathlib")
-    type.__setattr__(Path, "__qualname__", "Path")
+    type.__setattr__(Path, "__name__", _CLASS_NAME)
+    type.__setattr__(Path, "__qualname__", _CLASS_NAME)
     return Path

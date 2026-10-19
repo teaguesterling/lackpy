@@ -17,9 +17,12 @@ Sources, all unioned (Teague's ruling 4, 2026-10-18: managed settings included):
 
 When a managed source sets ``allowManagedPermissionRulesOnly: true`` (at the
 top level or inside ``permissions``; either is accepted, the stricter
-reading), only managed rules apply. Additional directories from every source
-still define the default-readable directories: a design call (Claude); the
-docs speak of rules only.
+reading), only managed sources apply: their rules and their additional
+directories. The user, project, local and ``[paths]`` additional directories
+are ignored too (security ruling, Task 4 fix round 1, reversing the brief's
+design call: managed-only means the organization fixes the reachable roots).
+
+Every settings location read here is passed to the policy as write-protected.
 
 A missing file is skipped. A malformed file raises ``ValueError`` naming it.
 """
@@ -27,25 +30,13 @@ A missing file is skipped. A malformed file raises ``ValueError`` naming it.
 from __future__ import annotations
 
 import json
-import sys
 import tomllib
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
-from .rules import PathPolicy, PathRule, parse_rule
+from .rules import MANAGED_SETTINGS, PathPolicy, PathRule, managed_settings_path, parse_rule
 
-
-def managed_settings_path(platform: str) -> Path:
-    """The managed settings file for ``platform`` (a ``sys.platform`` value)."""
-    if platform == "darwin":
-        return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
-    if platform == "win32":
-        # Not the legacy C:\ProgramData path.
-        return PureWindowsPath(r"C:\Program Files\ClaudeCode\managed-settings.json")  # type: ignore[return-value]
-    return Path("/etc/claude-code/managed-settings.json")  # Linux and WSL
-
-
-MANAGED_SETTINGS: Path = managed_settings_path(sys.platform)
+__all__ = ["MANAGED_SETTINGS", "load_policy", "managed_settings_path"]
 
 
 class _Collected:
@@ -178,4 +169,8 @@ def load_policy(workspace: Path, *, home: Path = Path.home(),
         others.dirs += [_directory(d, workspace, home) for d in table["additional_directories"]]
 
     rules = managed_set.rules + ([] if managed_only else others.rules)
-    return PathPolicy(workspace, rules, extra_dirs=managed_set.dirs + others.dirs)
+    dirs = managed_set.dirs + ([] if managed_only else others.dirs)
+    protected = [home / ".claude"]
+    if managed is not None:
+        protected += [managed, managed.parent / "managed-settings.d"]
+    return PathPolicy(workspace, rules, extra_dirs=dirs, protected=protected)

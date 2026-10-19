@@ -254,13 +254,38 @@ class TestSemantics5Symlinks:
         assert allowed(PathPolicy(ws, []), ws / "d" / "new.txt", "write")
 
 
+class TestDenyLiteralPrefixIsResolved:
+    def test_symlinked_home_dir_cannot_bypass_its_deny(self, ws, home, tmp_path):
+        # Review M1, measured case: ~/.ssh -> R/keys; R/keys/id read directly.
+        keys = tmp_path / "R" / "keys"
+        keys.mkdir(parents=True)
+        (keys / "id").write_text("k")
+        (home / ".ssh").symlink_to(keys)
+        rules = [rule("Read(~/.ssh/**)", anchor=ws, home=home),
+                 rule(f"Read(/{tmp_path}/R/**)", "allow", anchor=ws)]
+        policy = PathPolicy(ws, rules)
+        assert not allowed(policy, keys / "id", "read")
+        assert not allowed(policy, home / ".ssh" / "id", "read")
+        assert allowed(policy, tmp_path / "R" / "other", "read")
+
+    def test_symlinked_prefix_under_a_default_root(self, ws, tmp_path):
+        target = ws / "real-secrets"
+        target.mkdir()
+        (ws / "secrets").symlink_to(target)
+        policy = PathPolicy(ws, [rule("Read(./secrets/*.key)", anchor=ws)])
+        assert not allowed(policy, target / "a.key", "read")
+        assert allowed(policy, target / "a.txt", "read")
+
+
 class TestDescribe:
     def test_one_line_per_rule_and_default(self, ws, tmp_path):
         extra = tmp_path / "extra"
         rules = [rule("Read(.env)", anchor=ws, source="a.json"),
                  rule("Edit(./out/**)", anchor=ws, source="b.json")]
         lines = PathPolicy(ws, rules, extra_dirs=[extra]).describe()
-        assert len(lines) == 4
+        never = [line for line in lines if line.startswith("never write:")]
+        assert any(str(ws / ".claude") in line for line in never)
+        assert len(lines) - len(never) == 4
         assert any("Read(.env)" in line and "a.json" in line for line in lines)
         assert any("Edit(./out/**)" in line and "b.json" in line for line in lines)
         assert any(str(ws) in line for line in lines)
