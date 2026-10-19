@@ -1,0 +1,1 @@
+RuntimeError: All 2 providers failed to produce a valid program. Tried: rules, woollama. Last errors: {'woollama': ['Except at line 9 has no approved shape: it falls through and leaves row unassigned (assign it, or use continue or return)']}.

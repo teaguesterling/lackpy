@@ -87,3 +87,32 @@ Findings in the order they were found. Each line says what was measured.
      for validity, so the pre-prompt beats the repair loop.
    - Qwen3.6 without the pre-prompt breaks style.def-length (6 programs):
      it writes long functions.
+10. lackpy's own generation path, 2026-10-18 (Plan 2 Task 8, commit 474c78f).
+    `run_lackpy.py` called `LackpyService.generate` for each task. The writer was
+    Qwen3-30B-A3B-Instruct on the explicit route `tiiny-fast/Qwen/Qwen3-30B-A3B-Instruct`.
+    The prompt is lackpy's build_system_prompt: pre-prompt, guide, skeleton, task.
+    It holds no workspace file contents, unlike the harness prompt. lackpy's cleanup
+    and correction chain run inside generate, so there is no r2. Scored with
+    score.py beside qwen3-30b-pre in a scratch copy, so runs/2026-10-18/results.json
+    is unchanged. score.py now applies the current validator to every program, so
+    qwen3-30b-pre r1 shows 28 valid here, not the 27 in the table above.
+
+    | path | valid | correct | loose | both | both~ |
+    |---|---|---|---|---|---|
+    | lackpy generate (qwen3-30b-lackpy r1) | 28/30 | 24/30 | 26 | 24 | 26 |
+    | harness, pre-prompt (qwen3-30b-pre r1) | 28/30 | 27/30 | 28 | 25 | 26 |
+
+    - Review Focus 4 holds: no generated program names read_file, find_files,
+      write_file or edit_file (grep of r1/*.py: 0 files).
+    - lackpy's correction chain repaired 3 programs (few_shot_correction, 2 attempts each).
+    - The two invalid programs are real model output, kept as *.rejected.py:
+      regex-04 uses `while` (safety); try-03 has an except clause that falls through
+      and leaves `row` unassigned (style.try-handler), though `row` is not read after it.
+    - Transport: the first attempt lost 6 contiguous tasks (regex-04 to try-04). Each
+      was a woollama "inferencer error" at 60 s, with tasks before and after succeeding,
+      so the cause looks device-side, not task-specific (inferred). The six were
+      re-asked once. Four then succeeded in 4-6 s; regex-04 and try-03 were rejected
+      by the validator. The first-attempt errors are kept in runs/2026-10-18/_attempt1-qwen3-30b-lackpy/.
+    - The loss of 3 correct answers against the harness (24 against 27) is not explained
+      yet. Candidates are the missing workspace contents and the different prompt framing.
+      Neither is measured.
