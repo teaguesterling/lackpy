@@ -9,8 +9,10 @@ dictionary members of its module only. The static check cannot follow an alias
 The program keeps its ``import`` statements, so it is still plain Python. This
 replaces the AST import rewrite of design §4.3 with the same effect.
 
-``pathlib`` is not served until Task 4 binds the ``Path`` stand-in (ruling C):
-a real ``Path`` would give unconfined host file access.
+``pathlib`` is served only when a ``PathPolicy`` is given: its proxy's ``Path``
+is the stand-in from ``paths.make_path_class``. With no policy, ``pathlib``
+refuses (ruling C, fail closed): a real ``Path`` would give unconfined host
+file access.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import weakref
 from typing import Any, Callable, NamedTuple
 
 from ..lang import dictionary
+from .paths import PathPolicy, make_path_class
 from .refusal import LackpyRefusal, refuse
 
 _PATH_PENDING_HINT = "Path arrives with the PathPolicy"
@@ -49,10 +52,13 @@ class ModuleProxy:
 
     __slots__ = ("__weakref__",)
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, replacements: dict[str, Any] | None = None) -> None:
         module = importlib.import_module(name)
         members: dict[str, Any] = {}
         for member in dictionary.MODULES[name]:
+            if replacements and member in replacements:
+                members[member] = replacements[member]
+                continue
             if not hasattr(module, member):
                 continue  # e.g. datetime.UTC before Python 3.11
             value = getattr(module, member)
@@ -83,8 +89,11 @@ class ModuleProxy:
         return repr(_STATE[self].module)
 
 
-def make_restricted_import() -> Callable[..., ModuleProxy]:
+def make_restricted_import(path_policy: PathPolicy | None = None) -> Callable[..., ModuleProxy]:
     """Return a fresh ``__import__`` for one program run.
+
+    With ``path_policy``, ``pathlib`` is a proxy whose ``Path`` is the stand-in
+    bound to that policy, one class per run. Without it, ``pathlib`` refuses.
 
     Within a run, a module imported twice is the same proxy, as in plain
     Python. The members are the real, shared objects: the static
@@ -97,12 +106,15 @@ def make_restricted_import() -> Callable[..., ModuleProxy]:
                           fromlist: Any = (), level: int = 0) -> ModuleProxy:
         if level:
             refuse("a relative import")
-        if name == "pathlib":
+        if name == "pathlib" and path_policy is None:
             raise LackpyRefusal(f"import {name}", _PATH_PENDING_HINT)
         if name not in dictionary.MODULES:
             refuse(f"import {name}", name)
         if name not in proxies:
-            proxies[name] = ModuleProxy(name)
+            if name == "pathlib":
+                proxies[name] = ModuleProxy(name, {"Path": make_path_class(path_policy)})
+            else:
+                proxies[name] = ModuleProxy(name)
         return proxies[name]
 
     return restricted_import

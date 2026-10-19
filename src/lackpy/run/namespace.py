@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from ..lang import builtins_policy
 from .modules import make_restricted_import
+from .paths import PathPolicy
 from .refusal import refuse
 
 
@@ -97,20 +98,21 @@ class _TypeStandIn:
 _TYPE = _TypeStandIn()
 
 
-def build_namespace(*, program_file: str | None, path_policy: "PathPolicy | None" = None,
+def build_namespace(*, program_file: str | None, path_policy: PathPolicy | None = None,
                     print_fn: Callable[..., None]) -> dict[str, Any]:
     """Return fresh exec globals for one program run.
 
     Args:
         program_file: The program's path, for ``__file__``. None gives ``"<stdin>"``.
-        path_policy: Unused until Task 4, which binds the ``Path`` stand-in (ruling B).
+        path_policy: The policy for file access. With it, ``pathlib`` serves the
+            ``Path`` stand-in; with None, ``pathlib`` refuses (ruling C).
         print_fn: The function bound as ``print``, in the globals and the builtins.
     """
     program_builtins: dict[str, Any] = {
         name: getattr(_builtins, name) for name in builtins_policy.ALLOWED
     }
     program_builtins["print"] = print_fn
-    program_builtins["__import__"] = make_restricted_import()
+    program_builtins["__import__"] = make_restricted_import(path_policy)
     return {
         "__builtins__": program_builtins,
         "__name__": "__main__",

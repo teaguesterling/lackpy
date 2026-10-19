@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from .base import ExecutionResult
 from .namespace import build_namespace
+from .paths import PathPolicy
 from .refusal import LackpyRefusal
 from .trace import Trace, make_traced
 
@@ -24,7 +25,7 @@ class RestrictedRunner:
             params: dict[str, Any] | None = None,
             kibitzer_session: Any = None, *,
             program_file: str | None = None,
-            path_policy: "PathPolicy | None" = None) -> ExecutionResult:
+            path_policy: PathPolicy | None = None) -> ExecutionResult:
         """Compile and execute a lackpy program in a restricted namespace.
 
         The program's last expression (if any) is captured as the output.
@@ -37,7 +38,8 @@ class RestrictedRunner:
             params: Named parameter values to inject into the namespace.
             kibitzer_session: Optional KibitzerSession for per-call tracking.
             program_file: The program's path, for ``__file__``.
-            path_policy: Passed to :func:`build_namespace` (unused until Task 4).
+            path_policy: Passed to :func:`build_namespace`; None leaves
+                ``pathlib`` refusing.
 
         Returns:
             An ExecutionResult with success, output, trace, and variables.
