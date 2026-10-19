@@ -9,6 +9,8 @@ A refusal stops the program with an error. It never changes a result. A
 program that lackpy runs gives the same output under `python3` from the
 workspace directory. Inside lackpy, it can only do less.
 
+A [literate document](literate.md) uses the same policy for each of its cells.
+
 The path policy uses the `Read(...)` and `Edit(...)` permission rules of
 Claude Code. If Claude Code already guards a project, lackpy reads the same
 rules.

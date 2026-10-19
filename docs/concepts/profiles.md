@@ -53,12 +53,13 @@ These profiles give a failed result. lackpy does not run the program.
 | It sets `tools` or `extra_tools` | `tool kits were removed in lackpy stepy100; use pathlib.Path (docs/concepts/paths.md)` |
 | It is a list of tool names, a dict, or an unknown name such as `read_file,find_files` | the same |
 | Its name is a `.kit` or `.profile` file, not a table | the same, and the file name |
-| It sets `execution = "literate"` | the literate axis is disabled until it migrates to the path policy |
 | It sets `mode = "staged-dsl"` | the mode is disabled until it migrates to the path policy; use `1-shot` or `spm` |
 
 lackpy refuses mode `staged-dsl` on every route: a profile, `lackpy --mode`
-and `[inference] mode`. `lackpyctl render --execute` runs a literate document,
-so lackpy refuses it too. Each refusal waits for a migration to the path policy.
+and `[inference] mode`. The refusal waits for a migration to the path policy.
+
+A profile with `execution = "literate"` runs a [literate document](literate.md).
+It uses the same path policy as a program.
 
 ## Python API
 

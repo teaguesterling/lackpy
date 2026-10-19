@@ -177,10 +177,10 @@ instance = cls()
 ### `literate` — markdown with embedded code blocks
 
 Executes a markdown document with `` ```lackpy `` fenced code blocks
-incrementally, cell by cell, through a persistent kernel. Prose becomes
-`print()` calls with `{expr}` f-string interpolation, code blocks execute
-inline, and the captured stdout is the rendered document. Each cell undergoes
-static analysis (compile check + name resolution) before execution. Block
+incrementally, cell by cell, through a persistent kernel. Each code cell is a
+lackpy program: lackpy validates it with the cells before it, and runs it in
+the restricted namespace under the path policy. Prose shows `{expr}` values,
+and the captured stdout is the rendered document. Block
 annotations (`@hidden`, `@gather`, `@continue`, `@read`, `@write`, `@diff`,
 `@scratch`) control visibility, file I/O, and the gather-then-narrate agent
 pattern.
@@ -199,7 +199,9 @@ doc = '''
 # Summary
 
 ```lackpy @hidden
-lines = read_file("README.md").splitlines()
+from pathlib import Path
+
+lines = Path("README.md").read_text().splitlines()
 ```
 
 The file has {len(lines)} lines.

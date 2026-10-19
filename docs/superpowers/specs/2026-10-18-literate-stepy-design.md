@@ -92,8 +92,8 @@ The literate prompt (`literate/prompt.py`) teaches stepy. It combines `format_pr
 
 ## Gates
 
-1. The Plan 2 Task 7 C1 escape document refuses through every entry point. That document read a file outside the workspace through `(lambda: 0).__globals__`, walked `object.__subclasses__()`, and reached host `os`.
-2. A cell that writes `.claude/settings.json` refuses, which shows the Plan 2 write protection holds inside a document.
-3. For the equivalence fixtures, the concatenated code cells match `python3` in stdout and in written files.
-4. A refusal inside a `try`, in a cell, stops the document.
-5. No `exec`, `eval` or `compile` call in `src/lackpy/interpreters/literate/` runs document code outside `CellSession`. A test checks this, with an allowlist of parse-only `compile` calls.
+1. The Plan 2 Task 7 C1 escape document refuses through every entry point. That document read a file outside the workspace through `(lambda: 0).__globals__`, walked `object.__subclasses__()`, and reached host `os`. Done: cb95f96 (tests/literate/test_gate.py).
+2. A cell that writes `.claude/settings.json` refuses, which shows the Plan 2 write protection holds inside a document. Done: cb95f96 (tests/literate/test_gate.py).
+3. For the equivalence fixtures, the concatenated code cells match `python3` in stdout and in written files. Done: cb95f96, 81e4196 (tests/literate/test_equivalence.py).
+4. A refusal inside a `try`, in a cell, stops the document. Done: cb95f96 (tests/literate/test_gate.py).
+5. No `exec`, `eval` or `compile` call in `src/lackpy/interpreters/literate/` runs document code outside `CellSession`. A test checks this, with an allowlist of parse-only `compile` calls. Done: e89e9bd, da60dab (tests/literate/test_no_host_exec.py).
