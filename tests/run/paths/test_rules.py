@@ -290,3 +290,33 @@ class TestDescribe:
         assert any("Edit(./out/**)" in line and "b.json" in line for line in lines)
         assert any(str(ws) in line for line in lines)
         assert any(str(extra) in line for line in lines)
+
+
+class TestOutsideWorkspaceHint:
+    """Review M10: the outside-workspace refusal names the permissions.allow remedy."""
+
+    def test_read_refusal_names_a_read_allow(self, ws):
+        with pytest.raises(LackpyRefusal) as info:
+            PathPolicy(ws, []).check(Path("/etc/passwd"), "read")
+        assert "add Read(//etc/passwd) to permissions.allow" in str(info.value)
+
+    def test_write_refusal_names_an_edit_allow(self, ws, tmp_path):
+        with pytest.raises(LackpyRefusal) as info:
+            PathPolicy(ws, []).check(tmp_path / "out.txt", "write")
+        assert f"add Edit(/{tmp_path}/out.txt) to permissions.allow" in str(info.value)
+
+    def test_a_deny_names_no_allow_remedy(self, ws):
+        policy = PathPolicy(ws, [rule("Read(./secret)", anchor=ws)])
+        with pytest.raises(LackpyRefusal) as info:
+            policy.check(Path("secret"), "read")
+        assert "permissions.allow" not in str(info.value)
+
+
+class TestUnresolvableRule:
+    """Review I4: a rule whose literal prefix cannot be resolved (a symlink loop)
+    is a settings error, a ``ValueError`` that names the rule, not a refusal."""
+
+    def test_symlink_loop_in_a_deny_prefix(self, ws):
+        (ws / "loop").symlink_to(ws / "loop")
+        with pytest.raises(ValueError, match=r"Read\(\./loop/secret\)"):
+            PathPolicy(ws, [rule("Read(./loop/secret)", anchor=ws, source="ws settings")])

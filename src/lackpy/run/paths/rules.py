@@ -36,6 +36,11 @@ Semantics:
    ``managed-settings.d``. This is checked
    first, on the lexical and resolved forms, case-insensitively; no rule or
    default root lifts it. A write there would widen the policy of every later run.
+   Host code files are never writable either (ruling I5, final review): any path
+   with a ``.git``, ``.mcp.json`` or ``.envrc`` component, by the same check.
+   A write there makes a later host command (git, an MCP client, direnv) run
+   code the program chose. Reads stay allowed. A git directory with another
+   name (``--separate-git-dir``, a bare repository) is not recognized.
 6. Matching is case-sensitive. Upstream does not document case sensitivity;
    case-sensitive is the stricter choice on a case-insensitive filesystem for
    allows, and is how Linux paths compare.
@@ -81,6 +86,9 @@ MANAGED_SETTINGS: Path = managed_settings_path(sys.platform)
 
 _GLOB_CHARS = frozenset("*?[")
 _PROTECTED_PARTS = frozenset({".claude", ".lackpy"})  # compared casefolded
+# Ruling I5 (final review): a write here makes a later host command run code the
+# program chose: git config (core.fsmonitor) and hooks, MCP server commands, direnv.
+_HOST_CODE_PARTS = frozenset({".git", ".mcp.json", ".envrc"})  # compared casefolded
 
 
 @dataclass(frozen=True)
@@ -205,7 +213,12 @@ def _compile(rule: PathRule, workspace: Path) -> list[tuple[str, ...]]:
             cut = next((i for i, seg in enumerate(segs) if _GLOB_CHARS & set(seg)), len(segs))
             if cut == 0:
                 continue
-            resolved = _segments(_real("/" + "/".join(segs[:cut]))) + segs[cut:]
+            try:
+                real_prefix = _real("/" + "/".join(segs[:cut]))
+            except LackpyRefusal as e:  # a settings error, not a program's (review I4)
+                raise ValueError(f"rule {rule.text()} in {rule.source} cannot be resolved: "
+                                 f"{e.what}") from None
+            resolved = _segments(real_prefix) + segs[cut:]
             if resolved not in patterns:
                 patterns.append(resolved)
     return patterns
@@ -262,8 +275,12 @@ class PathPolicy:
         if op == "write":
             for form in (lexical, real):
                 folded = form.casefold()
-                if self._under(folded, self._protected) or _PROTECTED_PARTS & set(_segments(folded)):
+                parts = set(_segments(folded))
+                if self._under(folded, self._protected) or _PROTECTED_PARTS & parts:
                     return "it is a permission settings location, which lackpy never writes"
+                if _HOST_CODE_PARTS & parts:
+                    return ("it is a file that later runs as host code (git config or hooks, "
+                            ".mcp.json, .envrc), which lackpy never writes")
         deny_kinds = ("read",) if op == "read" else ("read", "edit")
         for form in (lexical, real):
             rule = self._rules_match(form, deny_kinds, "deny")
@@ -273,7 +290,10 @@ class PathPolicy:
         for form, roots in ((lexical, self._roots_lexical), (real, self._roots_real)):
             if not self._under(form, roots) and self._rules_match(form, allow_kind, "allow") is None:
                 where = "it" if form == lexical else f"its target {form}"
-                return f"{where} is outside the workspace and no allow rule matches"
+                tool = "Read" if op == "read" else "Edit"
+                # Review M10: name the remedy. ``//`` anchors the rule at the filesystem root.
+                return (f"{where} is outside the workspace and no allow rule matches; to allow it, "
+                        f"add {tool}(/{form}) to permissions.allow in .claude/settings.json")
         return None
 
     def check(self, path: Path, op: Literal["read", "write"]) -> None:

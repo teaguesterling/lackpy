@@ -47,10 +47,10 @@ from pathlib import Path
 print(Path("/etc/passwd").read_text())
 ```
 
-The run fails with this error (measured 2026-10-18):
+The run fails with this error (measured 2026-10-18, PathPolicy and RestrictedRunner):
 
 ```text
-reading /etc/passwd (it is outside the workspace and no allow rule matches) is not allowed in lackpy
+reading /etc/passwd (it is outside the workspace and no allow rule matches; to allow it, add Read(//etc/passwd) to permissions.allow in .claude/settings.json) is not allowed in lackpy
 ```
 
 ## Sources
@@ -200,6 +200,20 @@ lackpy checks the path as written and its resolved target. The check ignores
 case, also on Linux. No rule and no extra directory lifts it.
 
 A workspace inside `~/.claude` is therefore read-only: each write in it refuses.
+
+## Host code files
+
+Some files make a later host command run code. A git config or hook runs when
+you run `git`. An MCP client starts the commands in `.mcp.json`. direnv runs
+`.envrc`. So lackpy also refuses each write to:
+
+- any path with a `.git` component, at any depth;
+- any file or directory named `.mcp.json` or `.envrc`, at any depth.
+
+The check is the same as for settings locations: the path as written and its
+resolved target, case ignored, and no rule lifts it. Reads stay allowed. lackpy
+does not find a git directory that has another name, for example one made with
+`git init --separate-git-dir`.
 
 ## Symlinks
 

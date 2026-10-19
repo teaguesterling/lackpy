@@ -520,3 +520,79 @@ class TestWiring:
         result = run("from pathlib import Path\nPath('x').parent", PathPolicy(ws, []))
         assert result.success, result.error
         assert not isinstance(result.output, pathlib.PurePath)
+
+
+class TestHostCodeFilesAreNotWritable:
+    """Ruling I5 (final review): a write to ``.git`` internals, ``.mcp.json`` or
+    ``.envrc`` makes a later host command run code the program chose
+    (``core.fsmonitor`` and hooks, MCP server commands, direnv). Writes refuse
+    there; reads stay allowed."""
+
+    @pytest.mark.parametrize("relative", [
+        ".git/config", ".git/hooks/pre-commit", "sub/.git/config", "a/b/.git/hooks/post-checkout",
+        ".mcp.json", "sub/.mcp.json", ".envrc", "deep/er/.envrc",
+    ])
+    def test_direct_write_refuses(self, ws, P, relative):
+        for write in (lambda p: p.write_text("x"), lambda p: p.write_bytes(b"x")):
+            with pytest.raises(LackpyRefusal):
+                write(P(relative))
+        assert not (ws / relative).exists()
+
+    def test_existing_git_config_is_not_rewritten(self, ws, P):
+        (ws / ".git").mkdir()
+        (ws / ".git" / "config").write_text("[core]\n")
+        with pytest.raises(LackpyRefusal):
+            P(".git/config").write_text("[core]\n\tfsmonitor = touch PWNED\n")
+        assert (ws / ".git" / "config").read_text() == "[core]\n"
+
+    def test_write_through_a_symlink_refuses(self, ws, P):
+        (ws / ".git" / "hooks").mkdir(parents=True)
+        (ws / "innocent").symlink_to(ws / ".git")
+        with pytest.raises(LackpyRefusal):
+            P("innocent/config").write_text("x")
+        with pytest.raises(LackpyRefusal):
+            P("innocent/hooks/pre-commit").write_text("x")
+        (ws / "sub").mkdir()
+        (ws / "dirlink").symlink_to(ws / "sub")
+        (ws / "sub" / ".mcp.json").write_text("{}")
+        (ws / "mcp-link.json").symlink_to(ws / "sub" / ".mcp.json")
+        with pytest.raises(LackpyRefusal):
+            P("mcp-link.json").write_text("{}")  # the final component is a symlink
+        assert (ws / "sub" / ".mcp.json").read_text() == "{}"
+        assert not (ws / ".git" / "config").exists()
+
+    @pytest.mark.parametrize("relative", [".git/hooks", "a/.git/x", ".mcp.json", "sub/.envrc"])
+    def test_mkdir_parents_refuses(self, ws, P, relative):
+        with pytest.raises(LackpyRefusal):
+            P(relative).mkdir(parents=True)
+        assert not (ws / relative).exists()
+
+    def test_mkdir_parents_refuses_below_the_git_dir(self, ws, P):
+        with pytest.raises(LackpyRefusal):
+            P(".git/hooks/deep").mkdir(parents=True)
+        assert not (ws / ".git").exists()
+
+    @pytest.mark.parametrize("relative", [".GIT/config", ".Git/hooks/x", ".MCP.json", ".EnvRC"])
+    def test_case_variants_refuse(self, ws, P, relative):
+        # A case-insensitive filesystem would reach the real file.
+        with pytest.raises(LackpyRefusal):
+            P(relative).write_text("x")
+
+    def test_reads_are_unaffected(self, ws, P):
+        (ws / ".git").mkdir()
+        (ws / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        (ws / ".mcp.json").write_text("{}")
+        (ws / ".envrc").write_text("export X=1\n")
+        assert P(".git/HEAD").read_text().startswith("ref:")
+        assert P(".mcp.json").read_text() == "{}"
+        assert P(".envrc").read_text() == "export X=1\n"
+
+    @pytest.mark.parametrize("relative", [".gitignore", ".github/workflows/ci.yml", "git/config",
+                                          "mcp.json", "envrc", ".git-blame-ignore-revs"])
+    def test_lookalike_names_stay_writable(self, ws, P, relative):
+        P(relative).parent.mkdir(parents=True, exist_ok=True)
+        assert P(relative).write_text("ok") == 2
+
+    def test_refusal_names_the_reason(self, ws, P):
+        with pytest.raises(LackpyRefusal, match="runs as host code"):
+            P(".git/config").write_text("x")
