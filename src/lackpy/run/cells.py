@@ -56,6 +56,10 @@ class CellOutcome:
         rebound: Every name the run bound or rebound (by identity, any value),
             with the name of its value's type. Also for a run that failed part
             way. The values themselves are not given (ruling N1).
+        value: The value of the cell's trailing expression statement, as
+            ``RestrictedRunner.run`` gives a program's output: data as it is,
+            else its ``repr`` text, made inside the guarded run. None when the
+            cell ends in another statement, or failed (Task 4 fix round 1, M1).
     """
 
     ok: bool
@@ -66,6 +70,7 @@ class CellOutcome:
     cell_id: int | None = None
     line: int | None = None
     rebound: dict[str, str] = field(default_factory=dict)
+    value: Any = None
 
 
 @dataclass
@@ -88,6 +93,8 @@ class ExprOutcome:
 @dataclass
 class _Cell:
     code: CodeType | None  # None: the cell failed validation and is not in the program
+    # The trailing expression statement, compiled apart so its value is kept.
+    tail: CodeType | None = None
 
 
 # A validator line reference is ``line N`` outside quoted program text. Rules quote
@@ -199,7 +206,7 @@ class CellSession:
                                error=f"cell {cell_id} cannot be re-run: it {reason}")
         self._captured.clear()
         try:
-            return self._exec(cell_id, cell.code)
+            return self._exec(cell_id, cell.code, cell.tail)
         except RUNTIME_FAILURES as e:
             return self._failure(cell_id, e)
 
@@ -263,12 +270,17 @@ class CellSession:
         error = self._violations(source)
         if error is not None:
             return CellOutcome(ok=False, phase="validate", error=error, cell_id=cell_id)
+        # The trailing expression runs as itself, once, in the same namespace
+        # (the runner's last-expression rule), so its value is the cell's value.
+        tail = None
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            tail = compile(ast.Expression(tree.body.pop().value), "<lackpy>", "eval")
         code = compile(tree, "<lackpy>", "exec")
-        self._cells[cell_id].code = code
+        self._cells[cell_id] = _Cell(code=code, tail=tail)
         self._join(cell_id, source)
-        return self._exec(cell_id, code)
+        return self._exec(cell_id, code, tail)
 
-    def _exec(self, cell_id: int, code: CodeType) -> CellOutcome:
+    def _exec(self, cell_id: int, code: CodeType, tail: CodeType | None = None) -> CellOutcome:
         # References, not ids: an id can be reused once its object is freed.
         before = dict(self._namespace)
 
@@ -276,15 +288,21 @@ class CellSession:
             return (k not in self._runtime_names
                     and (k not in before or before[k] is not self._namespace[k]))
 
+        value = None
         try:
             _run_validated_code(code, self._namespace)
+            if tail is not None:
+                # Validated with the cell; the namespace is the restricted one.
+                value = eval(tail, self._namespace)  # noqa: S307
+                if not _is_data(value):
+                    value = repr(value)  # as RestrictedRunner.run; a refusal here latches
         except RUNTIME_FAILURES as e:
             outcome = self._failure(cell_id, e)
             outcome.rebound = self._rebound(changed)
             return outcome
         delta = data_variables(self._namespace, changed)
         return CellOutcome(ok=True, stdout="".join(self._captured), delta=delta, cell_id=cell_id,
-                           rebound=self._rebound(changed))
+                           rebound=self._rebound(changed), value=value)
 
     def _rebound(self, changed: Callable[[str], bool]) -> dict[str, str]:
         # The type's own __name__ descriptor: no metaclass code runs on the host.

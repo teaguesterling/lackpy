@@ -100,43 +100,34 @@ def _traced_paths(trace: Any, tools: tuple[str, ...]) -> list[str]:
     return list(seen)
 
 
-def _read_only(policy: dict[str, Any] | None) -> bool:
-    """A profile's ``policy.read_only`` (default False); ``ProfileError`` unless a bool.
+#: The literate grade ceiling of a read-only profile: pinhole reads, no writes.
+_READ_ONLY_CEILING = (1, 1)
+
+#: The keys a profile's ``policy`` table may hold.
+_POLICY_KEYS = frozenset({"read_only"})
+
+
+def _read_only(policy: Any) -> bool:
+    """A profile's ``policy.read_only`` (default False).
 
     A read-only profile runs under ``read_only_policy`` (literate stepy D7,
-    Ruling F). A value that is not a bool is an error, not "false": a typo
-    must not silently allow writes.
+    Ruling F). Fail closed (Task 4 review I2): a ``policy`` that is not a
+    table, a key other than ``read_only`` (a typo such as ``readonly``), or a
+    value that is not a bool is a ``ProfileError``, never "false".
     """
-    value = (policy or {}).get("read_only", False)
+    if policy is None:
+        return False
+    if not isinstance(policy, dict):
+        raise ProfileError(f"profile policy must be a table such as {{ read_only = true }}, "
+                           f"not {policy!r}")
+    unknown = sorted(str(k) for k in policy if k not in _POLICY_KEYS)
+    if unknown:
+        raise ProfileError(f"unknown profile policy key(s) {unknown}; "
+                           f"allowed: {sorted(_POLICY_KEYS)}")
+    value = policy.get("read_only", False)
     if not isinstance(value, bool):
         raise ProfileError(f"profile policy.read_only must be true or false, not {value!r}")
     return value
-
-
-def _last_cell_value(document: str, variables: dict[str, Any]) -> Any:
-    """The value of a literate document's last code cell, made data-safe.
-
-    A cell's value is its last statement when that statement is a bare name,
-    as a notebook shows it; the name's value is read from the run's bindings,
-    so nothing runs again. ``None`` when the last code cell ends otherwise, or
-    the value is not data (``runner._is_data``).
-    """
-    import ast
-
-    from .interpreters.literate.compiler import compile_cell
-    from .interpreters.literate.parser import parse
-
-    code = [c for c in parse(document).cells if c.cell_type != "prose"]
-    if not code:
-        return None
-    try:
-        body = ast.parse(compile_cell(code[-1])).body
-    except (SyntaxError, ValueError):
-        return None
-    if not body or not isinstance(body[-1], ast.Expr) or not isinstance(body[-1].value, ast.Name):
-        return None
-    value = variables.get(body[-1].value.id)
-    return value if _is_data(value) else None
 
 
 def _check_mode(mode: str | None) -> None:
@@ -755,10 +746,14 @@ class LackpyService:
         No toolset is passed: there is no kit grade, so no static ceiling; the
         policy is the boundary (a read-only profile adds the write deny).
 
-        The result: ``stdout`` is the rendered document; ``output`` is the
-        last code cell's value when that cell ends in a bare name bound to
-        data (else ``None``); ``trace`` is the session's trace; ``error`` is
-        the refusal that ended the document, then the reified failures.
+        The result: ``stdout`` is the rendered document; ``output`` follows
+        ``run_program``'s last-expression rule: when the run succeeded and the
+        last code cell ends in an expression statement, that expression's
+        value (data, or its ``repr`` text), else ``None``; ``trace`` is the
+        session's trace; ``error`` is the refusal that ended the document,
+        then the reified failures. A read-only profile also passes a read-only
+        ``grade_ceiling``, so the static planner refuses a visible write cell
+        before it runs (the policy still refuses what the planner cannot see).
         """
         from .interpreters.base import ExecutionContext
         from .interpreters.literate import LiterateInterpreter
@@ -767,10 +762,15 @@ class LackpyService:
             policy = self._load_path_policy(read_only=read_only)
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
+        config: dict[str, Any] = {"path_policy": policy}
+        if read_only:
+            # Task 4 review M5: the static planner over the policy (ruling) —
+            # a write cell it can see is refused before it runs.
+            config["grade_ceiling"] = _READ_ONLY_CEILING
         ctx = ExecutionContext(
             base_dir=str(self._workspace.resolve()),
             params=param_values,
-            config={"path_policy": policy},
+            config=config,
         )
         interp = LiterateInterpreter()
         validation = interp.validate(program, ctx)
@@ -784,7 +784,9 @@ class LackpyService:
         trace = result.metadata.get("trace")
         return ExecutionResult(
             success=result.success,
-            output=_last_cell_value(program, variables),
+            # run_program's rule: the last expression's value, only for a run
+            # that succeeded (review I1); the interpreter made it data-safe.
+            output=result.metadata.get("value") if result.success else None,
             stdout=str(result.output) if result.output else "",
             error=result.error,
             trace=trace if trace is not None else Trace(),

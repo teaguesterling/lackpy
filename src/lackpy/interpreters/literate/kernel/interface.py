@@ -35,6 +35,9 @@ class CellResult:
     #: The ``CellSession`` id of the run (for ``rerun_cell``); ``None`` for a
     #: cell that ran nothing in the session (prose, ``@continue``, a static failure).
     cell_id: int | None = None
+    #: The value of the cell's trailing expression statement (``CellOutcome.value``:
+    #: data, or its repr text); ``None`` otherwise.
+    value: Any = None
 
 
 class KernelInterface(IncrementalInterpreter, Protocol):

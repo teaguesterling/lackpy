@@ -500,19 +500,58 @@ class TestLiterateAxisRuns:
             assert result.success, result.error
             assert "X=42" in result.stdout
 
-    @pytest.mark.asyncio
-    async def test_output_is_the_last_code_cells_value_when_it_ends_in_a_name(self, service):
-        doc = "```lackpy\nx = {'a': [1, 2]}\nx\n```\n\nDone."
-        result = await service.run_program(doc, profile=_LIT)
-        assert result.success, result.error
-        assert result.output == {"a": [1, 2]}
+    # Output (fix round 1, I1 and M1): run_program's last-expression rule. When the
+    # run succeeded and the last code cell ends in an expression statement, the
+    # output is that expression's value, data or its repr text; else None.
 
     @pytest.mark.asyncio
-    async def test_output_is_none_when_the_last_value_is_not_data(self, service):
-        doc = "```lackpy\nf = len\nf\n```"
+    @pytest.mark.parametrize("last, expected", [
+        ("x", {"a": [1, 2]}),
+        ("len(x['a'])", 2),
+        ("x['a']", [1, 2]),
+        ("y = 3", None),
+    ])
+    async def test_output_is_the_last_code_cells_trailing_expression(self, service, last, expected):
+        doc = f"```lackpy\nx = {{'a': [1, 2]}}\n```\n\nText.\n\n```lackpy\n{last}\n```\n\nDone."
         result = await service.run_program(doc, profile=_LIT)
         assert result.success, result.error
+        assert result.output == expected
+
+    @pytest.mark.asyncio
+    async def test_a_value_that_is_not_data_is_its_repr_text(self, service):
+        doc = "```lackpy\nf = len\nf\n```"
+        result = await service.run_program(doc, profile=_LIT)
+        one_shot = await service.run_program("f = len\nf")
+        assert result.success, result.error
+        assert isinstance(result.output, str) and "len" in result.output
+        assert result.output == one_shot.output
+
+    @pytest.mark.asyncio
+    async def test_the_trailing_expression_runs_once(self, service):
+        doc = ("```lackpy\nfrom pathlib import Path\nprint('once')\n"
+               "Path('o.txt').write_text('ab')\n```")
+        result = await service.run_program(doc, profile=_LIT)
+        assert result.success, result.error
+        assert result.output == 2
+        assert result.stdout.count("once") == 1
+        assert [e.tool for e in result.trace.entries] == ["Path.write_text"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("doc", [
+        # Review I1, measured: each gave a value from a cell that never ran.
+        "```lackpy\nx = 7\n```\n\n```lackpy\nfrom pathlib import Path\nPath('/etc/passwd').read_text()\n```\n\n```lackpy\nx\n```",
+        "```lackpy\nx = 5\n```\n\n```lackpy\nnope + 1\nx\n```",
+        "```lackpy\nx = 9\n```\n\n```lackpy\nz = 1 / 0\nx\n```",
+    ])
+    async def test_a_failed_run_has_no_output(self, service, doc):
+        result = await service.run_program(doc, profile=_LIT)
+        assert not result.success
         assert result.output is None
+        delegated = await service.delegate("x", profile=_LIT, _program_override=doc)
+        assert not delegated["success"]
+        # delegate's effective output falls back to stdout (both axes); never
+        # a value from a cell that did not run.
+        assert delegated["output"] in (None, delegated["stdout"].strip())
 
     def test_pending_message_is_gone(self):
         import lackpy.profiles
@@ -625,11 +664,23 @@ class TestLiterateExecutionAxis:
 
     @pytest.mark.asyncio
     async def test_write_doc_refused_under_a_read_only_profile(self, service):
-        doc = "```lackpy @write(out.txt)\nhello\n```\n\n```lackpy\nafter = 1\n```"
+        # Fix round 1, M5: the static ceiling refuses the write cell before it
+        # runs (it is Unavailable); the document goes on.
+        doc = "```lackpy @write(out.txt)\nhello\n```\n\n```lackpy\nafter = 1\n```\n\nA={after}"
         result = await service.run_program(doc, profile=_RO)
         assert not result.success
-        assert "refused" in (result.error or "")
+        assert "effect ceiling exceeded" in (result.error or "")
+        assert "A=1" in result.stdout
         assert not (service._workspace / "out.txt").exists()
+
+    def test_under_the_planner_the_read_only_policy_still_denies_writes(self, service):
+        # The ceiling is a planner over the policy (ruling): the policy the
+        # session gets for a read-only profile denies every write by itself.
+        from lackpy.run.refusal import LackpyRefusal
+        policy = service._load_path_policy(read_only=True)
+        with pytest.raises(LackpyRefusal):
+            policy.check(service._workspace / "out.txt", "write")
+        policy.check(service._workspace / "test.txt", "read")
 
     @pytest.mark.asyncio
     async def test_a_read_only_profile_still_reads(self, service):
@@ -666,6 +717,54 @@ class TestLiterateExecutionAxis:
         assert "read_only" in result.error
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("policy", [
+        # Review I2, measured: the misspelled keys ran read-write; the
+        # non-tables raised AttributeError out of run_program.
+        {"readonly": True}, {"Read_Only": True}, {"read_only": True, "x": 1},
+        "read_only", True, ["read_only"],
+    ])
+    async def test_a_malformed_policy_is_a_profile_error(self, service, policy):
+        profile = Profile(execution="literate", policy=policy)
+        doc = "```lackpy\nfrom pathlib import Path\nPath('k.txt').write_text('x')\n```"
+        result = await service.run_program(doc, profile=profile)
+        assert not result.success
+        assert "policy" in result.error
+        delegated = await service.delegate("x", profile=profile, _program_override=doc)
+        assert not delegated["success"]
+        assert not (service._workspace / "k.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_a_misspelled_configured_policy_is_a_profile_error(self, tmp_path, tmp_home):
+        ws = tmp_path / "wsmis"
+        (ws / ".lackpy").mkdir(parents=True)
+        (ws / ".lackpy" / "config.toml").write_text(
+            '[profiles.ro]\nexecution = "literate"\npolicy = { readonly = true }\n')
+        svc = _make_service(ws, tmp_home)
+        doc = "```lackpy\nfrom pathlib import Path\nPath('k.txt').write_text('x')\n```"
+        result = await svc.run_program(doc, profile="ro")
+        assert not result.success
+        assert "readonly" in result.error
+        assert not (ws / "k.txt").exists()
+
+    def test_cli_with_a_non_table_policy_fails_cleanly(self, tmp_path, capsys, monkeypatch):
+        from lackpy import service as service_module
+        from lackpy.cli import main
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr(service_module, "load_policy",
+                            lambda w: load_policy(w, home=home, managed=None))
+        ws = tmp_path / "wscli"
+        (ws / ".lackpy").mkdir(parents=True)
+        (ws / ".lackpy" / "config.toml").write_text(
+            '[profiles.ro]\nexecution = "literate"\npolicy = "read_only"\n')
+        prog = tmp_path / "doc.md"
+        prog.write_text("```lackpy\nx = 1\n```\n")
+        code = main([str(prog), "--workspace", str(ws), "--profile", "ro"])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 1
+        assert "policy" in out["error"]
+
+    @pytest.mark.asyncio
     async def test_within_ceiling_doc_executes_and_renders(self, service):
         doc = "```lackpy\nx = 2 + 2\n```\n\nResult: {x}"
         result = await service.run_program(doc, profile=_LIT)
@@ -691,7 +790,7 @@ class TestLiterateExecutionAxis:
         result = await service.delegate(
             "x", profile=_RO, _program_override="```lackpy @write(o.txt)\nhi\n```")
         assert not result["success"]
-        assert "refused" in (result["error"] or "")
+        assert "effect ceiling exceeded" in (result["error"] or "")
         assert not (service._workspace / "o.txt").exists()
 
     @pytest.mark.asyncio

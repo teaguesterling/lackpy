@@ -262,6 +262,8 @@ class LiterateInterpreter:
         cell_ids: dict[int, int | None] = {}
         # D4: the text of the refusal that ended this run, if one did.
         refusal: str | None = None
+        # Each cell's latest value, for the cells whose latest run succeeded.
+        values: dict[int, Any] = {}
 
         for index, cell in enumerate(parsed.cells):
             refs, binds = _static_ref_bind_sets(cell)
@@ -285,6 +287,7 @@ class LiterateInterpreter:
             outcome = self._run_resolved_cell(
                 cell, index, kernel, ledger, versions, assigned_names
             )
+            _keep_value(values, index, outcome)
             if outcome.executed:
                 observed_effects[index] = outcome.observed_effects
                 cell_ids[index] = outcome.cell_id
@@ -308,7 +311,7 @@ class LiterateInterpreter:
             refusal = self._reexecute_dirty_subgraph(
                 parsed.cells, graph, kernel, ledger, versions, assigned_names,
                 reactive_mode, observed_effects, gate_violations, run_mark,
-                output_parts, cell_ids,
+                output_parts, cell_ids, values,
             )
 
         elapsed = (time.perf_counter() - start) * 1000
@@ -364,6 +367,9 @@ class LiterateInterpreter:
                 "rendered_markdown": rendered_markdown,
                 # The session's trace: every Path call the cells made (D9).
                 "trace": kernel.session.trace,
+                # The last code cell's trailing-expression value, when its
+                # latest run succeeded (Task 4 fix round 1, M1); else None.
+                "value": _last_code_value(parsed.cells, values),
                 "frontmatter": {
                     "echo": parsed.frontmatter.echo,
                     "output": parsed.frontmatter.output,
@@ -495,7 +501,7 @@ class LiterateInterpreter:
         return _CellOutcome(
             rendered="".join(parts), continue_requested=cont,
             executed=True, observed_effects=observed,
-            cell_id=result.cell_id,
+            cell_id=result.cell_id, ok=True, value=result.value,
         )
 
     def _reexecute_dirty_subgraph(
@@ -512,6 +518,7 @@ class LiterateInterpreter:
         run_mark: int,
         output_parts: list[str],
         cell_ids: dict[int, int | None] | None = None,
+        values: dict[int, Any] | None = None,
     ) -> str | None:
         """Re-execute the stale dependents of this run's re-assertions (L1.4).
 
@@ -648,6 +655,8 @@ class LiterateInterpreter:
                 cells[index], index, kernel, ledger, versions, assigned_names,
                 rerun_id=cell_ids.get(index), rerun=True,
             )
+            if values is not None:
+                _keep_value(values, index, outcome)
             if outcome.refusal is not None:
                 output_parts.append(outcome.rendered)
                 return outcome.refusal
@@ -693,6 +702,24 @@ class _CellOutcome:
     cell_id: int | None = None
     #: The refusal text when the cell's run refused (D4): the document stops.
     refusal: str | None = None
+    #: Whether the cell ran and succeeded; then ``value`` is its trailing
+    #: expression's value (``CellResult.value``), else None.
+    ok: bool = False
+    value: Any = None
+
+
+def _keep_value(values: dict[int, Any], index: int, outcome: _CellOutcome) -> None:
+    """Record the cell's value after a run that succeeded; forget it otherwise."""
+    if outcome.ok:
+        values[index] = outcome.value
+    else:
+        values.pop(index, None)
+
+
+def _last_code_value(cells: list[Cell], values: dict[int, Any]) -> Any:
+    """The value of the last code (non-prose) cell, or None when it did not succeed."""
+    code = [i for i, c in enumerate(cells) if c.cell_type != "prose"]
+    return values.get(code[-1]) if code else None
 
 
 def _static_ref_bind_sets(cell: Cell) -> tuple[set[str], set[str]]:

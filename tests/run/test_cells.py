@@ -510,3 +510,35 @@ def test_a_refusal_text_has_no_exception_type_prefix(session):
     out = session.run_cell("t = Path('/etc/hostname').read_text()")
     assert out.phase == "refused" and "/etc/hostname" in out.error
     assert not out.error.startswith("LackpyRefusal")
+
+
+# -- a cell's value: its trailing expression (Task 4 fix round 1, M1) ------------
+
+def test_a_cell_value_is_its_trailing_expression(session):
+    assert _ok(session.run_cell("x = [1, 2]\nlen(x)")).value == 2
+    assert _ok(session.run_cell("y = 3")).value is None
+    assert _ok(session.run_cell("x")).value == [1, 2]
+
+
+def test_a_cell_value_that_is_not_data_is_its_repr_as_the_runner_gives_it(session):
+    from lackpy.run.runner import RestrictedRunner
+    out = _ok(session.run_cell("f = len\nf"))
+    assert out.value == RestrictedRunner().run("f = len\nf").output
+
+
+def test_the_trailing_expression_runs_once(session):
+    out = _ok(session.run_cell("n = []\nn.append(1)\nprint('once')"))
+    assert out.stdout == "once\n"
+    assert _ok(session.run_cell("len(n)")).value == 1
+
+
+def test_a_rerun_gives_the_value_again(session):
+    _ok(session.run_cell("n = [1]"))
+    first = _ok(session.run_cell("len(n)"))
+    _ok(session.run_cell("n.append(2)"))
+    assert _ok(session.rerun_cell(first.cell_id)).value == 2
+
+
+def test_a_failed_cell_has_no_value(session):
+    out = session.run_cell("x = 1\n1 / 0")
+    assert not out.ok and out.value is None

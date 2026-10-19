@@ -6,12 +6,14 @@ and a document that writes files). Its code cells, joined in order, are a
 program. That program runs under ``python3 -I`` in a fresh copy of
 ``fixtures/workspace``. The document runs in two more fresh copies:
 
-* cell by cell, through the kernel the interpreter uses (one ``CellSession``
-  under the copy's ``PathPolicy``), which gives the stdout of each code cell;
+* cell by cell, through the kernel the service builds
+  (``literate._build_kernel``: one ``CellSession`` under the copy's
+  ``PathPolicy``), which gives the stdout of each cell;
 * through ``LackpyService.run_program`` with ``execution="literate"``.
 
-python3's stdout must equal the code cells' stdout joined. All three copies
-must hold the same files afterwards. Prose output is excluded: python3 has no
+python3's stdout must equal the code cells' stdout joined, exactly. The
+service's rendered stdout must equal every cell's output joined, exactly. All
+three copies must hold the same files and directories afterwards. Prose output is excluded: python3 has no
 prose. A document with ``@diff`` has no python3 twin (Task 3 ruling I2), so no
 fixture uses ``@diff``, and the test checks that.
 """
@@ -26,13 +28,13 @@ from pathlib import Path
 
 import pytest
 
+from lackpy.interpreters.base import ExecutionContext
+from lackpy.interpreters.literate import _build_kernel
 from lackpy.interpreters.literate.compiler import compile_cells
 from lackpy.interpreters.literate.parser import ParseResult, parse
 from lackpy.profiles import Profile
 from lackpy.run.paths import load_policy
 from lackpy.service import LackpyService
-
-from .conftest import make_kernel
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SEED = FIXTURES / "workspace"
@@ -44,8 +46,10 @@ def _copy(dest: Path) -> Path:
     return dest
 
 
-def _files(root: Path) -> dict[str, bytes]:
-    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+def _files(root: Path) -> dict[str, bytes | None]:
+    """Every file (its bytes) and every directory (``None``) under ``root``."""
+    return {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+            for p in sorted(root.rglob("*"))}
 
 
 def _joined(parsed: ParseResult) -> str:
@@ -78,13 +82,16 @@ def test_code_cells_match_python3(name, tmp_path):
                           capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
 
-    # The document, cell by cell, through the kernel: the code cells' stdout.
+    # The document, cell by cell, through the service's kernel builder.
     cell_ws = _copy(tmp_path / "cells")
-    kernel = make_kernel(load_policy(cell_ws, home=home, managed=None))
-    code_out = []
+    kernel = _build_kernel(ExecutionContext(
+        base_dir=str(cell_ws),
+        config={"path_policy": load_policy(cell_ws, home=home, managed=None)}))
+    code_out, all_out = [], []
     for index, cell in enumerate(parsed.cells):
         result = kernel.execute_cell(cell, index)
         assert result.success, (name, index, result.error)
+        all_out.append(result.output or "")
         if cell.cell_type != "prose":
             code_out.append(result.output or "")
 
@@ -99,8 +106,5 @@ def test_code_cells_match_python3(name, tmp_path):
     assert proc.stdout, f"{name}: the code cells print nothing to compare"
     assert _files(py_ws) == _files(cell_ws) == _files(svc_ws)
     assert _files(py_ws) != _files(SEED) or name in {"json_try.md", "regex.md", "scan_def.md"}
-    # The service's rendered document holds every code cell's output, in order.
-    rest = run.stdout
-    for out in filter(None, code_out):
-        assert out in rest, (name, out, run.stdout)
-        rest = rest[rest.index(out) + len(out):]
+    # The service's rendered document is every cell's output, exactly.
+    assert run.stdout == "".join(all_out)

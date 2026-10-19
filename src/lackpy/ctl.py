@@ -20,7 +20,10 @@ def _render(args) -> int:
     --execute runs the document through the service's literate path, the one
     ``run_program`` uses (literate stepy D9): validated cells, one CellSession,
     the PathPolicy of the workspace. The workspace is --base-dir, else
-    --workspace, else the document's directory (the cwd for stdin). The output is the rendered run;
+    --workspace, else the document's directory (the cwd for stdin). The
+    profile is --profile, else the workspace's configured default profile
+    (``[profile] default``, when that table exists), run as literate: a
+    read-only profile stays read-only here. The output is the rendered run;
     a failed run prints its error and exits 1 without writing --output.
     """
     from .interpreters.literate.parser import to_markdown
@@ -38,13 +41,31 @@ def _render(args) -> int:
 
     if args.execute:
         import asyncio
+        import dataclasses
 
-        from .profiles import Profile
+        from .profiles import Profile, ProfileError
         from .service import LackpyService
 
         workspace = Path(args.base_dir or getattr(args, "workspace", None) or source_dir)
         service = LackpyService(workspace=workspace.resolve())
-        result = asyncio.run(service.run_program(document, profile=Profile(execution="literate")))
+        # Review M6: the named profile, else the configured default, with the
+        # execution axis set to literate (render runs a document). No
+        # configured default: a plain literate profile.
+        profiles = service._config.profiles
+        name = args.profile or (service._config.profile_default
+                                if service._config.profile_default in profiles else None)
+        try:
+            if name is None:
+                profile = Profile(execution="literate")
+            elif name not in profiles:
+                raise ProfileError(f"unknown profile {name!r} (no [profiles.{name}] table)")
+            else:
+                profile = dataclasses.replace(service._configured_profile(name),
+                                              execution="literate")
+        except ProfileError as e:
+            print(f"lackpyctl render --execute: {e}", file=sys.stderr)
+            return 1
+        result = asyncio.run(service.run_program(document, profile=profile))
         if not result.success:
             print(f"lackpyctl render --execute: {result.error}", file=sys.stderr)
             return 1
@@ -132,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--execute",
         action="store_true",
         help="Run the document (validated cells under the workspace PathPolicy) and render its output",
+    )
+    render_p.add_argument(
+        "--profile",
+        default=None,
+        help="With --execute: the configured profile to run under (default: [profile] default)",
     )
     render_p.add_argument(
         "--base-dir",

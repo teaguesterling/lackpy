@@ -132,3 +132,47 @@ def test_render_execute_failure_exits_nonzero_and_writes_no_output_file(
     assert main(["render", "--execute", str(doc), "-o", str(out)]) == 1
     assert "Import" in capsys.readouterr().err
     assert not out.exists()
+
+
+# Fix round 1, M6: render --execute honours the configured default profile and --profile.
+
+def _ws_with_profiles(tmp_path, default=None):
+    ws = tmp_path / "ws"
+    (ws / ".lackpy").mkdir(parents=True)
+    text = ""
+    if default:
+        text += f'[profile]\ndefault = "{default}"\n\n'
+    text += '[profiles.ro]\nexecution = "literate"\npolicy = { read_only = true }\n\n'
+    text += '[profiles.rw]\nexecution = "literate"\n'
+    (ws / ".lackpy" / "config.toml").write_text(text)
+    return ws
+
+
+_WRITE = "```lackpy\nfrom pathlib import Path\nPath('o.txt').write_text('x')\n```\n"
+
+
+def test_render_execute_honours_a_read_only_default_profile(tmp_path, tmp_policy_home, capsys):
+    from lackpy.ctl import main
+    ws = _ws_with_profiles(tmp_path, default="ro")
+    doc = _doc(tmp_path, _WRITE)
+    assert main(["render", "--execute", str(doc), "--base-dir", str(ws)]) == 1
+    assert not (ws / "o.txt").exists()
+
+
+def test_render_execute_takes_a_profile(tmp_path, tmp_policy_home, capsys):
+    from lackpy.ctl import main
+    ws = _ws_with_profiles(tmp_path, default="rw")
+    doc = _doc(tmp_path, _WRITE)
+    assert main(["render", "--execute", "--profile", "ro", str(doc), "--base-dir", str(ws)]) == 1
+    assert not (ws / "o.txt").exists()
+    assert main(["render", "--execute", "--profile", "rw", str(doc), "--base-dir", str(ws)]) == 0
+    assert (ws / "o.txt").read_text() == "x"
+
+
+def test_render_execute_with_an_unknown_profile_exits_1(tmp_path, tmp_policy_home, capsys):
+    from lackpy.ctl import main
+    ws = _ws_with_profiles(tmp_path)
+    doc = _doc(tmp_path, _WRITE)
+    assert main(["render", "--execute", "--profile", "nope", str(doc), "--base-dir", str(ws)]) == 1
+    assert "nope" in capsys.readouterr().err
+    assert not (ws / "o.txt").exists()

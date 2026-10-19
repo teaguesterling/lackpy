@@ -209,7 +209,7 @@ class LightweightKernel:
             output += f"[scratch: {', '.join(parts)}]\n"
         return CellResult(success=True, output=output, error=None, error_phase=None,
                           namespace_delta=delta, cell_index=cell_index,
-                          cell_id=outcome.cell_id)
+                          cell_id=outcome.cell_id, value=outcome.value)
 
     def _hinted(self, error: str | None) -> str | None:
         # Ruling: a repeated Path import after an annotation imported it says why.

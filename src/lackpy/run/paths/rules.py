@@ -145,26 +145,27 @@ def _norm(path: Path | str) -> str:
 
 
 def _real(path: Path | str) -> str:
-    """``path`` with every symlink resolved; a missing tail stays as it is.
+    """``path`` with every symlink resolved, as the OS walks it; a missing tail stays.
 
-    A symlink loop is a ``LackpyRefusal`` on every Python version. Python 3.13
-    changed ``Path.resolve()``: without ``strict`` it no longer raises on a
-    loop (it returns the path unresolved). So resolve strictly first: a loop is
-    ``ELOOP`` (3.13) or ``RuntimeError`` (3.12 and older). Only a path that
-    does not exist (or another non-loop error, which non-strict mode ignored
-    before) falls back to the non-strict form.
+    ``..`` is resolved physically, after the symlink before it, as the OS opens
+    the path (a lexical ``..`` here would be an escape: ``link/../secret``).
+
+    A symlink loop anywhere is a ``LackpyRefusal``, on every Python version.
+    Python 3.13 changed ``Path.resolve()``: without ``strict`` it no longer
+    raises on a loop. So this does what 3.12's ``Path.resolve()`` did on every
+    version: ``os.path.realpath`` (non-strict), then ``stat`` the result, and
+    ``ELOOP`` is a loop. A loop after a missing or non-directory component
+    (``missing/../loop/x``, ``f.txt/../loop/x``) is caught too (review M2).
     """
-    p = Path(path)
     try:
-        return os.fspath(p.resolve(strict=True))
-    except RuntimeError as e:  # a symlink loop, Python 3.12 and older
-        raise LackpyRefusal(f"access to {path} (it cannot be resolved: {e})") from None
-    except OSError as e:
-        if e.errno == errno.ELOOP:  # a symlink loop, Python 3.13
-            raise LackpyRefusal(f"access to {path} (it cannot be resolved: {e})") from None
-    try:
-        return os.fspath(p.resolve())
-    except (OSError, RuntimeError) as e:  # symlink loop
+        real = os.path.realpath(os.fspath(path))
+        try:
+            os.stat(real)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise RuntimeError(f"Symlink loop from {real!r}") from None
+        return real
+    except (OSError, RuntimeError) as e:
         raise LackpyRefusal(f"access to {path} (it cannot be resolved: {e})") from None
 
 

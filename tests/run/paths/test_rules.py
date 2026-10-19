@@ -323,6 +323,31 @@ class TestUnresolvableRule:
         with pytest.raises(LackpyRefusal, match="cannot be resolved"):
             PathPolicy(ws, []).check(ws / "loop" / "secret", "read")
 
+    @pytest.mark.parametrize("shape", ["missing/../loop/x", "f.txt/../loop/x"])
+    def test_a_loop_after_a_missing_or_file_component_is_refused(self, ws, shape):
+        # Review M2, measured: on 3.13 the strict resolve stopped at ENOENT or
+        # ENOTDIR and the fallback hid the loop. 3.12 and 3.13 must agree.
+        (ws / "loop").symlink_to(ws / "loop")
+        (ws / "f.txt").write_text("x")
+        with pytest.raises(LackpyRefusal, match="cannot be resolved"):
+            PathPolicy(ws, []).check(ws / shape, "read")
+
+    @pytest.mark.parametrize("shape", ["missing/x", "f.txt/x", "new.txt", "d/../n.txt"])
+    def test_a_missing_or_non_directory_path_is_not_a_refusal(self, ws, shape):
+        (ws / "f.txt").write_text("x")
+        PathPolicy(ws, []).check(ws / shape, "read")
+        PathPolicy(ws, []).check(ws / shape, "write")
+
+    def test_dotdot_after_a_symlink_is_resolved_physically(self, ws, tmp_path):
+        # ``link/..`` is the parent of the link's TARGET, as the OS opens it, not
+        # the workspace: a lexical ``..`` normalization here would be an escape.
+        outside = tmp_path / "outside"
+        (outside / "dir").mkdir(parents=True)
+        (outside / "secret").write_text("s")
+        (ws / "link").symlink_to(outside / "dir")
+        with pytest.raises(LackpyRefusal, match="outside the workspace"):
+            PathPolicy(ws, []).check(ws / "link" / ".." / "secret", "read")
+
     def test_symlink_loop_in_a_deny_prefix(self, ws):
         (ws / "loop").symlink_to(ws / "loop")
         with pytest.raises(ValueError, match=r"Read\(\./loop/secret\)"):
