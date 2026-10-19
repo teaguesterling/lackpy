@@ -68,23 +68,11 @@ class RestrictedRunner:
             ``KeyboardInterrupt`` and ``SystemExit`` propagate: the host owns them.
         """
         trace = Trace()
-        # Capture print() into a per-run buffer rather than letting it escape to
-        # the process stdout. Binding the buffer here (not redirecting the global
-        # sys.stdout) keeps capture thread-safe and lets the caller recover a value when a generated program ends in
-        # ``print(x)`` instead of a bare last expression.
-        captured: list[str] = []
-
-        def _capturing_print(*args: Any, sep: str | None = " ", end: str | None = "\n",
-                             file: Any = None, flush: bool = False) -> None:
-            # None means the default, as in python3 (review M2).
-            sep = " " if sep is None else sep
-            end = "\n" if end is None else end
-            captured.append(sep.join(str(a) for a in args) + end)
-
+        captured, capturing_print = make_print_capture()
         try:
             return self._run(program, params or {}, program_file, path_policy,
-                             trace, captured, _capturing_print)
-        except (Exception, LackpyRefusal) as e:
+                             trace, captured, capturing_print)
+        except RUNTIME_FAILURES as e:
             # Exception covers RecursionError and MemoryError (design §8, gate 4).
             return ExecutionResult(success=False, error=error_text(e),
                                    trace=trace, stdout="".join(captured))
@@ -136,18 +124,47 @@ class RestrictedRunner:
             # (a BaseException on the host) or whose text raises.
             try:
                 output = repr(output)
-            except (Exception, LackpyRefusal):
+            except RUNTIME_FAILURES:
                 return ExecutionResult(
                     success=False, trace=trace, stdout="".join(captured),
                     error=f"the last expression's value ({type(output).__name__}) "
                           f"cannot be converted to text")
-        variables = {
-            k: v for k, v in exec_globals.items()
-            if k not in bound and not k.startswith("_") and _is_data(v)
-        }
+        variables = data_variables(exec_globals, lambda k: k not in bound)
 
         return ExecutionResult(success=True, output=output, trace=trace,
                                variables=variables, stdout="".join(captured))
+
+
+# What a program can raise that the host turns into a failed result (design §8, gate 4).
+# Exception covers RecursionError and MemoryError; KeyboardInterrupt and SystemExit
+# are not here, because the host owns them. Shared with ``cells.CellSession``.
+RUNTIME_FAILURES: tuple[type[BaseException], ...] = (Exception, LackpyRefusal)
+
+
+def make_print_capture() -> tuple[list[str], Callable[..., None]]:
+    """Return a buffer and the ``print`` that appends to it.
+
+    Capture goes to a per-run buffer rather than the process stdout. Binding the
+    buffer (not redirecting the global ``sys.stdout``) keeps capture thread-safe
+    and lets the caller recover a value when a generated program ends in
+    ``print(x)`` instead of a bare last expression.
+    """
+    captured: list[str] = []
+
+    def capturing_print(*args: Any, sep: str | None = " ", end: str | None = "\n",
+                        file: Any = None, flush: bool = False) -> None:
+        # None means the default, as in python3 (review M2).
+        sep = " " if sep is None else sep
+        end = "\n" if end is None else end
+        captured.append(sep.join(str(a) for a in args) + end)
+
+    return captured, capturing_print
+
+
+def data_variables(namespace: dict[str, Any], keep: Callable[[str], bool]) -> dict[str, Any]:
+    """The names in ``namespace`` that ``keep`` accepts, do not start with ``_``, and hold data (``_is_data``)."""
+    return {k: v for k, v in namespace.items()
+            if keep(k) and not k.startswith("_") and _is_data(v)}
 
 
 _DATA_SCALARS = (type(None), bool, int, float, str, bytes)
