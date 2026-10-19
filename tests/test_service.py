@@ -14,7 +14,7 @@ import pytest
 
 from lackpy.profiles import Profile
 from lackpy.run.paths import load_policy
-from lackpy.service import KIT_REMOVED, LITERATE_PENDING, LackpyService, ProfileError
+from lackpy.service import KIT_REMOVED, LITERATE_PENDING, STAGED_DSL_PENDING, LackpyService, ProfileError
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -488,6 +488,94 @@ class TestLiterateAxisRefused:
         assert code == 1
         assert out["error"] == LITERATE_PENDING
         assert _OUTSIDE_MARK not in json.dumps(out)
+
+
+class _SelectorProvider:
+    """A model that answers every intent with an ast-select selector (review N2)."""
+    name = "fake"
+
+    def available(self):
+        return True
+
+    async def generate(self, intent, namespace_desc, **kw):
+        return ".fn"
+
+
+_DSL_SECRET = "SECRET-DSL"
+
+
+class TestStagedDSLRefused:
+    """Review N2 / ruling: mode "staged-dsl" ran AstSelectInterpreter over the process cwd
+    at generation time with no PathPolicy, and the matched source became `program`.
+    It is refused on every route until ast-select runs under the PathPolicy."""
+
+    @pytest.fixture
+    def ws(self, tmp_path, monkeypatch):
+        ws = tmp_path / "wsd"
+        (ws / ".claude").mkdir(parents=True)
+        (ws / ".claude" / "settings.json").write_text(
+            json.dumps({"permissions": {"deny": ["Read(denied.py)"]}}))
+        (ws / "denied.py").write_text(f"def secret():\n    return '{_DSL_SECRET}'\n")
+        monkeypatch.chdir(ws)  # ast-select read the process cwd
+        ran = []
+        from lackpy.interpreters.ast_select import AstSelectInterpreter
+        original = AstSelectInterpreter.execute
+
+        async def spy(self, *a, **k):
+            ran.append(a)
+            return await original(self, *a, **k)
+
+        monkeypatch.setattr(AstSelectInterpreter, "execute", spy)
+        monkeypatch.setattr(LackpyService, "_providers_for", lambda self, m, t: [_SelectorProvider()])
+        import types
+        return types.SimpleNamespace(path=ws, ran=ran)
+
+    def _svc(self, ws, tmp_home, config=None):
+        if config is not None:
+            (ws.path / ".lackpy").mkdir(exist_ok=True)
+            (ws.path / ".lackpy" / "config.toml").write_text(config)
+        return _make_service(ws.path, tmp_home)
+
+    def _assert_refused(self, result, ws):
+        assert not result["success"]
+        assert result["error"] == STAGED_DSL_PENDING
+        assert _DSL_SECRET not in repr(result)
+        assert ws.ran == []
+
+    @pytest.mark.asyncio
+    async def test_profile_mode_is_refused(self, ws, tmp_home):
+        svc = self._svc(ws, tmp_home, '[profiles.d]\nmode = "staged-dsl"\n')
+        self._assert_refused(await svc.delegate("x", profile="d"), ws)
+        assert (await svc.run_program("x = 1", profile="d")).error == STAGED_DSL_PENDING
+
+    @pytest.mark.asyncio
+    async def test_explicit_mode_is_refused(self, ws, tmp_home):
+        svc = self._svc(ws, tmp_home)
+        self._assert_refused(await svc.delegate("x", mode="staged-dsl"), ws)
+
+    @pytest.mark.asyncio
+    async def test_inference_mode_is_refused(self, ws, tmp_home):
+        svc = self._svc(ws, tmp_home, '[inference]\nmode = "staged-dsl"\n')
+        self._assert_refused(await svc.delegate("x"), ws)
+
+    @pytest.mark.asyncio
+    async def test_generate_raises(self, ws, tmp_home):
+        svc = self._svc(ws, tmp_home)
+        with pytest.raises(ProfileError, match="staged-dsl"):
+            await svc.generate("x", mode="staged-dsl")
+        assert ws.ran == []
+
+    def test_cli_mode_is_refused(self, ws, capsys):
+        from lackpy.cli import main
+        code = main(["-c", "find functions", "--mode", "staged-dsl", "--workspace", str(ws.path)])
+        captured = capsys.readouterr()
+        assert code == 1
+        assert STAGED_DSL_PENDING in captured.out
+        assert _DSL_SECRET not in captured.out + captured.err
+        assert ws.ran == []
+
+    def test_message_names_the_pending_migration(self):
+        assert "staged-dsl" in STAGED_DSL_PENDING and "migrat" in STAGED_DSL_PENDING
 
 
 class TestLiterateExecutionAxis:

@@ -39,6 +39,14 @@ LITERATE_PENDING = ("the literate execution axis is disabled until the literate 
                     "PathPolicy); use a one-shot profile")
 
 
+# Ruling (Task 7 fix round 2, review N2): inference mode "staged-dsl" ran the
+# ast-select interpreter over the process cwd at generation time, with no
+# PathPolicy, and returned the matched source as the program.
+STAGED_DSL_PENDING = ("inference mode 'staged-dsl' is disabled until the ast-select "
+                      "interpreter it runs migrates under the stepy100 PathPolicy; "
+                      "use mode '1-shot' or 'spm'")
+
+
 class ProfileError(ValueError):
     """A profile lackpy cannot use: it names tools, or no such profile is configured."""
 

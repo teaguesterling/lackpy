@@ -17,7 +17,7 @@ from .infer.providers.templates import TemplatesProvider
 from .tools.providers.python import PythonProvider
 from .tools.registry import ResolvedTools
 from .lang.grader import compute_grade
-from .profiles import KIT_REMOVED, LITERATE_PENDING, Profile, ProfileError, ResolvedProfile, resolve_profile
+from .profiles import KIT_REMOVED, LITERATE_PENDING, STAGED_DSL_PENDING, Profile, ProfileError, ResolvedProfile, resolve_profile
 from .tools.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
@@ -39,6 +39,16 @@ def _policy_error(e: Exception) -> str:
     if type(e) is ValueError:
         return f"cannot load the path policy: {error_text(e)}"
     return f"cannot load the path policy ({type(e).__name__}): {error_text(e)}"
+
+
+def _check_mode(mode: str | None) -> None:
+    """Refuse inference mode "staged-dsl" (review N2).
+
+    Its strategy runs ``AstSelectInterpreter`` over the process cwd at generation
+    time, with no PathPolicy, and returns the matched source as the program.
+    """
+    if mode == "staged-dsl":
+        raise ProfileError(STAGED_DSL_PENDING)
 
 
 def _no_tools() -> ResolvedTools:
@@ -400,6 +410,7 @@ class LackpyService:
             # validator and no PathPolicy. Refused until the literate interpreter
             # migrates onto the runtime namespace.
             raise ProfileError(LITERATE_PENDING)
+        _check_mode(prof.mode)
         return ResolvedProfile(
             tools=_no_tools(), model=prof.model, mode=prof.mode, order=prof.order,
             temperature=prof.temperature, rules=prof.rules, language=prof.language,
@@ -509,6 +520,7 @@ class LackpyService:
             return await self._generate_literate(intent, providers, resolved, params_desc, rules)
 
         effective_mode = mode or rp.mode or self._config.inference_mode
+        _check_mode(effective_mode)
 
         if effective_mode and effective_mode in STRATEGIES:
             strategy_cls = STRATEGIES[effective_mode]
@@ -814,6 +826,8 @@ class LackpyService:
         start = time.perf_counter()
         try:
             rp = self._resolve_profile(profile)
+            if not _program_override:  # only generation runs the strategy
+                _check_mode(mode or rp.mode or self._config.inference_mode)
         except ProfileError as e:
             return {"success": False, "program": _program_override, "output": None,
                     "stdout": "", "error": str(e), "trace": []}
