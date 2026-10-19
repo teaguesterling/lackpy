@@ -29,9 +29,11 @@ Semantics:
    normalized) and its ``resolve()``d target. A deny matches either. A write
    refuses when the final component is a symlink, and when any directory
    component is a symlink whose target is not writable.
-7. Policy sources are never writable (security ruling, Task 4 fix round 1):
-   ``<workspace>/.claude/**``, ``<workspace>/.lackpy/**``, ``<home>/.claude/**``,
-   the managed settings file and its ``managed-settings.d``. This is checked
+7. Policy sources are never writable (security rulings, Task 4 fix rounds 1-2):
+   any path with a ``.claude`` or ``.lackpy`` component anywhere (so a later
+   run rooted in a subdirectory or an extra directory cannot be widened),
+   ``<home>/.claude.json``, the managed settings file and its
+   ``managed-settings.d``. This is checked
    first, on the lexical and resolved forms, case-insensitively; no rule or
    default root lifts it. A write there would widen the policy of every later run.
 6. Matching is case-sensitive. Upstream does not document case sensitivity;
@@ -78,6 +80,7 @@ def managed_settings_path(platform: str) -> Path:
 MANAGED_SETTINGS: Path = managed_settings_path(sys.platform)
 
 _GLOB_CHARS = frozenset("*?[")
+_PROTECTED_PARTS = frozenset({".claude", ".lackpy"})  # compared casefolded
 
 
 @dataclass(frozen=True)
@@ -229,7 +232,7 @@ class PathPolicy:
         self._roots_real = {_real(r) for r in roots}
         managed = Path(os.fspath(MANAGED_SETTINGS))
         builtin = [self.workspace / ".claude", self.workspace / ".lackpy", Path.home() / ".claude",
-                   managed, managed.parent / "managed-settings.d"]
+                   Path.home() / ".claude.json", managed, managed.parent / "managed-settings.d"]
         self.protected = [Path(_norm(self.workspace / p)) for p in (*builtin, *protected)]
         self._protected = {b.casefold() for p in self.protected for b in _bases(p)}
 
@@ -258,7 +261,8 @@ class PathPolicy:
         lexical, real = _norm(raw), _real(raw)
         if op == "write":
             for form in (lexical, real):
-                if self._under(form.casefold(), self._protected):
+                folded = form.casefold()
+                if self._under(folded, self._protected) or _PROTECTED_PARTS & set(_segments(folded)):
                     return "it is a permission settings location, which lackpy never writes"
         deny_kinds = ("read",) if op == "read" else ("read", "edit")
         for form in (lexical, real):

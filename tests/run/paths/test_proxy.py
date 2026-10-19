@@ -258,6 +258,22 @@ class TestOSErrorFilename:
         plain = _plain_error(ws, monkeypatch, call)
         assert ours == (type(plain), plain.filename, str(plain))
 
+    @pytest.mark.parametrize("method, call", [
+        ("iterdir", lambda P: P("nodir").iterdir()),
+        ("glob", lambda P: P("nodir").glob("*")),
+        ("rglob", lambda P: P("nodir").rglob("*")),
+    ])
+    def test_eager_listing_error_is_rewritten(self, ws, P, monkeypatch, method, call):
+        # Review N1: Python 3.13+ scandirs inside iterdir() itself, before
+        # iteration. Make every version raise at call time to cover that.
+        def eager(self, *args, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory", str(self))
+        monkeypatch.setattr(pathlib.Path, method, eager)
+        with pytest.raises(FileNotFoundError) as info:
+            list(call(P))
+        assert info.value.filename == "nodir"
+        assert str(ws) not in str(info.value)
+
     def test_program_prints_the_built_path(self, ws):
         program = ("from pathlib import Path\n"
                    "try:\n    Path('nope.txt').read_text()\nexcept FileNotFoundError as e:\n    print(e)\n")
@@ -334,6 +350,46 @@ class TestPolicySourcesAreNotWritable:
 
     def test_reads_are_unaffected(self, ws, P):
         assert P(".claude/settings.json").read_text().startswith("{")
+
+    @pytest.mark.parametrize("relative", [
+        "sub/.claude/settings.json", "sub/.lackpy/config.toml", "a/b/.CLAUDE/x", "deep/.LackPy/k",
+    ])
+    def test_nested_sources_refuse(self, ws, P, relative):
+        # Ruling N2: any .claude/.lackpy component, so a later run rooted in sub/ is safe.
+        with pytest.raises(LackpyRefusal):
+            P(relative).write_text("{}")
+        with pytest.raises(LackpyRefusal):
+            P(relative).parent.mkdir(parents=True)
+        assert not (ws / relative).exists()
+
+    def test_extra_dir_sources_refuse(self, home, managed, tmp_path):
+        ws2, extra = tmp_path / "ws2", tmp_path / "extra2"
+        ws2.mkdir()
+        extra.mkdir()
+        P = make_path_class(PathPolicy(ws2, [], extra_dirs=[extra]))
+        assert P(str(extra / "x")).write_text("ok") == 2  # the extra dir itself is writable
+        with pytest.raises(LackpyRefusal):
+            P(str(extra / ".claude" / "x")).write_text("{}")
+        with pytest.raises(LackpyRefusal):
+            P(str(extra / ".lackpy" / "config.toml")).write_text("")
+
+    def test_home_claude_json_refuses(self, home, P):
+        with pytest.raises(LackpyRefusal):
+            P(str(home / ".claude.json")).write_text("{}")
+        assert not (home / ".claude.json").exists()
+
+    def test_symlink_into_a_nested_source_refuses(self, ws, P):
+        (ws / "sub" / ".claude").mkdir(parents=True)
+        (ws / "innocent").symlink_to(ws / "sub" / ".claude")
+        with pytest.raises(LackpyRefusal):
+            P("innocent/settings.json").write_text("{}")
+
+    def test_nested_reads_still_work(self, ws, home, P):
+        (ws / "sub" / ".claude").mkdir(parents=True)
+        (ws / "sub" / ".claude" / "settings.json").write_text("{}")
+        (home / ".claude.json").write_text("{}")
+        assert P("sub/.claude/settings.json").read_text() == "{}"
+        assert P(str(home / ".claude.json")).read_text() == "{}"
 
     def test_direct_policy_protects_the_workspace_sources(self, ws):
         P = make_path_class(PathPolicy(ws, []))

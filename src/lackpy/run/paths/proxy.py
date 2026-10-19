@@ -236,16 +236,22 @@ def make_path_class(policy: PathPolicy) -> type:
         def glob(self, pattern: Any, **kwargs: Any) -> Iterator["Path"]:
             safe_pattern(pattern, "glob")
             base = target(self, "read")
-            return entries(self, base.glob(unwrap(pattern), **kwargs), base)
+            with as_built(self):  # 3.13+ may raise here, before iteration (review N1)
+                found = base.glob(unwrap(pattern), **kwargs)
+            return entries(self, found, base)
 
         def rglob(self, pattern: Any, **kwargs: Any) -> Iterator["Path"]:
             safe_pattern(pattern, "rglob")
             base = target(self, "read")
-            return entries(self, base.rglob(unwrap(pattern), **kwargs), base)
+            with as_built(self):
+                found = base.rglob(unwrap(pattern), **kwargs)
+            return entries(self, found, base)
 
         def iterdir(self) -> Iterator["Path"]:
             base = target(self, "read")
-            return entries(self, base.iterdir(), base)
+            with as_built(self):  # 3.13+ scandirs eagerly here (review N1)
+                found = base.iterdir()
+            return entries(self, found, base)
 
         # Write members.
         write_text = writer("write_text")

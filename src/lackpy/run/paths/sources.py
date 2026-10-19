@@ -170,7 +170,7 @@ def load_policy(workspace: Path, *, home: Path = Path.home(),
 
     rules = managed_set.rules + ([] if managed_only else others.rules)
     dirs = managed_set.dirs + ([] if managed_only else others.dirs)
-    protected = [home / ".claude"]
+    protected = [home / ".claude", home / ".claude.json"]
     if managed is not None:
         protected += [managed, managed.parent / "managed-settings.d"]
     return PathPolicy(workspace, rules, extra_dirs=dirs, protected=protected)
