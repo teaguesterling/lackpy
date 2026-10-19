@@ -2,24 +2,28 @@
 interpreter execs or evals document code. Every cell, interpolation and
 inspection goes through ``CellSession``.
 
-The check is static, over ``src/lackpy/interpreters/literate/``:
+The check is static, over every file under ``src/lackpy/interpreters/literate/``
+(ruling: an import allowlist, not a denylist of call shapes):
 
-* no reference to the ``exec``, ``eval``, ``compile``, ``__import__`` or
-  ``__builtins__`` names, called or aliased (``e = eval``), and no attribute
-  of that name (``builtins.exec``); ``re.compile`` and the parse-only
-  ``compile`` calls listed here (``ast.PyCF_ONLY_AST``) are allowed;
-* no import of a module that runs or builds code or processes
-  (``importlib``, ``runpy``, ``subprocess``, ``builtins``, ``code``, ...);
-* no ``types.FunctionType`` / ``types.CodeType`` / ``os.system`` / ``os.exec*``.
+* **Imports.** Every module imported, by ``import``, ``from ... import``,
+  ``importlib.import_module(...)`` or ``__import__(...)``, must be in
+  :data:`ALLOWED_MODULES` (stdlib data and text modules, and ``lackpy`` itself).
+  The never-allowed modules (:data:`NEVER_ALLOWED`) cannot be added there.
+  A dynamic import call is never allowed.
+* **Code-running names.** No ``exec``, ``eval`` or ``compile`` (bare, as an
+  attribute or as an alias), and no ``__import__`` or ``__builtins__`` name. A
+  ``.compile`` attribute is allowed only on a module imported as ``re``.
+* **Dunder attributes.** No ``x.__dunder__`` attribute except ``__name__``
+  and ``__init__`` (``super().__init__``): no ``f.__code__``, ``x.__globals__``, ``x.__subclasses__`` ...
 
-``tools.py`` is the one exception: it is unwired (no src module imports it,
-checked below) and literate stepy Task 3 deletes it (D7).
+An exception is LINE-scoped, never file-scoped: it names the file and the exact
+source text of the one node it excuses, with a reason. Each exception must
+match exactly one finding, so a stale or widened exception fails too.
 """
 
 from __future__ import annotations
 
 import ast
-import sys
 from pathlib import Path
 
 import lackpy.interpreters.literate as literate
@@ -27,108 +31,178 @@ import lackpy.interpreters.literate as literate
 ROOT = Path(literate.__file__).parent
 SRC = ROOT.parents[1]  # src/lackpy (a namespace package: no __file__)
 
-#: (file relative to ROOT, function) of each allowed parse-only compile call.
-PARSE_ONLY_COMPILES = {("kernel/static_analysis.py", "check_cell")}
+#: Modules the literate package may import (top-level name; ``lackpy`` covers
+#: every ``lackpy.*`` and relative import).
+ALLOWED_MODULES = frozenset({
+    "__future__", "ast", "collections", "contextlib", "contextvars", "dataclasses",
+    "functools", "json", "markdown_it", "re", "time", "tomllib", "typing", "uuid",
+    "lackpy",
+})
 
-#: Unwired until Task 3 deletes it (D7).
-UNWIRED = {"tools.py"}
+#: Never allowed (ruling). A needed use is a line-scoped EXCEPTION instead.
+NEVER_ALLOWED = frozenset({
+    "sys", "os", "builtins", "types", "importlib", "code", "subprocess", "pickle",
+    "pdb", "runpy", "timeit", "asyncio", "ctypes", "multiprocessing",
+})
 
-#: (file, what) references that run no code, with the reason.
-ALLOWED = {
-    # dir(builtins) only: the names check_cell resolves against.
-    ("kernel/static_analysis.py", "import builtins"),
-    # Reads the packaged tool_effects.toml; Task 3 deletes both (D7).
-    ("effects.py", "from importlib.resources import"),
+#: (file relative to ROOT, exact source text of the node) -> reason.
+EXCEPTIONS = {
+    ("kernel/static_analysis.py", "import builtins"):
+        "dir(builtins) only: the builtin names check_cell resolves against",
+    ("kernel/static_analysis.py", 'compile(code, "<cell>", "exec", ast.PyCF_ONLY_AST)'):
+        "parse only (ast.PyCF_ONLY_AST): no code object is made",
+    ("effects.py", "import sys"):
+        "sys.addaudithook for observe_effects; Task 3 replaces the observer (D7)",
+    ("effects.py", "from importlib.resources import files"):
+        "reads the packaged tool_effects.toml; Task 3 deletes both (D7)",
+    ("kernel/recovery.py", "import asyncio"):
+        "runs the host's own inference coroutine (a model call), never document code",
+    ("kernel/recovery.py", "import concurrent.futures"):
+        "a thread for that inference coroutine when a loop is already running",
+    ("tools.py", "import os"): "tools.py is unwired (tested below); Task 3 deletes it (D7)",
+    ("tools.py", "import subprocess"): "tools.py is unwired; Task 3 deletes it (D7)",
+    ("tools.py", "from pathlib import Path"): "tools.py is unwired; Task 3 deletes it (D7)",
 }
 
-_NAMES = {"exec", "eval", "compile", "__import__", "__builtins__"}
-_MODULES = {"importlib", "runpy", "subprocess", "builtins", "code", "codeop",
-            "ctypes", "marshal", "multiprocessing", "pty"}
-_ATTRS = {("types", "FunctionType"), ("types", "CodeType"), ("os", "system"),
-          ("os", "popen"), ("os", "fork"), ("os", "spawnv")}
+_CODE_NAMES = {"exec", "eval", "compile", "__import__", "__builtins__"}
+_DUNDERS_OK = {"__name__", "__init__"}  # super().__init__(...) in persistence.py
 
 
-def _findings():
-    """(file, innermost function, what) for each forbidden reference."""
-    for path in sorted(ROOT.rglob("*.py")):
-        rel = str(path.relative_to(ROOT))
-        if rel in UNWIRED:
-            continue
-        stack = ["<module>"]
-        found = []
+def check(root: Path) -> list[tuple[str, str, str]]:
+    """``(file, source text, what)`` for each finding under ``root``, before exceptions."""
+    findings: list[tuple[str, str, str]] = []
+    for path in sorted(root.rglob("*.py")):
+        rel = str(path.relative_to(root))
+        text = path.read_text()
+        tree = ast.parse(text)
+        re_aliases = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
+                      for a in n.names if a.name == "re"}
 
-        class Visitor(ast.NodeVisitor):
-            def visit_FunctionDef(self, node):
-                stack.append(node.name)
-                self.generic_visit(node)
-                stack.pop()
+        def add(node: ast.AST, what: str) -> None:
+            findings.append((rel, ast.get_source_segment(text, node) or "", what))
 
-            visit_AsyncFunctionDef = visit_FunctionDef
+        def module_ok(name: str) -> bool:
+            top = name.split(".")[0]
+            return top in ALLOWED_MODULES and top not in NEVER_ALLOWED
 
-            def visit_Call(self, node):
-                if isinstance(node.func, ast.Name) and node.func.id == "compile":
-                    flags = [ast.unparse(a) for a in node.args[3:]] + [
-                        ast.unparse(k.value) for k in node.keywords if k.arg == "flags"]
-                    if (rel, stack[-1]) in PARSE_ONLY_COMPILES and "ast.PyCF_ONLY_AST" in flags:
-                        for a in node.args:  # visit the arguments, not the allowed name
-                            self.visit(a)
-                        return
-                self.generic_visit(node)
+        # A called code name is reported with its whole call's text, so an
+        # exception names the exact call.
+        called: set[int] = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in _CODE_NAMES):
+                called.add(id(node.func))
+                add(node, node.func.id)
 
-            def visit_Name(self, node):
-                if node.id in _NAMES:
-                    found.append((rel, stack[-1], node.id))
-
-            def visit_Attribute(self, node):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if not module_ok(a.name):
+                        add(node, f"import {a.name}")
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0 and not module_ok(node.module or ""):
+                    add(node, f"from {node.module} import")
+            elif isinstance(node, ast.Name) and node.id in _CODE_NAMES and id(node) not in called:
+                add(node, node.id)
+            elif isinstance(node, ast.Attribute):
                 base = node.value.id if isinstance(node.value, ast.Name) else None
-                if node.attr in _NAMES and not (node.attr == "compile" and base == "re"):
-                    found.append((rel, stack[-1], f"{base}.{node.attr}"))
-                if (base, node.attr) in _ATTRS or (base == "os" and node.attr.startswith("exec")):
-                    found.append((rel, stack[-1], f"{base}.{node.attr}"))
-                self.generic_visit(node)
+                if node.attr in _CODE_NAMES and not (node.attr == "compile" and base in re_aliases):
+                    add(node, f"{base}.{node.attr}")
+                elif node.attr == "import_module":
+                    add(node, f"{base}.import_module")
+                elif (node.attr.startswith("__") and node.attr.endswith("__")
+                      and node.attr not in _DUNDERS_OK):
+                    add(node, f".{node.attr}")
+    return findings
 
-            def visit_Import(self, node):
-                for a in node.names:
-                    if a.name.split(".")[0] in _MODULES:
-                        found.append((rel, stack[-1], f"import {a.name}"))
 
-            def visit_ImportFrom(self, node):
-                mod = (node.module or "").split(".")[0]
-                if node.level == 0 and mod in _MODULES:
-                    found.append((rel, stack[-1], f"from {node.module} import"))
-                for a in node.names:
-                    if a.name in _NAMES:
-                        found.append((rel, stack[-1], f"from {node.module} import {a.name}"))
-
-        Visitor().visit(ast.parse(path.read_text()))
-        yield from found
+def _unexcused(root: Path, exceptions: dict) -> tuple[list, list]:
+    found = check(root)
+    used: dict[tuple[str, str], int] = {}
+    unexcused = []
+    for f in found:
+        key = (f[0], f[1])
+        if key in exceptions:
+            used[key] = used.get(key, 0) + 1
+        else:
+            unexcused.append(f)
+    bad_exceptions = [k for k in exceptions if used.get(k, 0) != 1]
+    return unexcused, bad_exceptions
 
 
 def test_no_code_running_reference_outside_cellsession():
-    assert [f for f in _findings() if (f[0], f[2]) not in ALLOWED] == []
+    unexcused, bad_exceptions = _unexcused(ROOT, EXCEPTIONS)
+    assert unexcused == []
+    assert bad_exceptions == []  # each exception excuses exactly one node
 
 
-def test_the_scan_catches_the_shapes_it_names(tmp_path, monkeypatch):
-    """The scan is not vacuous: each named shape is found."""
-    pkg = tmp_path / "lit"
-    pkg.mkdir()
-    (pkg / "bad.py").write_text(
-        "import builtins, importlib\nimport subprocess as sp\nfrom runpy import run_path\n"
-        "import types, os, re\n"
-        "def a(src):\n    e = eval\n    builtins.exec(src)\n    exec(src)\n"
-        "    compile(src, 'x', 'exec')\n    re.compile('ok')\n"
-        "    types.FunctionType\n    os.system('x')\n    os.execv('x', [])\n"
-        "    __import__('os')\n")
-    monkeypatch.setattr(sys.modules[__name__], "ROOT", pkg)
-    what = {w for _, _, w in _findings()}
-    assert {"eval", "builtins.exec", "exec", "compile", "__import__", "import builtins",
-            "import importlib", "import subprocess", "from runpy import",
-            "types.FunctionType", "os.system", "os.execv"} <= what
-    assert "re.compile" not in what
+def test_the_allowlist_holds_no_never_allowed_module():
+    assert ALLOWED_MODULES & NEVER_ALLOWED == set()
 
 
-def test_the_unwired_files_have_no_importer_in_src():
+def test_every_exception_has_a_reason():
+    assert all(reason.strip() for reason in EXCEPTIONS.values())
+
+
+def test_the_unwired_file_has_no_importer_in_src():
     for path in SRC.rglob("*.py"):
+        if path == ROOT / "tools.py":
+            continue
         text = path.read_text()
-        assert "literate.tools" not in text and "make_tool_namespace" not in text \
-            or path.name in UNWIRED, path
+        assert "literate.tools" not in text and "make_tool_namespace" not in text, path
+        assert "from .tools import" not in text and "from ..tools import" not in text, path
+
+
+PLANTED = {
+    "getattr builtins": "import builtins\ngetattr(builtins, 'ex'+'ec')('1')\n",
+    "__builtins__ subscript": "__builtins__['exec']('1')\n",
+    "compile attr": "import ast\nast.compile\nx.compile('1','x','exec')\n",
+    "code.InteractiveInterpreter": "import code\ncode.InteractiveInterpreter().runsource('1')\n",
+    "from code import": "from code import InteractiveInterpreter\n",
+    "sys.modules builtins getattr": "import sys\ngetattr(sys.modules['builtins'], 'ex'+'ec')('1')\n",
+    "vars(sys.modules[...])": "import sys\nvars(sys.modules['builtins'])['ev'+'al']('1')\n",
+    "from os import system": "from os import system\nsystem('id')\n",
+    "import os as o": "import os as o\no.system('id')\n",
+    "from types import FunctionType": "from types import FunctionType, CodeType\n",
+    "os.posix_spawn/spawnl": "import os\nos.posix_spawn('x',[],{})\nos.spawnl(0,'x')\n",
+    "timeit": "import timeit\ntimeit.timeit('1')\n",
+    "pickle": "import pickle\npickle.loads(b'')\n",
+    "asyncio subprocess": "import asyncio\nasyncio.create_subprocess_shell('id')\n",
+    "pdb": "import pdb\npdb.run('1')\n",
+    "func.__code__.replace": "def f(): pass\ntype(f)(f.__code__.replace(), {})\n",
+    "operator attrgetter on builtins":
+        "import operator, sys\noperator.attrgetter('ex'+'ec')(sys.modules['builtins'])\n",
+    "importlib.import_module": "import importlib\nimportlib.import_module('os')\n",
+    "__import__ call": "__import__('os')\n",
+}
+
+
+def test_every_planted_shape_is_caught(tmp_path):
+    """The re-review's shapes (rr4), and the dynamic imports: the same
+    checker, run over a planted file, catches each one."""
+    missed = []
+    for name, shape in PLANTED.items():
+        d = tmp_path / name.replace(" ", "_").replace("/", "_")
+        d.mkdir()
+        (d / "m.py").write_text(shape)
+        if not check(d):
+            missed.append(name)
+    assert missed == []
+
+
+def test_an_exception_excuses_one_line_not_a_file(tmp_path):
+    (tmp_path / "m.py").write_text("import sys\nimport ast\nx = ast.parse('1').__class__\n")
+    unexcused, bad = _unexcused(tmp_path, {("m.py", "import sys"): "planted"})
+    assert bad == []
+    assert [w for *_, w in unexcused] == [".__class__"]
+    # A second, identical line is not covered by the one exception.
+    (tmp_path / "m.py").write_text("import sys\nimport sys\n")
+    _, bad = _unexcused(tmp_path, {("m.py", "import sys"): "planted"})
+    assert bad == [("m.py", "import sys")]
+
+
+def test_re_compile_is_not_code_compile(tmp_path):
+    (tmp_path / "m.py").write_text("import re\nR = re.compile('x')\n")
+    assert check(tmp_path) == []
+    (tmp_path / "m.py").write_text("import ast as re2\nR = re2.compile('x')\n")
+    assert [w for *_, w in check(tmp_path)] == ["re2.compile"]
