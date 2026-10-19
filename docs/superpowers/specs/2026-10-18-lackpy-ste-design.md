@@ -1068,20 +1068,20 @@ main causes:
 
 Plan 2 must turn each item into a test that passes before `lackpy-ste` merges.
 
-1. The module proxies close `statistics.sys`, and the `Path` proxy closes
+1. **[Done 9503a78 (module proxies), 232f323 (Path stand-in); test `test_gate_1_statistics_sys_closed_statically_and_at_runtime` passed. The `Path('x').parser.os` test is SKIPPED on Python 3.12 (3.13+ only), so that half is not shown to pass.]** The module proxies close `statistics.sys`, and the `Path` proxy closes
    `Path('x').parser.os`. On Python 3.13 that attribute is the real `os` module.
-2. The proxies refuse `setattr` on member bindings. Today these validate:
+2. **[Done 9503a78; `test_gate_2_setattr_on_member_bindings_refused` passed.]** The proxies refuse `setattr` on member bindings. Today these validate:
    `C = Counter; C.most_common = len`, and `[Path][0].read_text = print`.
-3. The trace records a `BaseException` refusal. `src/lackpy/run/trace.py`
+3. **[Done 7148bfe; `test_gate_3_trace_records_a_refusal` passed.]** The trace records a `BaseException` refusal. `src/lackpy/run/trace.py`
    catches `Exception` only.
-4. `RestrictedRunner.run` never raises. A validated 3,000-deep unary expression
+4. **[Done 99c4d99 and b73c41a (runner), b2cfd20 (validate); the four `test_gate_4_*` tests passed.]** `RestrictedRunner.run` never raises. A validated 3,000-deep unary expression
    raises RecursionError from `ast.fix_missing_locations`. `validate()` raises
    MemoryError from `ast.parse` at a depth of about 50,000.
-5. Decide if `TimeoutError` from `src/lackpy/run/bridge.py` becomes a refusal.
+5. **[Done 7148bfe, wording 16c910a; `TimeoutError` is uncatchable. The three `test_gate_5_*` tests passed.]** Decide if `TimeoutError` from `src/lackpy/run/bridge.py` becomes a refusal.
    Today a program can catch it and retry a hung tool.
-6. Define `__file__` deliberately. `Path(__file__).read_text()` validates.
-7. Decide if `ExecutionResult.variables` may carry function objects.
-8. `datetime.UTC` exists only on Python 3.11 and later. `lackpy-lang` still
+6. **[Done 99c4d99; `test_gate_6_*` (2 tests) passed.]** Define `__file__` deliberately. `Path(__file__).read_text()` validates.
+7. **[Done 7148bfe, 16c910a, 8fa918e; `test_gate_7_variables_carry_no_function_objects` passed.]** Decide if `ExecutionResult.variables` may carry function objects.
+8. **[Partly done: the runtime test `test_gate_8_datetime_utc_runs` passed (asserts Python >= 3.11); `lackpy-lang` still claims Python 3.10, which no test here covers.]** `datetime.UTC` exists only on Python 3.11 and later. `lackpy-lang` still
    claims Python 3.10.
-9. Plan 2 replaces `tests/run/test_import_fail_closed.py`. That test pins the
+9. **[Done 9503a78; `test_gate_9_fail_closed_import_test_is_replaced` passed.]** Plan 2 replaces `tests/run/test_import_fail_closed.py`. That test pins the
    fact that imports fail closed until the proxies exist.

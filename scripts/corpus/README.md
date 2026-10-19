@@ -81,3 +81,13 @@ non-vocabulary violation is that rule: loosening the rule moves the program into
 
 Dropping all five would give 6,258 structural (89.6%). `safety.except-base` and `safety.node`
 are safety tier, so only the first three are candidates for loosening.
+
+## Plan 2 close-out figures (2026-10-18, after stepy100 Plan 2)
+
+Measured at commit `f936537` (branch `mcp-tool-metadata`, clean tree). blq `corpus` run `corpus:217`:
+snapshot 7,003 rows, sha `fc7ba975c23d`; 6,984 parsed; **615 admitted (8.8%)**;
+**3,372 structural (48.3%)**. Plan 1 close-out was 608 admitted and 3,030 structural; the change comes
+from `dd6b283` (nesting to depth 3, I/O calls as arguments, no attribute stores), before Plan 2 began.
+No Plan 2 task changed the corpus figures.
+
+blq `test-all` (run `test-all:216`, same commit): **2,497 passed, 32 skipped, 102 xfailed**.
