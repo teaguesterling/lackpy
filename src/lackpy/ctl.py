@@ -14,30 +14,43 @@ def _render(args) -> int:
     Without --execute this is a pure text transform: <compute> tags become
     ```lackpy fences and the [kernel] channel is stripped, so the result renders
     anywhere markdown does. Nothing runs -- which matters, because running a
-    literate document writes files and shells out, and that must never be a
-    side effect of asking to see it. --execute is refused (stepy100 Task 7,
-    review N1) until the literate interpreter runs on the stepy100 runtime.
+    literate document can write files, and that must never be a side effect of
+    asking to see it.
+
+    --execute runs the document through the service's literate path, the one
+    ``run_program`` uses (literate stepy D9): validated cells, one CellSession,
+    the PathPolicy of the workspace. The workspace is --base-dir, else
+    --workspace, else the document's directory (the cwd for stdin). The output is the rendered run;
+    a failed run prints its error and exits 1 without writing --output.
     """
     from .interpreters.literate.parser import to_markdown
 
     if args.path == "-":
         document = sys.stdin.read()
+        source_dir = Path.cwd()
     else:
         source = Path(args.path)
         if not source.is_file():
             print(f"No such document: {source}", file=sys.stderr)
             return 1
         document = source.read_text()
+        source_dir = source.parent
 
     if args.execute:
-        # Task 7 review N1: executing ran the literate axis with no validator and
-        # no PathPolicy (a document read files outside --base-dir). Refused until
-        # the literate interpreter migrates, like every service route (C1).
-        from .profiles import LITERATE_PENDING
+        import asyncio
 
-        print(f"lackpyctl render --execute: {LITERATE_PENDING}", file=sys.stderr)
-        return 1
-    out = to_markdown(document)
+        from .profiles import Profile
+        from .service import LackpyService
+
+        workspace = Path(args.base_dir or getattr(args, "workspace", None) or source_dir)
+        service = LackpyService(workspace=workspace.resolve())
+        result = asyncio.run(service.run_program(document, profile=Profile(execution="literate")))
+        if not result.success:
+            print(f"lackpyctl render --execute: {result.error}", file=sys.stderr)
+            return 1
+        out = result.stdout
+    else:
+        out = to_markdown(document)
 
     if args.output:
         Path(args.output).write_text(out + "\n")
@@ -118,12 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     render_p.add_argument(
         "--execute",
         action="store_true",
-        help="Disabled until the literate interpreter migrates to the stepy100 runtime",
+        help="Run the document (validated cells under the workspace PathPolicy) and render its output",
     )
     render_p.add_argument(
         "--base-dir",
         default=None,
-        help="Unused while --execute is disabled",
+        help="The workspace the document runs in (default: its own directory)",
     )
 
     # profile

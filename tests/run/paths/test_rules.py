@@ -316,6 +316,13 @@ class TestUnresolvableRule:
     """Review I4: a rule whose literal prefix cannot be resolved (a symlink loop)
     is a settings error, a ``ValueError`` that names the rule, not a refusal."""
 
+    def test_a_path_through_a_symlink_loop_is_refused(self, ws):
+        # Python 3.13 changed Path.resolve(): without strict it no longer raises
+        # on a symlink loop. The policy must still see the loop on every version.
+        (ws / "loop").symlink_to(ws / "loop")
+        with pytest.raises(LackpyRefusal, match="cannot be resolved"):
+            PathPolicy(ws, []).check(ws / "loop" / "secret", "read")
+
     def test_symlink_loop_in_a_deny_prefix(self, ws):
         (ws / "loop").symlink_to(ws / "loop")
         with pytest.raises(ValueError, match=r"Read\(\./loop/secret\)"):

@@ -56,6 +56,7 @@ process that swaps a symlink between them is not defended against.
 
 from __future__ import annotations
 
+import errno
 import fnmatch
 import os
 import posixpath
@@ -144,8 +145,25 @@ def _norm(path: Path | str) -> str:
 
 
 def _real(path: Path | str) -> str:
+    """``path`` with every symlink resolved; a missing tail stays as it is.
+
+    A symlink loop is a ``LackpyRefusal`` on every Python version. Python 3.13
+    changed ``Path.resolve()``: without ``strict`` it no longer raises on a
+    loop (it returns the path unresolved). So resolve strictly first: a loop is
+    ``ELOOP`` (3.13) or ``RuntimeError`` (3.12 and older). Only a path that
+    does not exist (or another non-loop error, which non-strict mode ignored
+    before) falls back to the non-strict form.
+    """
+    p = Path(path)
     try:
-        return os.fspath(Path(path).resolve())
+        return os.fspath(p.resolve(strict=True))
+    except RuntimeError as e:  # a symlink loop, Python 3.12 and older
+        raise LackpyRefusal(f"access to {path} (it cannot be resolved: {e})") from None
+    except OSError as e:
+        if e.errno == errno.ELOOP:  # a symlink loop, Python 3.13
+            raise LackpyRefusal(f"access to {path} (it cannot be resolved: {e})") from None
+    try:
+        return os.fspath(p.resolve())
     except (OSError, RuntimeError) as e:  # symlink loop
         raise LackpyRefusal(f"access to {path} (it cannot be resolved: {e})") from None
 

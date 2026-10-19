@@ -128,16 +128,23 @@ def test_delegate_returns_the_programs_stdout(monkeypatch):
     assert asyncio.run(server.delegate("x"))["stdout"] == "hi\n"
 
 
-def test_configured_literate_profile_is_refused(tmp_path):
-    # Review C1: the literate axis ran with no validator and no PathPolicy.
-    from lackpy.service import LITERATE_PENDING
-    (tmp_path / ".lackpy").mkdir()
-    (tmp_path / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
-    server.set_workspace(tmp_path)
+def test_configured_literate_profile_runs(tmp_path):
+    # Literate stepy Task 4: the axis runs (review C1 refused it with
+    # LITERATE_PENDING). The escape document is gate 1 in tests/literate/test_gate.py.
+    from lackpy.run.paths import load_policy
+    from lackpy.service import LackpyService
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    ws = tmp_path / "ws"
+    (ws / ".lackpy").mkdir(parents=True)
+    (ws / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
+    server._service = LackpyService(
+        workspace=ws, path_policy_loader=lambda w: load_policy(w, home=home, managed=None))
     try:
-        doc = "```lackpy\nn = len(().__class__.__base__.__subclasses__())\n```\n\nN={n}"
+        doc = "```lackpy\nx = 6 * 7\nx\n```\n\nX={x}"
         result = asyncio.run(server.run_program(doc, profile="lit"))
-        assert not result["success"]
-        assert result["error"] == LITERATE_PENDING
+        assert result["success"], result["error"]
+        assert "X=42" in result["stdout"]
+        assert result["output"] == 42
     finally:
         server._service = None

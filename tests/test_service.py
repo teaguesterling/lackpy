@@ -14,15 +14,11 @@ import pytest
 
 from lackpy.profiles import Profile
 from lackpy.run.paths import load_policy
-from lackpy.service import KIT_REMOVED, LITERATE_PENDING, STAGED_DSL_PENDING, LackpyService, ProfileError
+from lackpy.service import KIT_REMOVED, STAGED_DSL_PENDING, LackpyService, ProfileError
 
 REPO = Path(__file__).resolve().parents[1]
 
 READ = "from pathlib import Path\nx = Path('test.txt').read_text()\nlen(x)"
-
-_LITERATE = pytest.mark.xfail(
-    reason="kit removed in stepy100 Plan 2; literate migration pending", strict=True)
-
 
 @pytest.fixture
 def tmp_home(tmp_path):
@@ -457,77 +453,72 @@ class TestLanguageSpec:
 _LIT = Profile(execution="literate")
 
 
-_OUTSIDE_MARK = "SECRET-OUTSIDE-THE-WORKSPACE"
+class TestLiterateAxisRuns:
+    """Literate stepy Task 4 (D9): the literate axis runs through the service.
 
-
-def _escape_docs(outside):
-    # Review C1, measured: on the literate axis a doc walked to object.__subclasses__(),
-    # took the literate layer's read_file from a lambda's __globals__, and read a file
-    # outside the workspace. No validator ran and no PathPolicy was loaded.
-    return [
-        "```lackpy\nn = len(().__class__.__base__.__subclasses__())\n```\n\nN={n}",
-        f"```lackpy\ng = (lambda: 0).__globals__\nt = g['read_file']('{outside}')\n```\n\nT={{t}}",
-    ]
-
-
-class TestLiterateAxisRefused:
-    """Review C1 / ruling: the literate axis is refused on every entry path until
-    the literate interpreter migrates onto the runtime namespace and PathPolicy."""
-
-    @pytest.fixture
-    def outside(self, tmp_path):
-        f = tmp_path / "outside.txt"
-        f.write_text(_OUTSIDE_MARK)
-        return f
+    It replaced ``TestLiterateAxisRefused`` (review C1 refused the axis with
+    ``LITERATE_PENDING`` until the interpreter ran on the stepy100 runtime).
+    The C1 escape document is gate 1 in ``tests/literate/test_gate.py``, on
+    every entry point.
+    """
 
     @pytest.mark.asyncio
-    async def test_escape_fails_before_anything_runs(self, tmp_path, tmp_home, outside):
+    async def test_a_literate_run_loads_the_policy_through_the_service_seam(self, tmp_path, tmp_home):
         ws = tmp_path / "wsl"
         ws.mkdir()
+        (ws / "in.txt").write_text("abc")
         calls = []
         svc = _make_service(ws, tmp_home, calls)
-        for doc in _escape_docs(outside):
-            result = await svc.run_program(doc, profile=_LIT)
-            assert not result.success
-            assert result.error == LITERATE_PENDING
-            assert result.stdout == "" and result.output is None
-            delegated = await svc.delegate("x", profile=_LIT, _program_override=doc)
-            assert not delegated["success"]
-            assert delegated["error"] == LITERATE_PENDING
-            assert _OUTSIDE_MARK not in repr(delegated)
-        assert calls == []  # refused before the policy load, so before any run
+        doc = "```lackpy\nfrom pathlib import Path\nn = len(Path('in.txt').read_text())\n```\n\nN={n}"
+        result = await svc.run_program(doc, profile=_LIT)
+        assert result.success, result.error
+        assert "N=3" in result.stdout
+        assert calls == [ws]
+        assert [e.tool for e in result.trace.entries] == ["Path.read_text"]
 
     @pytest.mark.asyncio
-    async def test_configured_literate_profile_is_refused(self, tmp_path, tmp_home, outside):
+    async def test_a_policy_load_failure_is_a_failed_result(self, tmp_path):
+        def boom(workspace):
+            raise ValueError("bad settings")
+        ws = tmp_path / "wsb"
+        ws.mkdir()
+        svc = LackpyService(workspace=ws, path_policy_loader=boom)
+        result = await svc.run_program("```lackpy\nx = 1\n```", profile=_LIT)
+        assert not result.success
+        assert "bad settings" in result.error
+
+    @pytest.mark.asyncio
+    async def test_configured_literate_profile_runs(self, tmp_path, tmp_home):
         ws = tmp_path / "wsc"
         (ws / ".lackpy").mkdir(parents=True)
         (ws / ".lackpy" / "config.toml").write_text(
             '[profile]\ndefault = "lit"\n\n[profiles.lit]\nexecution = "literate"\n')
         svc = _make_service(ws, tmp_home)
-        doc = _escape_docs(outside)[1]
+        doc = "```lackpy\nx = 6 * 7\n```\n\nX={x}"
         for profile in ("lit", None):  # by name, and as the configured default
             result = await svc.run_program(doc, profile=profile)
-            assert result.error == LITERATE_PENDING
-        assert svc.validate("x = 1", profile="lit").errors == [LITERATE_PENDING]
-        with pytest.raises(ProfileError, match="literate"):
-            await svc.generate("greet", profile="lit")
-        assert (await svc.create("x = 1", profile="lit", name="t"))["errors"] == [LITERATE_PENDING]
+            assert result.success, result.error
+            assert "X=42" in result.stdout
 
-    def test_message_names_the_pending_migration(self):
-        assert "literate" in LITERATE_PENDING and "migrat" in LITERATE_PENDING
+    @pytest.mark.asyncio
+    async def test_output_is_the_last_code_cells_value_when_it_ends_in_a_name(self, service):
+        doc = "```lackpy\nx = {'a': [1, 2]}\nx\n```\n\nDone."
+        result = await service.run_program(doc, profile=_LIT)
+        assert result.success, result.error
+        assert result.output == {"a": [1, 2]}
 
-    def test_cli_refuses_a_configured_literate_profile(self, tmp_path, outside, capsys):
-        from lackpy.cli import main
-        ws = tmp_path / "wscli"
-        (ws / ".lackpy").mkdir(parents=True)
-        (ws / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
-        prog = ws / "doc.py"
-        prog.write_text(_escape_docs(outside)[1])
-        code = main([str(prog), "--workspace", str(ws), "--profile", "lit"])
-        out = json.loads(capsys.readouterr().out)
-        assert code == 1
-        assert out["error"] == LITERATE_PENDING
-        assert _OUTSIDE_MARK not in json.dumps(out)
+    @pytest.mark.asyncio
+    async def test_output_is_none_when_the_last_value_is_not_data(self, service):
+        doc = "```lackpy\nf = len\nf\n```"
+        result = await service.run_program(doc, profile=_LIT)
+        assert result.success, result.error
+        assert result.output is None
+
+    def test_pending_message_is_gone(self):
+        import lackpy.profiles
+        import lackpy.service
+        assert not hasattr(lackpy.profiles, "LITERATE_PENDING")
+        assert not hasattr(lackpy.service, "LITERATE_PENDING")
 
 
 class _SelectorProvider:
@@ -618,40 +609,74 @@ class TestStagedDSLRefused:
         assert "staged-dsl" in STAGED_DSL_PENDING and "migrat" in STAGED_DSL_PENDING
 
 
+_RO = Profile(execution="literate", policy={"read_only": True})
+
+
 class TestLiterateExecutionAxis:
-    """Profile `execution == "literate"` routes run_program through the
-    LiterateInterpreter, so the effect-ceiling gate (defaulting to the granted
-    toolset's grade) and the write journal enforce end-to-end via the service.
-    With no kit, the granted toolset is empty and the ceiling is w=0.
+    """Profile ``execution == "literate"`` routes run_program and delegate through
+    the LiterateInterpreter on the stepy100 runtime: one CellSession under the
+    workspace PathPolicy (D9). A literate cell can write what a one-shot program
+    can; a read-only profile (``policy = {read_only = true}``) adds the
+    ``Edit(//**)`` deny (D7, Ruling F).
+
+    Retired kit model: the ceiling was the granted toolset's grade (a profile
+    with read_file was w=1 and refused @write; one with edit_file was w=3).
     """
 
-    @_LITERATE
     @pytest.mark.asyncio
-    async def test_write_doc_refused_under_a_literate_profile(self, service):
-        # Retired kit model: the profile granted read_file (w=1). With no tools
-        # the ceiling is w=0, so a @write doc (w=3) is refused before any cell runs.
-        doc = "```lackpy @write(out.txt)\nhello\n```"
-        result = await service.run_program(doc, profile=_LIT)
+    async def test_write_doc_refused_under_a_read_only_profile(self, service):
+        doc = "```lackpy @write(out.txt)\nhello\n```\n\n```lackpy\nafter = 1\n```"
+        result = await service.run_program(doc, profile=_RO)
         assert not result.success
-        assert "effect ceiling exceeded" in (result.error or "")
+        assert "refused" in (result.error or "")
         assert not (service._workspace / "out.txt").exists()
 
-    @_LITERATE
+    @pytest.mark.asyncio
+    async def test_a_read_only_profile_still_reads(self, service):
+        doc = "```lackpy\nfrom pathlib import Path\nt = Path('test.txt').read_text()\n```\n\nT={t}"
+        result = await service.run_program(doc, profile=_RO)
+        assert result.success, result.error
+        assert "T=hello world" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_a_configured_read_only_profile_refuses_a_write(self, tmp_path, tmp_home):
+        ws = tmp_path / "wsro"
+        (ws / ".lackpy").mkdir(parents=True)
+        (ws / ".lackpy" / "config.toml").write_text(
+            '[profiles.ro]\nexecution = "literate"\npolicy = { read_only = true }\n')
+        svc = _make_service(ws, tmp_home)
+        doc = "```lackpy\nfrom pathlib import Path\nPath('o.txt').write_text('x')\n```"
+        result = await svc.run_program(doc, profile="ro")
+        assert not result.success
+        assert not (ws / "o.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_read_only_applies_to_a_one_shot_profile_too(self, service):
+        # Fail closed: the key is never ignored on the other axis.
+        prog = "from pathlib import Path\nPath('o.txt').write_text('x')"
+        result = await service.run_program(prog, profile=Profile(policy={"read_only": True}))
+        assert not result.success
+        assert not (service._workspace / "o.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_read_only_must_be_a_bool(self, service):
+        result = await service.run_program(
+            "```lackpy\nx = 1\n```", profile=Profile(execution="literate", policy={"read_only": "yes"}))
+        assert not result.success
+        assert "read_only" in result.error
+
     @pytest.mark.asyncio
     async def test_within_ceiling_doc_executes_and_renders(self, service):
-        # A pure doc (w=0) is within the ceiling -> it runs and renders.
         doc = "```lackpy\nx = 2 + 2\n```\n\nResult: {x}"
         result = await service.run_program(doc, profile=_LIT)
         assert result.success
         assert "Result: 4" in result.stdout
 
-    @_LITERATE
     @pytest.mark.asyncio
-    async def test_write_allowed_when_toolset_grade_permits(self, service):
-        # Granting a w=3 tool raised the ceiling to w=3; a profile cannot grant tools now.
+    async def test_a_literate_profile_writes_under_the_policy(self, service):
+        # Parity with a one-shot program: the policy, not a kit grade, decides.
         doc = "```lackpy @write(out.txt)\nkept\n```"
-        profile = Profile(tools=["read_file", "edit_file"], execution="literate")
-        result = await service.run_program(doc, profile=profile)
+        result = await service.run_program(doc, profile=_LIT)
         assert result.success, result.error
         assert (service._workspace / "out.txt").read_text() == "kept"
 
@@ -661,18 +686,14 @@ class TestLiterateExecutionAxis:
         result = await service.run_program(READ)
         assert result.success
 
-    @_LITERATE
     @pytest.mark.asyncio
-    async def test_delegate_dispatches_literate_and_gate_refuses(self, service):
-        # delegate routes through the same axis seam: a write doc under a literate
-        # profile is refused by the gate (via _program_override, no LLM).
+    async def test_delegate_dispatches_literate_and_policy_refuses(self, service):
         result = await service.delegate(
-            "x", profile=_LIT, _program_override="```lackpy @write(o.txt)\nhi\n```")
+            "x", profile=_RO, _program_override="```lackpy @write(o.txt)\nhi\n```")
         assert not result["success"]
-        assert "effect ceiling exceeded" in (result["error"] or "")
+        assert "refused" in (result["error"] or "")
         assert not (service._workspace / "o.txt").exists()
 
-    @_LITERATE
     @pytest.mark.asyncio
     async def test_delegate_dispatches_literate_and_renders(self, service):
         result = await service.delegate(
@@ -680,13 +701,21 @@ class TestLiterateExecutionAxis:
         assert result["success"]
         assert "Result: 4" in result["stdout"]
 
+    @pytest.mark.asyncio
+    async def test_delegate_reports_the_files_a_document_touched(self, service):
+        doc = ("```lackpy\nfrom pathlib import Path\nt = Path('test.txt').read_text()\n"
+               "Path('copy.txt').write_text(t)\n```")
+        result = await service.delegate("x", profile=_LIT, _program_override=doc)
+        assert result["success"], result["error"]
+        assert result["files_read"] == ["test.txt"]
+        assert result["files_modified"] == ["copy.txt"]
+
 
 class TestLiterateGenerationRouting:
     """generate() routes an execution=="literate" profile to the literate
     generation path (own hint + parse validation), not the Python dispatcher.
     """
 
-    @_LITERATE
     @pytest.mark.asyncio
     async def test_literate_profile_uses_the_literate_generation_path(self, service, monkeypatch):
         from lackpy.infer.dispatch import GenerationResult
@@ -766,20 +795,19 @@ class _Violation:
 class TestLiterateModePolicy:
     """delegate's kibitzer mode-policy pre-check applies to literate docs."""
 
-    @_LITERATE
     def test_planned_calls_extracted_from_a_literate_doc(self, service):
         rp = service._resolve_profile(_LIT)
         calls = service._planned_tool_calls("```lackpy\ndata = read_file('t')\n```", rp)
         assert calls == ["read_file"]
 
-    @_LITERATE
     def test_annotation_calls_are_extracted_too(self, service):
-        # @write compiles to write_file(...) -- the compiled call is what policy sees.
+        # Retired kit model: @write compiled to write_file(...), a named call.
+        # Since literate stepy Task 3 it compiles to Path(...).write_text(...):
+        # a method call, which names no planned call (see the limitation below).
         rp = service._resolve_profile(_LIT)
         calls = service._planned_tool_calls("```lackpy @write(o.txt)\nhi\n```", rp)
-        assert "write_file" in calls
+        assert calls == []
 
-    @_LITERATE
     @pytest.mark.asyncio
     async def test_delegate_routes_literate_calls_to_mode_policy(self, service):
         fake = _FakeKibitzer()
@@ -788,16 +816,16 @@ class TestLiterateModePolicy:
             "x", profile=_LIT, _program_override="```lackpy\ndata = read_file('t')\n```")
         assert fake.seen_planned == [{"tool": "read_file", "input": {}}]
 
-    @_LITERATE
     @pytest.mark.asyncio
     async def test_delegate_enforces_a_literate_mode_policy_violation(self, service):
-        fake = _FakeKibitzer(violations=[_Violation("write_file blocked in test mode")])
+        # Retired kit model: the doc was a @write (write_file); now a named call.
+        fake = _FakeKibitzer(violations=[_Violation("read_file blocked in test mode")])
         service._kibitzer = fake
         result = await service.delegate(
-            "x", profile=_LIT, _program_override="```lackpy @write(o.txt)\nhi\n```")
+            "x", profile=_LIT, _program_override="```lackpy\ndata = read_file('t')\n```")
         assert not result["success"]
         assert "Kibitzer mode policy violation" in result["error"]
-        assert "write_file blocked" in result["error"]
+        assert "read_file blocked" in result["error"]
 
     @pytest.mark.asyncio
     async def test_one_shot_program_has_no_tool_calls_to_check(self, service):
@@ -808,7 +836,6 @@ class TestLiterateModePolicy:
         await service.delegate("read file", _program_override=READ)
         assert fake.seen_planned is None
 
-    @_LITERATE
     def test_cooperative_limitation_indirect_calls_bypass(self, service):
         # Boundary pin: mode policy sees only DIRECT named calls. Attribute /
         # aliased / reflected invocations are NOT attributed to a tool, so they

@@ -1,5 +1,7 @@
 """Tests for lackpyctl CLI."""
 
+import pytest
+
 from lackpy.ctl import build_parser
 
 
@@ -79,38 +81,54 @@ def test_parser_render_execute_and_output():
     assert args.output == "out.md"
 
 
-# --- Task 7 fix round 2, N1: `render --execute` ran the literate axis unvalidated ---
+# --- literate stepy Task 4: `render --execute` runs through the service ---
+# (Task 7 fix round 2, N1 refused it with LITERATE_PENDING until the literate
+# interpreter ran on the stepy100 runtime.) The escape document is gate 1 in
+# tests/literate/test_gate.py.
 
-def _escape_doc(tmp_path):
-    outside = tmp_path / "outside.txt"
-    outside.write_text("SECRET-RENDER")
+@pytest.fixture
+def tmp_policy_home(tmp_path, monkeypatch):
+    """Every service policy load uses a temporary home and no managed settings."""
+    from lackpy import service
+    from lackpy.run.paths import load_policy
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(service, "load_policy",
+                        lambda ws: load_policy(ws, home=home, managed=None))
+    return home
+
+
+def _doc(tmp_path, text):
     doc = tmp_path / "doc" / "doc.md"
-    doc.parent.mkdir()
-    doc.write_text("```lackpy\ng = (lambda: 0).__globals__\n"
-                   f"t = g['read_file']('{outside}')\n```\n\nT={{t}}\n")
+    doc.parent.mkdir(exist_ok=True)
+    doc.write_text(text)
     return doc
 
 
-def test_render_execute_is_refused(tmp_path, capsys):
+def test_render_execute_renders_the_run(tmp_path, tmp_policy_home, capsys):
     from lackpy.ctl import main
-    from lackpy.profiles import LITERATE_PENDING
-    code = main(["render", "--execute", str(_escape_doc(tmp_path))])
-    captured = capsys.readouterr()
-    assert code == 1
-    assert LITERATE_PENDING in captured.err
-    assert "SECRET-RENDER" not in captured.out + captured.err
+    doc = _doc(tmp_path, "```lackpy\nx = 6 * 7\n```\n\nX={x}\n")
+    assert main(["render", "--execute", str(doc)]) == 0
+    assert "X=42" in capsys.readouterr().out
 
 
-def test_render_execute_writes_no_output_file(tmp_path, capsys):
+def test_render_execute_resolves_paths_against_the_base_dir(tmp_path, tmp_policy_home, capsys):
     from lackpy.ctl import main
+    base = tmp_path / "base"
+    base.mkdir()
+    doc = _doc(tmp_path, "```lackpy @write(out.txt)\nkept\n```\n")
     out = tmp_path / "out.md"
-    assert main(["render", "--execute", str(_escape_doc(tmp_path)), "-o", str(out)]) == 1
-    assert not out.exists()
+    assert main(["render", "--execute", str(doc), "--base-dir", str(base), "-o", str(out)]) == 0
+    assert (base / "out.txt").read_text() == "kept"
+    assert not (doc.parent / "out.txt").exists()
+    assert out.exists()
 
 
-def test_render_without_execute_still_renders_and_runs_nothing(tmp_path, capsys):
+def test_render_execute_failure_exits_nonzero_and_writes_no_output_file(
+        tmp_path, tmp_policy_home, capsys):
     from lackpy.ctl import main
-    assert main(["render", str(_escape_doc(tmp_path))]) == 0
-    out = capsys.readouterr().out
-    assert "g['read_file']" in out          # the source is shown
-    assert "SECRET-RENDER" not in out        # nothing ran
+    doc = _doc(tmp_path, "```lackpy\nimport os\n```\n")
+    out = tmp_path / "out.md"
+    assert main(["render", "--execute", str(doc), "-o", str(out)]) == 1
+    assert "Import" in capsys.readouterr().err
+    assert not out.exists()

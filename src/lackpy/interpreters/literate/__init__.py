@@ -362,6 +362,8 @@ class LiterateInterpreter:
                 "ledger": ledger,
                 "versions": versions,
                 "rendered_markdown": rendered_markdown,
+                # The session's trace: every Path call the cells made (D9).
+                "trace": kernel.session.trace,
                 "frontmatter": {
                     "echo": parsed.frontmatter.echo,
                     "output": parsed.frontmatter.output,

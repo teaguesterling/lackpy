@@ -18,17 +18,17 @@ from .infer.providers.templates import TemplatesProvider
 from .tools.providers.python import PythonProvider
 from .tools.registry import ResolvedTools
 from .lang.grader import compute_grade
-from .profiles import KIT_REMOVED, LITERATE_PENDING, STAGED_DSL_PENDING, Profile, ProfileError, ResolvedProfile, resolve_profile
+from .profiles import KIT_REMOVED, STAGED_DSL_PENDING, Profile, ProfileError, ResolvedProfile, resolve_profile
 from .tools.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
 from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
-from .run.paths import PathPolicy, load_policy
-from .run.runner import RestrictedRunner, _binds_params
+from .run.paths import PathPolicy, load_policy, read_only_policy
+from .run.runner import RestrictedRunner, _binds_params, _is_data
 from .run.refusal import LackpyRefusal
-from .run.trace import error_text
+from .run.trace import Trace, error_text
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,45 @@ def _traced_paths(trace: Any, tools: tuple[str, ...]) -> list[str]:
         if entry.success and entry.tool in tools and entry.args:
             seen.setdefault(str(entry.args[0]), None)
     return list(seen)
+
+
+def _read_only(policy: dict[str, Any] | None) -> bool:
+    """A profile's ``policy.read_only`` (default False); ``ProfileError`` unless a bool.
+
+    A read-only profile runs under ``read_only_policy`` (literate stepy D7,
+    Ruling F). A value that is not a bool is an error, not "false": a typo
+    must not silently allow writes.
+    """
+    value = (policy or {}).get("read_only", False)
+    if not isinstance(value, bool):
+        raise ProfileError(f"profile policy.read_only must be true or false, not {value!r}")
+    return value
+
+
+def _last_cell_value(document: str, variables: dict[str, Any]) -> Any:
+    """The value of a literate document's last code cell, made data-safe.
+
+    A cell's value is its last statement when that statement is a bare name,
+    as a notebook shows it; the name's value is read from the run's bindings,
+    so nothing runs again. ``None`` when the last code cell ends otherwise, or
+    the value is not data (``runner._is_data``).
+    """
+    import ast
+
+    from .interpreters.literate.compiler import compile_cell
+    from .interpreters.literate.parser import parse
+
+    code = [c for c in parse(document).cells if c.cell_type != "prose"]
+    if not code:
+        return None
+    try:
+        body = ast.parse(compile_cell(code[-1])).body
+    except (SyntaxError, ValueError):
+        return None
+    if not body or not isinstance(body[-1], ast.Expr) or not isinstance(body[-1].value, ast.Name):
+        return None
+    value = variables.get(body[-1].value.id)
+    return value if _is_data(value) else None
 
 
 def _check_mode(mode: str | None) -> None:
@@ -441,8 +480,7 @@ class LackpyService:
             ProfileError: The profile names tools (a list, a dict, a ``.kit`` or
                 ``.profile`` file, or a ``tools``/``extra_tools`` key), or the
                 name is not configured; the message carries ``KIT_REMOVED``. Or
-                the profile selects ``execution = "literate"``; the message is
-                ``LITERATE_PENDING``.
+                the profile's ``policy.read_only`` is set and is not a bool.
         """
         profiles = self._config.profiles
         if profile is None:
@@ -464,11 +502,7 @@ class LackpyService:
             raise ProfileError(KIT_REMOVED)
         if prof.tools or prof.extra_tools:
             raise ProfileError(KIT_REMOVED)
-        if prof.execution == "literate":
-            # Review C1: that axis runs a document with no restricted-Python
-            # validator and no PathPolicy. Refused until the literate interpreter
-            # migrates onto the runtime namespace.
-            raise ProfileError(LITERATE_PENDING)
+        _read_only(prof.policy)  # a malformed read_only fails here, before any run
         _check_mode(prof.mode)
         return ResolvedProfile(
             tools=_no_tools(), model=prof.model, mode=prof.mode, order=prof.order,
@@ -643,7 +677,8 @@ class LackpyService:
             interpreter=interpreter, kibitzer_session=self._kibitzer,
         )
 
-    async def _execute(self, program: str, param_values: dict[str, Any]) -> ExecutionResult:
+    async def _execute(self, program: str, param_values: dict[str, Any],
+                       *, read_only: bool = False) -> ExecutionResult:
         """Run an (already validated) program through the restricted runner.
 
         The single execution path shared by ``run_program`` and ``delegate``.
@@ -652,18 +687,26 @@ class LackpyService:
         run needs the event loop and the runner runs inline.
         """
         async with self._exec_lock:
-            return self._run_sync(program, param_values)
+            return self._run_sync(program, param_values, read_only=read_only)
 
-    def _run_sync(self, program: str, param_values: dict[str, Any]) -> ExecutionResult:
+    def _load_path_policy(self, *, read_only: bool) -> PathPolicy:
+        """The workspace ``PathPolicy`` through the service's policy seam, loaded
+        for this run; with ``read_only`` it also denies every write
+        (``read_only_policy``, design D7, Ruling F). Raises what the loader raises."""
+        loader = self._path_policy_loader or load_policy
+        policy = loader(self._workspace)
+        return read_only_policy(policy) if read_only else policy
+
+    def _run_sync(self, program: str, param_values: dict[str, Any],
+                  *, read_only: bool = False) -> ExecutionResult:
         """Load the PathPolicy, switch into the workspace, run, restore cwd.
 
         The policy is loaded on every run, so a settings change takes effect on
         the next run. A malformed settings file gives a failed result whose
         error names the file; it never raises.
         """
-        loader = self._path_policy_loader or load_policy
         try:
-            policy = loader(self._workspace)
+            policy = self._load_path_policy(read_only=read_only)
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
         prev_cwd = os.getcwd()
@@ -683,42 +726,53 @@ class LackpyService:
         Validation lives ABOVE the branch: a literate document is NOT restricted
         Python, so it must not pass through the restricted-Python validator (which
         would reject its fences/prose as a syntax error and never reach the gate).
-        ``execution == "literate"`` validates and runs the program through the
-        LiterateInterpreter, whose ceiling gate + write journal enforce the granted
-        toolset's grade (empty since the kit was removed, so w=0); any other axis
-        is restricted Python -- always validated with no allowed names (parked
-        item 1: there is no skip), then run through the restricted runner.
+        ``execution == "literate"`` runs the document through the
+        LiterateInterpreter: every cell is validated against the program so far
+        and runs in one CellSession under the workspace PathPolicy (literate
+        stepy D2, D9). Any other axis is restricted Python -- always validated
+        with no allowed names (parked item 1: there is no skip), then run
+        through the restricted runner. A profile whose ``policy.read_only`` is
+        true runs under ``read_only_policy`` on either axis.
         """
+        read_only = _read_only(rp.policy)
         if rp.execution == "literate":
-            return await self._execute_literate(program, rp.tools, param_values)
+            return await self._execute_literate(program, param_values, read_only=read_only)
 
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
             return ExecutionResult(success=False, error=validation_error(validation))
-        return await self._execute(program, param_values)
+        return await self._execute(program, param_values, read_only=read_only)
 
     async def _execute_literate(
-        self, program: str, resolved: Any, param_values: dict[str, Any],
+        self, program: str, param_values: dict[str, Any], *, read_only: bool = False,
     ) -> ExecutionResult:
-        """Execute a literate document through the LiterateInterpreter, adapting its
-        result to an ``ExecutionResult``.
+        """Run a literate document (design D9) and adapt the result.
 
-        The granted toolset (``resolved``) is threaded as ``context.tools`` so the
-        ceiling defaults to its grade -- a document may not exceed the effect grade
-        of the tools its profile granted -- and its callables join the literate
-        namespace. ``base_dir`` is made absolute so the write journal / tool path
-        resolver is immune to the concurrent single-flight ``os.chdir`` on the
-        restricted-Python path.
+        The ``PathPolicy`` comes through the same seam as ``run_program``'s
+        (``_load_path_policy``); a load failure is a failed result, never a
+        raise. The document's ``Path`` resolves against the workspace, so no
+        ``os.chdir`` is made and the run does not take ``_exec_lock`` (D8).
+        No toolset is passed: there is no kit grade, so no static ceiling; the
+        policy is the boundary (a read-only profile adds the write deny).
+
+        The result: ``stdout`` is the rendered document; ``output`` is the
+        last code cell's value when that cell ends in a bare name bound to
+        data (else ``None``); ``trace`` is the session's trace; ``error`` is
+        the refusal that ended the document, then the reified failures.
         """
         from .interpreters.base import ExecutionContext
         from .interpreters.literate import LiterateInterpreter
 
-        interp = LiterateInterpreter()
+        try:
+            policy = self._load_path_policy(read_only=read_only)
+        except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
+            return ExecutionResult(success=False, error=_policy_error(e))
         ctx = ExecutionContext(
             base_dir=str(self._workspace.resolve()),
-            tools=resolved,
             params=param_values,
+            config={"path_policy": policy},
         )
+        interp = LiterateInterpreter()
         validation = interp.validate(program, ctx)
         if not validation.valid:
             return ExecutionResult(
@@ -726,12 +780,15 @@ class LackpyService:
                 error=f"Validation failed: {'; '.join(validation.errors)}",
             )
         result = await interp.execute(program, ctx)
+        variables = result.metadata.get("variables", {})
+        trace = result.metadata.get("trace")
         return ExecutionResult(
             success=result.success,
-            output=result.output,
+            output=_last_cell_value(program, variables),
             stdout=str(result.output) if result.output else "",
             error=result.error,
-            variables=result.metadata.get("variables", {}),
+            trace=trace if trace is not None else Trace(),
+            variables={k: v for k, v in variables.items() if _is_data(v)},
         )
 
     async def _generate_literate(
