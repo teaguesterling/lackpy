@@ -269,3 +269,40 @@ It does not make the corpus publishable. It removes what two detectors can name,
 one found a population the first missed. A third detector would probably find a smaller one
 again. Decision D4 requires a human read of every committed fixture; about 50 fixtures is a
 tractable read, and the scrub narrows what that read is looking for.
+
+---
+
+## 12. Re-measured against a moving branch
+
+The branch moved 22 commits while this brief was written, through Plan 2 tasks 5 to 7. The
+measurement was re-run against `45a20e9`. **The headline holds: 4,582 programs, 65.6%.**
+
+| Layer | at `6855fa1` | at `45a20e9` |
+|---|---|---|
+| L0 today, unmodified | 608 | 615 |
+| L2 `open(...)` rewritten | 2,293 | 2,351 |
+| L3 mechanical statement splits | 2,395 | 2,395 |
+| L4 templated assert messages | 4,582 | 4,582 |
+
+The reachability figure is stable across 22 commits of language work. That is the useful
+property: it depends on what the corpus contains, not on the rule set of the day.
+
+Two smaller changes, both in the residual: `safety.attr-store` appears (65 programs), and
+`style.elif-chain` leaves the top of the list. Neither moves the total.
+
+**Two statements in this brief went stale, and one of them was an issue.**
+
+  - `edit_file` no longer exists. `1b2dffb` removed the kit from the runtime and deleted
+    `src/lackpy/sources/builtins.py`. Issue #62 was filed against it about four hours before
+    that commit, and is now closed as obsolete. Section 2.5's disposition came true: a program
+    now patches with `Path.write_text` and its own `.replace`, so the guarded-patch idiom from
+    the corpus is the pattern that carries the check.
+  - The import rule has not changed. L1 still adds one program, so the import-to-proxy rewrite
+    (build order step 4) is still ahead.
+
+**Build order step 7 has landed.** `056142e` adds plain-Python equivalence over 30 references
+and a Plan 2 gate suite. That is gate 2 of section 4, the behavioural check. The sequencing
+rule in section 11 now has a concrete dependency: run that suite on unscrubbed pairs.
+
+**Re-run before quoting.** Every number here carries the commit it was measured at. A figure
+quoted without one is a figure about a branch that has moved.
