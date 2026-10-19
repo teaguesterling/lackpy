@@ -8,17 +8,12 @@ from lackpy.policy.types import PolicyResult, PolicyContext
 from lackpy.policy.sources.tools import ToolsPolicySource
 from lackpy.tools.registry import ResolvedTools, resolve_tools
 from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
-try:
-    from lackpy.tools.providers.builtin import BuiltinProvider
-except ImportError:  # removed with the kit in stepy100 Plan 2, Task 7
-    BuiltinProvider = None
 from lackpy.lang.grader import Grade
 
 
 @pytest.fixture
 def toolbox():
     tb = Toolbox()
-    tb.register_provider(BuiltinProvider())
     for name, desc, grade in [
         ("read_file", "Read file contents", 1),
         ("find_files", "Find files matching pattern", 1),
@@ -68,12 +63,10 @@ class TestToolsPolicySource:
         result = source.resolve(PolicyResult(), context)
         assert result.resolved is False
 
-    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_priority_is_zero(self, toolbox):
         source = ToolsPolicySource(toolbox)
         assert source.priority == 0
 
-    @pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; policy layer migration pending", strict=True)
     def test_name_is_kit(self, toolbox):
         source = ToolsPolicySource(toolbox)
         assert source.name == "tools"

@@ -127,10 +127,11 @@ class PythonInterpreter:
         loader = self._path_policy_loader or load_policy
         try:
             policy = loader(Path(context.base_dir))
-        except (ValueError, OSError) as e:
+        except Exception as e:  # host code; never raises out (review M4)
+            from ..service import _policy_error
             return InterpreterExecutionResult(
                 success=False,
-                error=f"cannot load the path policy: {e}",
+                error=_policy_error(e),
                 output_format="none",
                 duration_ms=(time.perf_counter() - start) * 1000,
             )

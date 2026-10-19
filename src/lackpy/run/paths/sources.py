@@ -72,8 +72,9 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError) as e:
-        raise ValueError(f"{path}: malformed settings file: {e}") from None
+    except (ValueError, OSError, RecursionError, MemoryError) as e:
+        # RecursionError: JSON nested past the recursion limit (Task 7 review M4).
+        raise ValueError(f"{path}: malformed settings file: {type(e).__name__}: {e}") from None
     if not isinstance(data, dict):
         raise ValueError(f"{path}: settings must be a JSON object")
     return data
@@ -111,8 +112,8 @@ def _read_paths_table(path: Path) -> dict[str, list[str]] | None:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
-    except (tomllib.TOMLDecodeError, OSError) as e:
-        raise ValueError(f"{path}: malformed config file: {e}") from None
+    except (tomllib.TOMLDecodeError, OSError, RecursionError, MemoryError) as e:
+        raise ValueError(f"{path}: malformed config file: {type(e).__name__}: {e}") from None
     if "paths" not in data:
         return None
     table = data["paths"]

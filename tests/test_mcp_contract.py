@@ -106,3 +106,38 @@ def test_resource_functions_still_directly_callable(tmp_path):
     assert isinstance(server.config(), dict)
     assert isinstance(server.provider_list(), list)
     server._service = None
+
+
+def test_run_program_returns_the_programs_stdout(tmp_path):
+    # Ruling (Task 7 fix round, I1): a heredoc replacement that prints nothing is not one.
+    server.set_workspace(tmp_path)
+    try:
+        result = asyncio.run(server.run_program("print('hi')\nprint('there')"))
+        assert result["success"], result["error"]
+        assert result["stdout"] == "hi\nthere\n"
+    finally:
+        server._service = None
+
+
+def test_delegate_returns_the_programs_stdout(monkeypatch):
+    class _Svc:
+        async def delegate(self, intent, **kw):
+            return {"success": True, "output": None, "stdout": "hi\n", "trace": []}
+
+    monkeypatch.setattr(server, "_service", _Svc())
+    assert asyncio.run(server.delegate("x"))["stdout"] == "hi\n"
+
+
+def test_configured_literate_profile_is_refused(tmp_path):
+    # Review C1: the literate axis ran with no validator and no PathPolicy.
+    from lackpy.service import LITERATE_PENDING
+    (tmp_path / ".lackpy").mkdir()
+    (tmp_path / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
+    server.set_workspace(tmp_path)
+    try:
+        doc = "```lackpy\nn = len(().__class__.__base__.__subclasses__())\n```\n\nN={n}"
+        result = asyncio.run(server.run_program(doc, profile="lit"))
+        assert not result["success"]
+        assert result["error"] == LITERATE_PENDING
+    finally:
+        server._service = None

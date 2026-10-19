@@ -34,6 +34,27 @@ class ReadFile(Lackey):
         return self.read_file(self.path)
 '''
 
+PARAMS_NAMED_LACKEY = '''
+from lackpy.lackey import Lackey
+
+class P(Lackey):
+    params: str = "x"
+
+    def run(self) -> str:
+        return self.params
+'''
+
+BODY_BINDS_PARAMS_LACKEY = '''
+from lackpy.lackey import Lackey
+
+class P(Lackey):
+    name: str = "x"
+
+    def run(self) -> str:
+        params = {"name": "shadow"}
+        return params["name"] + self.name
+'''
+
 REQUIRED_LACKEY = '''
 from lackpy.lackey import Lackey
 
@@ -116,6 +137,23 @@ class TestRunLackey:
         passed = await service.run_lackey(path, params={"name": "bo"})
         assert passed["success"], passed["error"]
         assert passed["output"] == "hi bo"
+
+    @pytest.mark.asyncio
+    async def test_param_named_params_is_refused(self, service, workspace):
+        # Review M5: run_lackey adds the params literal, so a param named params collides.
+        path = workspace / "p.py"
+        path.write_text(PARAMS_NAMED_LACKEY)
+        result = await service.run_lackey(path)
+        assert not result["success"]
+        assert "'params'" in result["error"] and "rename" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_body_binding_params_is_refused(self, service, workspace):
+        path = workspace / "b.py"
+        path.write_text(BODY_BINDS_PARAMS_LACKEY)
+        result = await service.run_lackey(path)
+        assert not result["success"]
+        assert "binds 'params'" in result["error"] and "rename" in result["error"]
 
     @pytest.mark.asyncio
     async def test_lackey_declaring_tools_is_an_error(self, service, workspace):

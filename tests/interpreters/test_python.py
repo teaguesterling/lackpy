@@ -113,6 +113,25 @@ class TestPythonExecution:
         assert str(settings) in result.error
 
     @pytest.mark.asyncio
+    async def test_any_loader_exception_is_a_failed_result(self, ws):
+        # Review M4: the loader is host code; whatever it raises is a failed result.
+        def loader(base_dir):
+            raise TypeError("boom")
+        result = await run_interpreter(PythonInterpreter(path_policy_loader=loader), "x = 1",
+                                       ExecutionContext(base_dir=ws))
+        assert not result.success
+        assert "TypeError" in result.error
+
+    @pytest.mark.asyncio
+    async def test_deeply_nested_settings_name_the_file(self, interp, ws):
+        settings = ws / ".claude" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_text('{"permissions": {"deny": ' + "[" * 100000 + "]" * 100000 + '}}')
+        result = await run_interpreter(interp, "x = 1", ExecutionContext(base_dir=ws))
+        assert not result.success
+        assert str(settings) in result.error
+
+    @pytest.mark.asyncio
     async def test_context_naming_tools_fails(self, interp, ws):
         result = await run_interpreter(interp, "count([])", ExecutionContext(tools=_make_kit(), base_dir=ws))
         assert not result.success

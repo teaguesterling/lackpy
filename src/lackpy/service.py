@@ -17,7 +17,7 @@ from .infer.providers.templates import TemplatesProvider
 from .tools.providers.python import PythonProvider
 from .tools.registry import ResolvedTools
 from .lang.grader import compute_grade
-from .profiles import KIT_REMOVED, Profile, ProfileError, ResolvedProfile, resolve_profile
+from .profiles import KIT_REMOVED, LITERATE_PENDING, Profile, ProfileError, ResolvedProfile, resolve_profile
 from .tools.toolbox import Toolbox
 from .lang.grammar import ALLOWED_BUILTINS
 from .policy.layer import PolicyLayer
@@ -25,9 +25,21 @@ from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.paths import PathPolicy, load_policy
-from .run.runner import RestrictedRunner
+from .run.runner import RestrictedRunner, _binds_params
+from .run.trace import error_text
 
 logger = logging.getLogger(__name__)
+
+def _policy_error(e: Exception) -> str:
+    """The failed-result text for a PathPolicy that cannot be loaded.
+
+    ``load_policy`` raises ``ValueError`` naming the settings file; any other
+    type is named too, so a loader defect is not mistaken for a settings one.
+    """
+    if type(e) is ValueError:
+        return f"cannot load the path policy: {error_text(e)}"
+    return f"cannot load the path policy ({type(e).__name__}): {error_text(e)}"
+
 
 def _no_tools() -> ResolvedTools:
     """The empty tool set every profile resolves to since the kit was removed."""
@@ -359,7 +371,9 @@ class LackpyService:
         Raises:
             ProfileError: The profile names tools (a list, a dict, a ``.kit`` or
                 ``.profile`` file, or a ``tools``/``extra_tools`` key), or the
-                name is not configured. The message carries ``KIT_REMOVED``.
+                name is not configured; the message carries ``KIT_REMOVED``. Or
+                the profile selects ``execution = "literate"``; the message is
+                ``LITERATE_PENDING``.
         """
         profiles = self._config.profiles
         if profile is None:
@@ -381,6 +395,11 @@ class LackpyService:
             raise ProfileError(KIT_REMOVED)
         if prof.tools or prof.extra_tools:
             raise ProfileError(KIT_REMOVED)
+        if prof.execution == "literate":
+            # Review C1: that axis runs a document with no restricted-Python
+            # validator and no PathPolicy. Refused until the literate interpreter
+            # migrates onto the runtime namespace.
+            raise ProfileError(LITERATE_PENDING)
         return ResolvedProfile(
             tools=_no_tools(), model=prof.model, mode=prof.mode, order=prof.order,
             temperature=prof.temperature, rules=prof.rules, language=prof.language,
@@ -570,8 +589,8 @@ class LackpyService:
         loader = self._path_policy_loader or load_policy
         try:
             policy = loader(self._workspace)
-        except (ValueError, OSError) as e:
-            return ExecutionResult(success=False, error=f"cannot load the path policy: {e}")
+        except Exception as e:  # host code; run_program never raises (review M4)
+            return ExecutionResult(success=False, error=_policy_error(e))
         prev_cwd = os.getcwd()
         try:
             os.chdir(self._workspace)
@@ -952,6 +971,17 @@ class LackpyService:
         # Convert top-level `return X` to bare expression `X` so the runner can
         # execute the body as a flat program (return is only valid inside a function).
         run_body = _strip_top_level_return(info.run_body)
+        # Review M5: the prefix below owns the name `params`.
+        if "params" in defaults:
+            return {"success": False, "program": info.run_body, "output": None, "stdout": "",
+                    "error": "Lackey param 'params' collides with the params literal that "
+                             "run_lackey adds; rename the param", "trace": []}
+        import ast as _ast
+        if defaults and any(_binds_params(n) for n in _ast.walk(_ast.parse(run_body))):
+            return {"success": False, "program": info.run_body, "output": None, "stdout": "",
+                    "error": "Lackey run body binds 'params', but run_lackey adds the params "
+                             "literal for the Lackey's params; rename the body's variable",
+                    "trace": []}
         prefix = ""
         if defaults:
             prefix = f"params = {defaults!r}\n" + "".join(

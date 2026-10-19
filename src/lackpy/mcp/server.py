@@ -66,7 +66,7 @@ async def delegate(intent: str, profile: str | None = None,
     the lackpy validator checks; it reads and writes files only through
     pathlib.Path, under the workspace's permission rules. `profile` names a
     configured `[profiles.<name>]` entry (model, mode, rules); omit it for the
-    default. Returns a lean result (success, output, program, the traced calls); call
+    default. Returns a lean result (success, output, stdout, program, the traced calls); call
     `run_program` with the program if you need the full step trace.
     """
     r = await _get_service().delegate(intent, profile=profile, params=params, rules=rules)
@@ -74,6 +74,7 @@ async def delegate(intent: str, profile: str | None = None,
         "success": r.get("success"),
         "output": r.get("output"),
         "error": r.get("error"),
+        "stdout": r.get("stdout"),
         "program": r.get("program"),
         "generation_tier": r.get("generation_tier"),
         "total_time_ms": r.get("total_time_ms"),
@@ -100,6 +101,7 @@ async def run_program(program: str, profile: str | None = None,
     only through pathlib.Path, under the workspace's permission rules."""
     result = await _get_service().run_program(program, profile=profile, params=params, rules=rules)
     return {"success": result.success, "output": result.output, "error": result.error,
+            "stdout": result.stdout,
             "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
                         "success": e.success, "error": e.error} for e in result.trace.entries]}
 

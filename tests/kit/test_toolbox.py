@@ -3,20 +3,14 @@
 import pytest
 
 from lackpy.tools.toolbox import Toolbox, ToolSpec, ArgSpec
-try:
-    from lackpy.tools.providers.builtin import BuiltinProvider
-except ImportError:  # removed with the kit in stepy100 Plan 2, Task 7
-    BuiltinProvider = None
 
 
 @pytest.fixture
 def toolbox():
     tb = Toolbox()
-    tb.register_provider(BuiltinProvider())
     return tb
 
 
-@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool registry migration pending", strict=True)
 def test_register_tool(toolbox):
     spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents",
@@ -37,13 +31,11 @@ def test_resolve_tool(toolbox):
     assert callable(fn)
 
 
-@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool registry migration pending", strict=True)
 def test_resolve_unknown_tool_raises(toolbox):
     with pytest.raises(KeyError):
         toolbox.resolve("nonexistent")
 
 
-@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool registry migration pending", strict=True)
 def test_list_tools(toolbox):
     spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents", args=[], returns="str")
@@ -53,7 +45,6 @@ def test_list_tools(toolbox):
     assert tools[0].name == "read_file"
 
 
-@pytest.mark.xfail(reason="kit removed in stepy100 Plan 2; tool registry migration pending", strict=True)
 def test_format_namespace_description(toolbox):
     spec = ToolSpec(name="read_file", provider="builtin", provider_config={},
                     description="Read file contents",
