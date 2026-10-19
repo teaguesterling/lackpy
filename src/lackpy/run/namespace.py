@@ -11,12 +11,15 @@ the real ``__import__``, ``__build_class__``, ``open``,
 from __future__ import annotations
 
 import builtins as _builtins
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ..lang import builtins_policy
 from .modules import make_restricted_import
 from .paths import PathPolicy
 from .refusal import refuse
+
+if TYPE_CHECKING:
+    from .trace import Trace
 
 
 class _TypeView:
@@ -99,7 +102,8 @@ _TYPE = _TypeStandIn()
 
 
 def build_namespace(*, program_file: str | None, path_policy: PathPolicy | None = None,
-                    print_fn: Callable[..., None]) -> dict[str, Any]:
+                    print_fn: Callable[..., None],
+                    trace: "Trace | None" = None) -> dict[str, Any]:
     """Return fresh exec globals for one program run.
 
     Args:
@@ -107,12 +111,13 @@ def build_namespace(*, program_file: str | None, path_policy: PathPolicy | None 
         path_policy: The policy for file access. With it, ``pathlib`` serves the
             ``Path`` stand-in; with None, ``pathlib`` refuses (ruling C).
         print_fn: The function bound as ``print``, in the globals and the builtins.
+        trace: Where the ``Path`` stand-in records its I/O calls. None records nothing.
     """
     program_builtins: dict[str, Any] = {
         name: getattr(_builtins, name) for name in builtins_policy.ALLOWED
     }
     program_builtins["print"] = print_fn
-    program_builtins["__import__"] = make_restricted_import(path_policy)
+    program_builtins["__import__"] = make_restricted_import(path_policy, trace)
     return {
         "__builtins__": program_builtins,
         "__name__": "__main__",

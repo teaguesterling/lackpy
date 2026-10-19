@@ -440,8 +440,9 @@ class TestReviewFocus1:
         assert not (tmp_path / "made").exists()
 
     def test_params_built_dotdot(self, ws):
-        result = run("from pathlib import Path\n(Path(params['root']) / '..' / 'x').read_text()",
-                     PathPolicy(ws, []), params={"params": {"root": "."}})
+        result = run("from pathlib import Path\nparams = {'root': 'sub'}\n"
+                     "(Path(params['root']) / '..' / 'x').read_text()",
+                     PathPolicy(ws, []), params={"root": "."})
         assert not result.success
         assert "not allowed in lackpy" in (result.error or ""), result.error
 

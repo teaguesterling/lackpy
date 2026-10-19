@@ -20,11 +20,14 @@ from __future__ import annotations
 import importlib
 import types
 import weakref
-from typing import Any, Callable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 from ..lang import dictionary
 from .paths import PathPolicy, make_path_class
 from .refusal import LackpyRefusal, refuse
+
+if TYPE_CHECKING:
+    from .trace import Trace
 
 _PATH_PENDING_HINT = "Path arrives with the PathPolicy"
 
@@ -89,11 +92,13 @@ class ModuleProxy:
         return repr(_STATE[self].module)
 
 
-def make_restricted_import(path_policy: PathPolicy | None = None) -> Callable[..., ModuleProxy]:
+def make_restricted_import(path_policy: PathPolicy | None = None,
+                           trace: "Trace | None" = None) -> Callable[..., ModuleProxy]:
     """Return a fresh ``__import__`` for one program run.
 
     With ``path_policy``, ``pathlib`` is a proxy whose ``Path`` is the stand-in
     bound to that policy, one class per run. Without it, ``pathlib`` refuses.
+    With ``trace``, the stand-in records its I/O calls there.
 
     Within a run, a module imported twice is the same proxy, as in plain
     Python. The members are the real, shared objects: the static
@@ -112,7 +117,7 @@ def make_restricted_import(path_policy: PathPolicy | None = None) -> Callable[..
             refuse(f"import {name}", name)
         if name not in proxies:
             if name == "pathlib":
-                proxies[name] = ModuleProxy(name, {"Path": make_path_class(path_policy)})
+                proxies[name] = ModuleProxy(name, {"Path": make_path_class(path_policy, trace)})
             else:
                 proxies[name] = ModuleProxy(name)
         return proxies[name]

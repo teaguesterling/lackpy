@@ -20,6 +20,8 @@ import asyncio
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any, Awaitable
 
+from .refusal import LackpyRefusal
+
 
 class AsyncBridge:
     """Marshals coroutines from a worker thread onto a target event loop.
@@ -38,7 +40,9 @@ class AsyncBridge:
 
         Raises:
             RuntimeError: If no loop is active (called outside an execution).
-            TimeoutError: If the coroutine does not complete within ``timeout``.
+            LackpyRefusal: If the coroutine does not complete within ``timeout``.
+                A refusal, not ``TimeoutError``, so a program cannot catch it
+                and retry a hung tool (design §8, gate 5).
         """
         loop = self.loop
         if loop is None:
@@ -51,7 +55,7 @@ class AsyncBridge:
             return fut.result(timeout)
         except FuturesTimeout:
             fut.cancel()
-            raise TimeoutError(f"async tool call timed out after {timeout}s")
+            raise LackpyRefusal("a tool call timed out") from None
 
 
 def mark_async(fn: Any) -> Any:

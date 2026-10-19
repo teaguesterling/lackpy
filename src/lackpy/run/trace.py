@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from .refusal import LackpyRefusal
+
 
 @dataclass
 class TraceEntry:
@@ -14,8 +16,10 @@ class TraceEntry:
 
     Attributes:
         step: Zero-based index of this call within the program execution.
-        tool: Name of the tool that was called.
-        args: Keyword argument mapping captured at call time.
+        tool: Name of the tool that was called (``"Path.read_text"`` for a
+            ``Path`` stand-in member).
+        args: Keyword argument mapping captured at call time; for a ``Path``
+            member, a list holding the path as the program built it.
         result: Summarized return value, or None if the call failed.
         duration_ms: Wall-clock time for the call in milliseconds.
         success: Whether the call completed without raising.
@@ -24,7 +28,7 @@ class TraceEntry:
 
     step: int
     tool: str
-    args: dict[str, Any]
+    args: dict[str, Any] | list[Any]
     result: Any
     duration_ms: float
     success: bool
@@ -52,7 +56,7 @@ def make_traced(name: str, fn: Callable, trace: Trace,
 
     The wrapper captures positional and keyword arguments, measures wall-clock
     duration, appends a TraceEntry to ``trace``, and re-raises any exception
-    after recording it.
+    or ``LackpyRefusal`` after recording it (design §8, gate 3).
 
     If a kibitzer_session is provided, each call is also reported to Kibitzer
     via after_call() for mode tracking and coaching.
@@ -76,32 +80,59 @@ def make_traced(name: str, fn: Callable, trace: Trace,
             call_args[key] = val
         call_args.update(kwargs)
 
-        step = len(trace.entries)
-        start = time.perf_counter()
+        def report(success: bool) -> None:
+            if kibitzer_session:
+                kibitzer_session.after_call(name, call_args, success=success)
 
-        try:
-            result = fn(*args, **kwargs)
-            duration = (time.perf_counter() - start) * 1000
-            trace.entries.append(TraceEntry(
-                step=step, tool=name, args=call_args,
-                result=_summarize(result), duration_ms=duration,
-                success=True, error=None,
-            ))
-            if kibitzer_session:
-                kibitzer_session.after_call(name, call_args, success=True)
-            return result
-        except Exception as e:
-            duration = (time.perf_counter() - start) * 1000
-            trace.entries.append(TraceEntry(
-                step=step, tool=name, args=call_args,
-                result=None, duration_ms=duration,
-                success=False, error=str(e),
-            ))
-            if kibitzer_session:
-                kibitzer_session.after_call(name, call_args, success=False)
-            raise
+        return record_call(trace, name, call_args, lambda: fn(*args, **kwargs), report)
 
     return wrapper
+
+
+def record_call(trace: Trace, tool: str, args: dict[str, Any] | list[Any],
+                call: Callable[[], Any],
+                on_done: Callable[[bool], None] | None = None,
+                summarize: bool = True) -> Any:
+    """Run ``call()``, append one TraceEntry for it, and return its result.
+
+    A raised ``Exception`` or ``LackpyRefusal`` is recorded as a failed entry
+    whose error is ``str(e)`` (for a refusal, that text carries the hint), then
+    re-raised. ``summarize=False`` records no result (for a lazy iterator).
+    """
+    step = len(trace.entries)
+    start = time.perf_counter()
+    try:
+        result = call()
+    except (Exception, LackpyRefusal) as e:
+        trace.entries.append(TraceEntry(
+            step=step, tool=tool, args=args, result=None,
+            duration_ms=(time.perf_counter() - start) * 1000,
+            success=False, error=error_text(e),
+        ))
+        if on_done:
+            on_done(False)
+        raise
+    trace.entries.append(TraceEntry(
+        step=step, tool=tool, args=args,
+        result=_summarize(result) if summarize else None,
+        duration_ms=(time.perf_counter() - start) * 1000,
+        success=True, error=None,
+    ))
+    if on_done:
+        on_done(True)
+    return result
+
+
+def error_text(e: BaseException) -> str:
+    """Return ``str(e)``, or a fixed text when ``str(e)`` itself raises.
+
+    ``str(KeyError(n))`` raises ``ValueError`` for an int over 4,300 digits;
+    the runner must still return a result (review I1), and a trace entry too.
+    """
+    try:
+        return str(e)
+    except (Exception, LackpyRefusal):
+        return f"{type(e).__name__} (its message could not be converted to text)"
 
 
 def _summarize(value: Any, max_len: int = 500) -> Any:

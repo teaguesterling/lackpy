@@ -103,15 +103,18 @@ class TestPrintCapture:
 
 
 class TestParams:
-    def test_params_available_as_variables(self, runner, mock_namespace):
-        result = runner.run("len(content)", mock_namespace, params={"content": "hello world"})
-        assert result.success
+    # Task 5: params replace the program's own params literal; no bare names (tests/run/test_params.py).
+    def test_params_reach_the_program_through_its_literal(self, runner, mock_namespace):
+        result = runner.run('params = {"content": ""}\nlen(params["content"])', mock_namespace,
+                            params={"content": "hello world"})
+        assert result.success, result.error
         assert result.output == 11
 
-    def test_params_not_in_output_variables(self, runner, mock_namespace):
-        result = runner.run("x = len(content)", mock_namespace, params={"content": "hello"})
+    def test_params_bind_no_variable_of_their_own(self, runner, mock_namespace):
+        result = runner.run('params = {"content": ""}\nx = len(params["content"])', mock_namespace,
+                            params={"content": "hello"})
         assert "content" not in result.variables
-        assert "x" in result.variables
+        assert result.variables == {"params": {"content": "hello"}, "x": 5}
 
 
 class TestErrorHandling:
@@ -193,10 +196,15 @@ class TestRuntimeNamespace:
     def test_params_cannot_replace_the_builtins(self, runner):
         # A param or kit tool named like a namespace global must not replace it.
         import builtins
-        # Since review M3 the run refuses at bind time, before the program runs.
+        # Since Task 5 a param binds no name at all; this program has no params
+        # literal, so the run fails before it starts, naming the key.
         result = runner.run("open", params={"__builtins__": vars(builtins)})
         assert not result.success
-        assert "'__builtins__' collides" in result.error
+        assert "'__builtins__'" in result.error
+        # With a literal, a dict of functions has no literal form (ruling c).
+        result = runner.run('params = {"__builtins__": {}}\nopen', params={"__builtins__": vars(builtins)})
+        assert not result.success
+        assert "'__builtins__'" in result.error
 
     def test_unprintable_error_does_not_raise(self, runner):
         # Review I1: str(KeyError(n)) raises ValueError for an int over 4,300 digits.
@@ -216,18 +224,20 @@ _NAMESPACE_KEYS = ["type", "print", "__file__", "__name__", "__builtins__", "len
 
 
 class TestNameCollisions:
-    """Review M3: a param or kit tool must not collide with a namespace name.
+    """Review M3: a kit tool must not collide with a namespace name.
 
     Neither side may win silently: the caller's value and the namespace's
     value are both meaningful. The run fails at bind time, naming the name.
+    A param cannot collide since Task 5: it binds no name (ruling a).
     """
 
     @pytest.mark.parametrize("name", _NAMESPACE_KEYS)
-    def test_param_collision_is_a_failed_result(self, runner, name):
-        result = runner.run("x = 1", params={name: "caller value"})
-        assert not result.success
-        assert repr(name) in result.error
-        assert "collides" in result.error
+    def test_param_named_like_a_namespace_name_binds_nothing(self, runner, name):
+        program = f'params = {{"{name}": "default"}}\nx = params["{name}"]\ny = len(str(type(1)))'
+        result = runner.run(program, params={name: "caller value"})
+        assert result.success, result.error
+        assert result.variables["x"] == "caller value"
+        assert result.variables["y"] == len("<class 'int'>")
 
     @pytest.mark.parametrize("name", _NAMESPACE_KEYS)
     def test_tool_collision_is_a_failed_result(self, runner, name):
@@ -239,6 +249,6 @@ class TestNameCollisions:
         assert called == []
 
     def test_non_colliding_names_still_bind(self, runner):
-        result = runner.run("x = n + 1", {"tool": lambda: 0}, params={"n": 1})
+        result = runner.run('params = {"n": 0}\nx = params["n"] + 1', {"tool": lambda: 0}, params={"n": 1})
         assert result.success, result.error
-        assert result.variables == {"x": 2}
+        assert result.variables == {"params": {"n": 1}, "x": 2}

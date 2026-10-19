@@ -87,7 +87,8 @@ class TestPythonExecution:
             tools=_make_kit(),
             params={"data": [1, 2, 3, 4, 5]},
         )
-        result = await run_interpreter(interp, "count(data)", ctx)
+        # Task 5: params replace the program's own params literal; no bare names.
+        result = await run_interpreter(interp, 'params = {"data": []}\ncount(params["data"])', ctx)
         assert result.success
         assert result.output == 5
 

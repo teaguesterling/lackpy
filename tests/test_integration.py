@@ -92,6 +92,8 @@ class TestKitManagement:
 class TestParamsIntegration:
     @pytest.mark.asyncio
     async def test_run_with_params(self, service):
-        result = await service.run_program("len(content)", profile=["read_file"], params={"content": "test string"})
+        # Task 5: params replace the program's own params literal; no bare names.
+        result = await service.run_program('params = {"content": ""}\nlen(params["content"])',
+                                           profile=["read_file"], params={"content": "test string"})
         assert result.success
         assert result.output == 11

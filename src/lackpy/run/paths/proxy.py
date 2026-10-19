@@ -27,6 +27,11 @@ members in ``dictionary.PATH_MEMBERS`` and refuse everything else.
   stand-ins, as on ``pathlib`` (ruling I3).
 - The metaclass refuses every non-dunder class attribute, so ``Path.home()``
   and ``Path.cwd()`` refuse.
+- With a ``Trace``, each I/O member call appends one entry,
+  ``tool="Path.<member>"`` and ``args=[str(path)]`` (the path as built, plus
+  the pattern for ``glob``/``rglob``). A refused or failed call is a failed
+  entry, then the refusal or error goes on (design §8, gate 3). Listings record
+  no result: they are lazy.
 """
 
 from __future__ import annotations
@@ -34,11 +39,15 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import weakref
-from typing import Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from ...lang import dictionary
 from ..refusal import LackpyRefusal, refuse
+from ..trace import record_call
 from .rules import PathPolicy
+
+if TYPE_CHECKING:
+    from ..trace import Trace
 
 _STATE: dict[int, pathlib.Path] = {}
 
@@ -64,8 +73,13 @@ class _PathMeta(type):
         refuse(f"del Path.{attr}")
 
 
-def make_path_class(policy: PathPolicy) -> type:
-    """Return a ``Path`` stand-in class bound to ``policy``."""
+def is_path_stand_in(value: Any) -> bool:
+    """Whether ``value`` is a ``Path`` stand-in class or instance (for the gate-7 filter)."""
+    return isinstance(value, _PathMeta) or isinstance(type(value), _PathMeta)
+
+
+def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
+    """Return a ``Path`` stand-in class bound to ``policy``; I/O calls go to ``trace`` when given."""
 
     def raw(p: "Path") -> pathlib.Path:
         return _STATE[id(p)]
@@ -117,19 +131,20 @@ def make_path_class(policy: PathPolicy) -> type:
                     continue  # ruling: omit, so a deny neither fails the listing nor reveals the entry
                 yield new(built / entry.relative_to(base))
 
-    def reader(name: str) -> Callable[..., Any]:
-        def member(self: "Path", *args: Any, **kwargs: Any) -> Any:
-            absolute = target(self, "read")
-            with as_built(self):
-                return getattr(absolute, name)(*args, **kwargs)
-        member.__name__ = name
-        return member
+    def traced(name: str, p: "Path", call: Callable[[], Any], *extra: Any,
+               lazy: bool = False) -> Any:
+        if trace is None:
+            return call()
+        args = [str(raw(p)), *(str(unwrap(x)) for x in extra)]
+        return record_call(trace, f"Path.{name}", args, call, summarize=not lazy)
 
-    def writer(name: str) -> Callable[..., Any]:
+    def io(name: str, op: str) -> Callable[..., Any]:
         def member(self: "Path", *args: Any, **kwargs: Any) -> Any:
-            absolute = target(self, "write")
-            with as_built(self):
-                return getattr(absolute, name)(*args, **kwargs)
+            def call() -> Any:
+                absolute = target(self, op)
+                with as_built(self):
+                    return getattr(absolute, name)(*args, **kwargs)
+            return traced(name, self, call)
         member.__name__ = name
         return member
 
@@ -228,45 +243,53 @@ def make_path_class(policy: PathPolicy) -> type:
             return new(raw(self).joinpath(*(unwrap(o) for o in others)))
 
         # Read members.
-        read_text = reader("read_text")
-        read_bytes = reader("read_bytes")
-        exists = reader("exists")
-        is_file = reader("is_file")
-        is_dir = reader("is_dir")
+        read_text = io("read_text", "read")
+        read_bytes = io("read_bytes", "read")
+        exists = io("exists", "read")
+        is_file = io("is_file", "read")
+        is_dir = io("is_dir", "read")
 
         def glob(self, pattern: Any, **kwargs: Any) -> Iterator["Path"]:
-            safe_pattern(pattern, "glob")
-            base = target(self, "read")
-            with as_built(self):  # 3.13+ may raise here, before iteration (review N1)
-                found = base.glob(unwrap(pattern), **kwargs)
-            return entries(self, found, base)
+            def call() -> Iterator["Path"]:
+                safe_pattern(pattern, "glob")
+                base = target(self, "read")
+                with as_built(self):  # 3.13+ may raise here, before iteration (review N1)
+                    found = base.glob(unwrap(pattern), **kwargs)
+                return entries(self, found, base)
+            return traced("glob", self, call, pattern, lazy=True)
 
         def rglob(self, pattern: Any, **kwargs: Any) -> Iterator["Path"]:
-            safe_pattern(pattern, "rglob")
-            base = target(self, "read")
-            with as_built(self):
-                found = base.rglob(unwrap(pattern), **kwargs)
-            return entries(self, found, base)
+            def call() -> Iterator["Path"]:
+                safe_pattern(pattern, "rglob")
+                base = target(self, "read")
+                with as_built(self):
+                    found = base.rglob(unwrap(pattern), **kwargs)
+                return entries(self, found, base)
+            return traced("rglob", self, call, pattern, lazy=True)
 
         def iterdir(self) -> Iterator["Path"]:
-            base = target(self, "read")
-            with as_built(self):  # 3.13+ scandirs eagerly here (review N1)
-                found = base.iterdir()
-            return entries(self, found, base)
+            def call() -> Iterator["Path"]:
+                base = target(self, "read")
+                with as_built(self):  # 3.13+ scandirs eagerly here (review N1)
+                    found = base.iterdir()
+                return entries(self, found, base)
+            return traced("iterdir", self, call, lazy=True)
 
         # Write members.
-        write_text = writer("write_text")
-        write_bytes = writer("write_bytes")
+        write_text = io("write_text", "write")
+        write_bytes = io("write_bytes", "write")
 
         def mkdir(self, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
-            absolute = target(self, "write")
-            if parents:
-                for ancestor in absolute.parents:
-                    if ancestor.exists():
-                        break
-                    policy.check(ancestor, "write")
-            with as_built(self):
-                absolute.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+            def call() -> None:
+                absolute = target(self, "write")
+                if parents:
+                    for ancestor in absolute.parents:
+                        if ancestor.exists():
+                            break
+                        policy.check(ancestor, "write")
+                with as_built(self):
+                    absolute.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+            return traced("mkdir", self, call)
 
     type.__setattr__(Path, "__module__", _CLASS_MODULE)
     type.__setattr__(Path, "__name__", _CLASS_NAME)

@@ -392,9 +392,8 @@ class LackpyService:
                 values[name] = val["value"]
             else:
                 values[name] = val
-        collisions = set(values.keys()) & (set(resolved.tools.keys()) | ALLOWED_BUILTINS)
-        if collisions:
-            raise ValueError(f"Param names collide with tool/builtin names: {collisions}")
+        # No name-collision check: params replace the values of the program's own
+        # ``params`` literal and bind no bare names (stepy100 Task 5).
         params_desc = format_params_description(params)
         return values, params_desc, set(values.keys())
 

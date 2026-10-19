@@ -85,8 +85,12 @@ class TestDelegate:
 
     @pytest.mark.asyncio
     async def test_delegate_with_params(self, service):
+        # Task 5: a passed param needs the program's own params literal. The rules
+        # provider writes none, so the run fails and names the key (it used to
+        # bind an unused bare name `prefix`).
         result = await service.delegate("read file test.txt", profile=["read_file"], params={"prefix": "hello"})
-        assert result["success"]
+        assert not result["success"]
+        assert "'prefix'" in result["error"]
 
 
 class TestKitInfo:

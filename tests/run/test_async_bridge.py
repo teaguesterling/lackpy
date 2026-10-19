@@ -80,6 +80,29 @@ async def test_async_tool_timeout_yields_failed_result(tmp_path):
     assert res.trace.entries and res.trace.entries[0].success is False
 
 
+async def test_async_tool_timeout_cannot_be_caught(tmp_path):
+    # Gate 5 (design call): a program must not catch and retry a hung tool.
+    svc = LackpyService(workspace=tmp_path)
+    bridge = svc._bridge
+
+    async def _hang(x):
+        await asyncio.sleep(10)
+        return x
+
+    @mark_async
+    def proxy(x):
+        return bridge.call_sync(_hang(x), timeout=0.1)
+
+    svc.toolbox.add_source(_FuncSource(_spec("hang", "x"), proxy))
+    program = "try:\n    y = hang(1)\nexcept TimeoutError:\n    y = hang(2)\ny"
+    res = await svc.run_program(program, profile=["hang"])
+
+    assert not res.success
+    assert "a tool call timed out" in (res.error or "")
+    # One call, refused; the handler never ran the retry.
+    assert [e.success for e in res.trace.entries] == [False]
+
+
 async def test_exec_lock_serializes_concurrent_executions(tmp_path):
     # Proves the single-flight lock: once execution runs off the loop thread, two
     # overlapping delegations must NOT interleave (which would race the global cwd).
