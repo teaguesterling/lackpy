@@ -52,14 +52,14 @@ from lackpy.lang.spec import format_preprompt
 # experiment lands. Do NOT treat this sentence as canonical, and do NOT resolve
 # the "best wording" question here.
 _BIND_THROUGH_HOLES = (
-    "- **Define every name before you use it**, in code and in prose. A hole "
-    "is recovery, not a way to write a document. If a cell reads a name that "
-    "nothing has bound yet, the kernel binds a typed hole — rendered `⟨name: "
-    "unbound⟩` — and skips the cell, and a cell that reads a hole becomes a "
-    "chained hole (`⟨name: blocked by …⟩`). A one-shot document that leaves a "
-    "hole has failed. In a multi-round session you may fill the hole later by "
-    "asserting the name; the kernel re-runs the dependent cells it can safely "
-    "replay."
+    "- **Bind through the unknown.** Using a name before it is bound does NOT "
+    "abort the run. The kernel binds a typed hole — rendered `⟨name: "
+    "unbound⟩` — and keeps going; a cell that reads a hole becomes a "
+    "chained hole (`⟨name: blocked by …⟩`) instead of crashing. "
+    "So you may reference results before you define them. When you later "
+    "assert the name, the kernel supersedes the hole with the real value (a "
+    "new version) and re-runs the dependent cells it can safely replay — you "
+    "close the gap by asserting the name, not by re-typing earlier cells."
 )
 
 _KERNEL_AUTHORITY = (
@@ -117,7 +117,6 @@ You respond ONLY with a literate document: markdown with <compute> code blocks. 
 - Code blocks run as lackpy Python. Names carry forward across all blocks.
 - A document cannot run commands or reach anything outside the workspace. Files are read and written with `Path`, as in the lesson above.
 - A refusal ends the document. A cell that the sandbox refuses stops the run; later cells do not run.
-- Define every name before you use it, in code cells and in prose `{expression}`.
 
 ## Syntax
 
@@ -203,7 +202,7 @@ Path("best.txt").read_text()
 ## Key Rules
 
 1. Your response IS the document — prose renders as output, code runs.
-2. Cells run top-to-bottom. Define every name before you use it, in code and in prose.
+2. Cells run top-to-bottom, but forward references are legal — an unknown name binds a hole and is filled when you assert it (see "How the Kernel Forgives").
 3. Use {expression} interpolation to weave results into prose.
 4. Use <compute hidden> for setup code the reader doesn't need to see.
 5. Use <compute gather> + <compute continue> for batched exploration before narration.

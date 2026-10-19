@@ -87,16 +87,12 @@ class TestL5ForgivenessConventions:
         return LiterateInterpreter().system_prompt_hint()
 
     def test_conventions_teach_bind_through_holes(self):
-        """Task 5 fix round (retired: 'forward references are legal'): the hint
-        teaches define-before-use; a hole is named only as recovery."""
-        hint = " ".join(self._hint().split())
+        """The shipped conventions teach bind-through-the-unknown: an unknown
+        name binds a hole and forward references are legal."""
+        hint = self._hint()
         assert "hole" in hint
         assert "⟨name: unbound⟩" in hint  # the merged Hole repr
-        assert "forward references are legal" not in hint
-        assert "may reference results before you define them" not in hint
-        assert "Bind through the unknown" not in hint
-        assert "Define every name before you use it" in hint
-        assert "recovery" in hint
+        assert "forward" in hint  # forward references are now legal
 
     def test_old_define_before_using_hint_removed(self):
         """The REVERSAL: the old 'define before using / no forward references'
