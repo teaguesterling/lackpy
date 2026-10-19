@@ -1298,7 +1298,9 @@ def _apply_document_params(parsed: ParseResult, params: dict[str, Any]) -> str |
     (``runner._apply_params``). The program it checks is every code cell of the
     document, joined: ``params`` must be bound exactly once, by a top-level
     ``params = {"name": <literal>, ...}`` in one cell. Only that literal's text
-    is replaced in its cell, so the rest of the cell (comments too) is kept.
+    is replaced in its cell, so the rest of the cell is kept. The literal itself
+    is written back by ``ast.unparse`` on one line: comments inside a multi-line
+    literal are lost (the run is the same).
     Returns the error text, or None; on an error no cell is changed.
     """
     from ...run.runner import _apply_params, _params_literal

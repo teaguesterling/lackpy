@@ -584,10 +584,12 @@ class TestCellsRunThroughTheSession:
     @pytest.mark.asyncio
     async def test_a_param_that_is_not_data_is_a_configuration_error(
             self, interpreter, tmp_path):
+        # After I4 the value must be refused by the literal rewrite itself: the
+        # document has a params literal, and a None default skips the type check.
         ctx = ExecutionContext(base_dir=tmp_path, params={"f": print})
-        result = await interpreter.execute("```lackpy\nx = 1\n```\n", ctx)
+        result = await interpreter.execute("```lackpy\nparams = {'f': None}\n```\n", ctx)
         assert result.success is False
-        assert "param" in result.error
+        assert "cannot be written as a Python literal" in result.error
 
 
 class TestParamsLiteral:
