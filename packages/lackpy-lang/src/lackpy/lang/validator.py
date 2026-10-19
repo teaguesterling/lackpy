@@ -67,6 +67,27 @@ def validate(
     allowed_names: set[str] | None = None,
     extra_rules: list | None = None,
 ) -> ValidationResult:
+    """Validate a lackpy program string; never raises for a program's shape.
+
+    A program so deeply nested that ``ast.parse`` or a rule walk exhausts the
+    parser stack (``MemoryError``) or the recursion limit (``RecursionError``)
+    gets an invalid result with one ``safety.parse`` violation. ``validate()``
+    is on every run path, so a crash here would be a host crash (design §8,
+    gate 4). See :func:`_validate` for the checks.
+    """
+    try:
+        return _validate(program, allowed_names, extra_rules)
+    except (MemoryError, RecursionError) as e:
+        kind = "too deeply nested to parse" if isinstance(e, MemoryError) else "nested too deeply to check"
+        v = Violation("safety.parse", None, f"Program is {kind}: reduce the nesting depth of its expressions")
+        return ValidationResult(valid=False, errors=[v.message], violations=[v])
+
+
+def _validate(
+    program: str,
+    allowed_names: set[str] | None = None,
+    extra_rules: list | None = None,
+) -> ValidationResult:
     """Validate a lackpy program string against the language grammar and namespace.
 
     Parses the program, builds one rule Context, and runs every registered

@@ -41,15 +41,20 @@ def test_gate_1_statistics_sys_closed_statically_and_at_runtime():
     assert result.output is None
 
 
+@pytest.mark.skipif(sys.version_info < (3, 13), reason="Path.parser exists only on Python 3.13+; "
+                    "before that the stand-in refuses the name as unknown, which proves nothing")
 @pytest.mark.parametrize("program", [
     "from pathlib import Path\nPath('x').parser.os",
     "from pathlib import Path\nPath('x').parser",
 ])
 def test_gate_1_path_parser_closed_at_runtime(program, tmp_path, tmp_home):
     # The validator ADMITS these (measured), so the runtime stand-in is the only guard.
+    assert validate(program, allowed_names=set()).valid
+    assert hasattr(Path("x"), "parser")
     result = run_in_lackpy(program, tmp_path, tmp_home)
     assert not result.success
     assert result.output is None
+    assert "Path.parser" in result.error, result.error
 
 
 # --- 2. no setattr on member bindings ----------------------------------------
@@ -67,7 +72,6 @@ def test_gate_2_setattr_on_member_bindings_refused(program, tmp_path, tmp_home):
     if "Path" in program:
         result = _raw(program, path_policy=load_policy(tmp_path, home=tmp_home, managed=None))
         assert not result.success
-    assert collections.Counter.most_common is not len
 
 
 # --- 3. the trace records a BaseException refusal ----------------------------
@@ -91,17 +95,38 @@ def test_gate_4_run_never_raises_on_deep_expressions(depth):
     assert result.success or result.error
 
 
-@pytest.mark.xfail(strict=True, raises=MemoryError,
-                   reason="DEFECT gate 4: validate() raises MemoryError from ast.parse at depth ~50,000 "
-                          "(lackpy-lang, Plan 1; no Plan 2 task owns it)")
-def test_gate_4_validate_never_raises_on_deep_expressions():
+@pytest.mark.parametrize("program", [
+    "x = " + "-" * 50_000 + "1\n",
+    "x = " + "-" * 500_000 + "1\n",
+    "x = " + "+".join(["1"] * 200_000) + "\n",
+    "x = " + "[" * 5_000 + "]" * 5_000 + "\n",
+], ids=["unary-50k", "unary-500k", "binop-200k", "lists-5k"])
+def test_gate_4_validate_never_raises_on_deep_expressions(program):
+    verdict = validate(program, allowed_names=set())  # must return, not raise
+    assert verdict.valid or verdict.violations
+
+
+def test_gate_4_too_deep_is_a_safety_parse_violation():
     verdict = validate("x = " + "-" * 50_000 + "1\n", allowed_names=set())
     assert not verdict.valid
+    assert [v.rule_id for v in verdict.violations] == ["safety.parse"]
+    assert "nesting depth" in verdict.errors[0]
+
+
+def test_gate_4_deep_valid_program_validates_then_runs(tmp_path, tmp_home):
+    # run_in_lackpy raises Invalid if validate() rejects, so reaching the result proves both halves.
+    result = run_in_lackpy("x = " + "-" * 3_000 + "1\n", tmp_path, tmp_home)
+    assert result.success, result.error
+    assert result.variables == {"x": 1}
 
 
 # --- 5. a hung tool is a refusal the program cannot catch ---------------------
 
-def test_gate_5_timeout_cannot_be_caught():
+@pytest.mark.parametrize("handler, validated", [
+    ("except TimeoutError:", True),
+    ("except Exception:", False),  # rejected statically (safety.except-base): runner-direct
+], ids=["TimeoutError", "Exception-runner-direct"])
+def test_gate_5_timeout_cannot_be_caught(handler, validated):
     bridge = AsyncBridge()
     loop = asyncio.new_event_loop()
     t = threading.Thread(target=loop.run_forever, daemon=True)
@@ -116,8 +141,8 @@ def test_gate_5_timeout_cannot_be_caught():
         calls.append(n)
         return bridge.call_sync(hang(), timeout=0.1)
 
-    program = "try:\n    y = tool(1)\nexcept TimeoutError:\n    y = tool(2)\n"
-    assert validate(program, allowed_names={"tool"}).valid
+    program = f"try:\n    y = tool(1)\n{handler}\n    y = tool(2)\n"
+    assert validate(program, allowed_names={"tool"}).valid is validated
     try:
         result = RestrictedRunner().run(program, namespace={"tool": tool})
     finally:
@@ -127,6 +152,14 @@ def test_gate_5_timeout_cannot_be_caught():
     assert not result.success
     assert "waiting on a tool call past its timeout" in result.error
     assert calls == [1], "the handler retried the hung tool"
+
+
+def test_gate_5_bare_except_is_rejected_statically():
+    """A bare ``except:`` catches ``BaseException`` in CPython, so it would catch the timeout
+    refusal at run time (measured: the handler retries the hung tool when the validator is
+    bypassed). Only the static rule guards it; the runner cannot. Reported in task-6-report.md."""
+    program = "try:\n    y = tool(1)\nexcept:\n    y = tool(2)\n"
+    assert not validate(program, allowed_names={"tool"}).valid
 
 
 # --- 6. __file__ is defined deliberately --------------------------------------
@@ -143,8 +176,8 @@ def test_gate_6_path_of_file_does_not_read_the_host(tmp_path, tmp_home):
     program = "from pathlib import Path\nPath(__file__).read_text()"
     assert validate(program, allowed_names=set()).valid
     result = run_in_lackpy(program, tmp_path, tmp_home)
-    assert not result.success  # "<stdin>" is no file in the workspace
-    assert result.error
+    assert not result.success
+    assert "No such file" in result.error and "'<stdin>'" in result.error, result.error
 
 
 # --- 7. variables carry data, never functions ---------------------------------

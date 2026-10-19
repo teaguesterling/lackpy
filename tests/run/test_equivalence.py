@@ -7,6 +7,7 @@ switches to ``run_program`` in Task 7). Both must succeed and give equal stdout
 and equal file trees (every file's bytes, and the set of paths).
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,7 +31,13 @@ def test_reference_is_equivalent_under_python3_and_lackpy(task, fixtures_copy, t
     assert before == snapshot(lp_dir)
 
     (py_dir / "prog.py").write_text(task["reference"])
-    proc = subprocess.run([sys.executable, "prog.py"], cwd=py_dir, capture_output=True, text=True, timeout=60)
+    # -I: isolated mode (no user site, no PYTHONPATH, no cwd on sys.path beyond the script dir).
+    # Env is PATH only plus PYTHONHASHSEED=0; the lackpy side runs in this process, so the
+    # same seed is set for the whole pytest run only if the caller exports it (no set output
+    # is printed by any of the 30 references, so hashing does not matter today).
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONHASHSEED": "0"}
+    proc = subprocess.run([sys.executable, "-I", "prog.py"], cwd=py_dir, env=env,
+                          capture_output=True, text=True, timeout=60)
     (py_dir / "prog.py").unlink()
     assert proc.returncode == 0, proc.stderr
 
