@@ -6,11 +6,17 @@ usage: run_lackpy.py RUN_DIR LABEL ROUTE
          "openai/<ROUTE>" with base_url http://127.0.0.1:47600/v1 (the device
          gateway is OpenAI-compatible). Override the gateway with LACKPY_EVAL_BASE_URL.
   For each task: copy fixtures/ to a fresh directory, then call
-  LackpyService(workspace=<copy>).generate(goal, model="openai/<ROUTE>").
-  -> RUN_DIR/LABEL/r1/<id>.py         the program lackpy returned (valid by construction)
-     RUN_DIR/LABEL/r1/<id>.meta.json  secs, provider, correction strategy and attempts
-     RUN_DIR/LABEL/r1/<id>.error.txt  when generation failed; no .py is written, and
-                                      score.py counts the missing program as a failure
+  LackpyService(workspace=<copy>).generate(goal). The service's woollama tier is
+  configured with model "openai/<ROUTE>", so no per-call model override is needed;
+  without one the service uses that provider instance, and its last output stays
+  readable for <id>.rejected.py.
+  -> RUN_DIR/LABEL/r1/<id>.py           the program lackpy returned (valid by construction)
+     RUN_DIR/LABEL/r1/<id>.meta.json    secs, provider, correction strategy and attempts
+     RUN_DIR/LABEL/r1/<id>.error.txt    when generation failed; no .py is written, and
+                                        score.py counts the missing program as a failure
+     RUN_DIR/LABEL/r1/<id>.rejected.py  the model's last program, after sanitize and
+                                        cleanup, when generation failed. score.py reads
+                                        only <id>.py, so it never scores this file.
 THINKING=off adds chat_template_kwargs.enable_thinking=false (as run_local.py does).
 
 Differences from run_local.py, which this mirrors:
@@ -37,6 +43,8 @@ sys.path.insert(0, str(HERE))
 from tasks import TASKS  # noqa: E402
 
 from lackpy.config import LackpyConfig  # noqa: E402
+from lackpy.infer.cleanup import deterministic_cleanup  # noqa: E402
+from lackpy.infer.sanitize import sanitize_output  # noqa: E402
 from lackpy.service import LackpyService  # noqa: E402
 
 BASE_URL = os.environ.get("LACKPY_EVAL_BASE_URL", "http://127.0.0.1:47600/v1")
@@ -80,10 +88,13 @@ def generate_one(task: dict, route: str, out: Path, service_factory=None) -> boo
         service = factory(ws)
         t0 = time.time()
         try:
-            gen = asyncio.run(service.generate(task["goal"], model=model_for(route)))
+            gen = asyncio.run(service.generate(task["goal"]))
         except Exception as e:  # a failed generation is a result, never a skip
             secs = time.time() - t0
             (out / f"{task['id']}.error.txt").write_text(f"{type(e).__name__}: {e}\n")
+            rejected = _last_program(service)
+            if rejected is not None:
+                (out / f"{task['id']}.rejected.py").write_text(rejected.rstrip() + "\n")
             (out / f"{task['id']}.meta.json").write_text(json.dumps({"secs": round(secs, 1), "ok": False}))
             return False
         secs = time.time() - t0
@@ -94,6 +105,15 @@ def generate_one(task: dict, route: str, out: Path, service_factory=None) -> boo
         "correction_attempts": gen.correction_attempts,
     }))
     return True
+
+
+def _last_program(service) -> str | None:
+    """The LLM tier's last output as the dispatcher validated it, or None."""
+    for provider in getattr(service, "_inference_providers", ()):
+        raw = getattr(provider, "_last_output", None)
+        if raw:
+            return deterministic_cleanup(sanitize_output(raw))
+    return None
 
 
 def main(argv: list[str] | None = None, tasks: list[dict] | None = None, service_factory=None) -> None:

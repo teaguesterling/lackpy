@@ -96,3 +96,38 @@ def test_failed_generation_writes_an_error_not_a_program(tmp_path):
     assert not (out / "def-01.py").exists()
     assert "providers failed" in (out / "def-01.error.txt").read_text()
     assert json.loads((out / "def-01.meta.json").read_text())["ok"] is False
+
+
+REJECTED = 'import os\nprint(os.getcwd())\n'
+
+
+@pytest.fixture
+def rejecting_gateway(gateway, monkeypatch):
+    """The stub answers every request with a program the validator rejects."""
+    monkeypatch.setattr(sys.modules[__name__], "PROGRAM", REJECTED)
+    return gateway
+
+
+def test_rejected_program_text_is_kept(rejecting_gateway, tmp_path):
+    # Fix round 1, review M6: a rejected program's text is saved beside error.txt.
+    task = {"id": "def-02", "goal": "Print the working directory."}
+    run_lackpy.main([str(tmp_path), "lbl", "tiiny-fast/m"], tasks=[task])
+    out = tmp_path / "lbl" / "r1"
+    assert not (out / "def-02.py").exists()
+    assert (out / "def-02.error.txt").exists()
+    assert "os.getcwd()" in (out / "def-02.rejected.py").read_text()
+
+
+def test_score_ignores_rejected_programs(tmp_path, monkeypatch):
+    import score
+    rnd = tmp_path / "lbl" / "r1"
+    rnd.mkdir(parents=True)
+    (rnd / "def-01.rejected.py").write_text("print(1)\n")
+    monkeypatch.setattr(score, "TASKS", [{"id": "def-01", "family": "def"}])
+    monkeypatch.setattr(score, "expected", lambda: {})
+    monkeypatch.setattr(score, "score", lambda *a: pytest.fail("a rejected program was scored"))
+    monkeypatch.setattr(sys, "argv", ["score.py", str(tmp_path)])
+    score.main()
+    import json as _json
+    rows = _json.loads((tmp_path / "results.json").read_text())["programs"]
+    assert [(r["task"], r["valid"], r["rules"]) for r in rows] == [("def-01", False, ["missing"])]

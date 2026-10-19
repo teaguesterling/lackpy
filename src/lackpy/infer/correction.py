@@ -142,7 +142,8 @@ class CorrectionChain:
 
         # Strategy 2: Few-shot correction via provider.generate() with error feedback
         if provider is not None:
-            enriched = enrich_errors(validation.errors, namespace_desc)
+            enriched = enrich_errors(validation.errors, namespace_desc,
+                                     violations=validation.violations)
 
             # Kibitzer: get correction hints to strengthen enrichment
             if kibitzer_session is not None:

@@ -62,10 +62,13 @@ def test_dsl_interpreter_keeps_its_own_framing():
     assert format_preprompt() not in prompt
 
 
-def test_includes_builtins():
-    prompt = build_system_prompt(namespace_desc="")
-    assert "len" in prompt
-    assert "print" in prompt
+def test_includes_builtins_row():
+    # Fix round 1, review M7: pin the approved-builtins row of the guide, not
+    # two words that a 20 KB prompt holds anyway.
+    row = next(line for line in format_style_guide().splitlines()
+               if line.startswith("| Functions and types |"))
+    assert "`len`" in row and "`print`" in row
+    assert row in build_system_prompt(namespace_desc="")
 
 
 def test_includes_params_literal_when_provided():

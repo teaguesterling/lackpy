@@ -12,20 +12,30 @@ from __future__ import annotations
 
 import re
 
-from ..lang.dictionary import MODULES, hint_for
+from ..lang.dictionary import MODULES, UNAPPROVED, hint_for
+from ..lang.registry import RULES
+from ..lang.validator import validate as _validate  # noqa: F401  (registers every rule)
 
 # The quoted subject of a validator error: "Forbidden name: 'open' at line 3",
-# "Unknown module member: 'json.load' at line 2".
-_SUBJECT = re.compile(r"'([A-Za-z_][\w.]*)'")
+# "Unknown module member: 'json.load' at line 2", "attribute access: '.format'".
+_SUBJECT = re.compile(r"'\.?([A-Za-z_][\w.]*)'")
+
+_LAMBDA = next(r.summary for r in RULES if r.id == "style.lambda-position")
+_APPROVED_HINTS = frozenset(UNAPPROVED.values())
 
 
-def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
+def enrich_errors(errors: list[str], namespace_desc: str,
+                  violations: list | None = None) -> list[str]:
     """Augment validation errors with actionable positive hints.
 
     Args:
         errors: Raw validation error strings.
         namespace_desc: Unused since the kit was removed (stepy100); kept for
             callers' signatures.
+        violations: The validator's ``Violation`` objects, when the caller has
+            them. A violation's hint that is a ``dictionary.UNAPPROVED`` entry
+            is added; it reaches words whose error text does not name them
+            (``import glob`` gives "Forbidden AST node: Import").
 
     Returns:
         Enriched error list with positive hints appended where patterns match.
@@ -44,11 +54,15 @@ def enrich_errors(errors: list[str], namespace_desc: str) -> list[str]:
                 add(f"For {subject}: {hint}.")
             elif subject == "Path" and error.startswith("Unknown function"):
                 add("Import Path first: from pathlib import Path.")
+    for violation in violations or ():
+        hint = getattr(violation, "hint", None)
+        if hint in _APPROVED_HINTS and not any(hint in h for h in hints):
+            add(f"{hint}.")
 
     error_text = " ".join(errors).lower()
 
     if "lambda" in error_text:
-        add("lambda is allowed only as key= for sorted, min or max.")
+        add(_LAMBDA)
 
     if "forbidden ast node: import" in error_text or "importfrom" in error_text:
         modules = ", ".join(sorted(MODULES))

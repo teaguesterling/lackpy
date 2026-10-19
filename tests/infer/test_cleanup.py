@@ -41,6 +41,37 @@ class TestImports:
         assert deterministic_cleanup(program) == program
 
 
+class TestImportLinesAreNodes:
+    """Fix round 1, review I1: imports are removed by their AST line ranges, so
+    text inside a string literal is never touched."""
+
+    def test_import_lines_inside_a_string_survive(self):
+        program = (
+            "from pathlib import Path\n"
+            "\n"
+            "Path('gen.py').write_text(\'\'\'import os\n"
+            "from sys import argv\n"
+            "from the start\n"
+            "print(1)\n"
+            "\'\'\')\n"
+        ).rstrip()
+        assert validate(program).valid, validate(program).errors
+        assert deterministic_cleanup(program) == program
+
+    def test_mixed_import_statement_is_kept_for_the_validator(self):
+        # Removing the line would drop json too (a NameError later).
+        program = "import os, json\nx = json.dumps(1)"
+        assert deterministic_cleanup(program) == program
+
+    def test_import_sharing_a_line_is_kept(self):
+        program = "import os; x = 1"
+        assert "x = 1" in deterministic_cleanup(program)
+
+    def test_multiline_from_import_removed_whole(self):
+        program = "from os.path import (\n    join,\n    basename,\n)\nx = 1"
+        assert deterministic_cleanup(program) == "x = 1"
+
+
 class TestCommentsSurvive:
     def test_intent_block_and_waiver_kept_when_nothing_is_rewritten(self):
         program = (
@@ -64,10 +95,11 @@ class TestRewriteOpen:
         assert "read_file" not in result
         assert validate(result, allowed_names=set()).valid, validate(result).errors
 
-    def test_rewrites_open_readlines_keeping_line_ends(self):
-        result = deterministic_cleanup("lines = open(path).readlines()")
-        assert "open" not in result
-        assert "Path(path).read_text().splitlines(keepends=True)" in result
+    def test_readlines_is_not_rewritten(self):
+        # Fix round 1, review M1: str.splitlines also splits on \x0c, \x85 and
+        # others; file lines split on \n only. Left for the validator to report.
+        program = "lines = open(path).readlines()"
+        assert deterministic_cleanup(program) == program
 
     def test_open_read_mode_is_rewritten(self):
         result = deterministic_cleanup("data = open(path, 'r').read()")
@@ -124,11 +156,20 @@ class TestRewriteWithOpen:
         result = deterministic_cleanup(program)
         assert "read_text" not in result
 
-    def test_with_open_readlines(self):
+    def test_with_open_readlines_is_not_rewritten(self):
+        # Fix round 1, review M1.
         program = "with open(f) as fh:\n    lines = fh.readlines()"
-        result = deterministic_cleanup(program)
-        assert "open" not in result
-        assert "Path(f).read_text().splitlines(keepends=True)" in result
+        assert deterministic_cleanup(program) == program
+
+    def test_with_open_two_reads_is_not_rewritten(self):
+        # Fix round 1, review M2: the second read gives '' under python3.
+        program = "with open(f) as fh:\n    a = fh.read()\n    b = fh.read()"
+        assert deterministic_cleanup(program) == program
+
+    def test_with_open_other_handle_use_is_not_rewritten(self):
+        # Fix round 1, review M2.
+        program = "with open(f) as fh:\n    a = fh.read()\n    fh.close()"
+        assert deterministic_cleanup(program) == program
 
     def test_with_open_in_loop(self):
         program = "for f in files:\n    with open(f) as fh:\n        content = fh.read()\n    print(content)"
@@ -160,11 +201,10 @@ class TestRewriteWithOpen:
         result = deterministic_cleanup(program)
         assert "with" in result
 
-    def test_with_open_iterate_lines(self):
+    def test_with_open_iterate_lines_is_not_rewritten(self):
+        # Fix round 1, review M1.
         program = "with open(f) as fh:\n    for line in fh:\n        print(line)"
-        result = deterministic_cleanup(program)
-        assert "open" not in result
-        assert "Path(f).read_text().splitlines(keepends=True)" in result
+        assert deterministic_cleanup(program) == program
 
 
 class TestRewritePathCalls:
