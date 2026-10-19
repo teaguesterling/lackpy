@@ -198,7 +198,7 @@ async def run_literate_agent(
         if result.errors and result.errors[0].startswith("refused:"):
             # A refusal ended the document and closed the session (D4): every
             # later round would refuse too, so stop and say why.
-            return f"{session.rendered}\n\n{result.errors[0]}"
+            return f"{session.display}\n\n{result.errors[0]}"
 
         if not result.ok:
             # Left: hand the errors + the raw un-interpreted document back so the
@@ -212,7 +212,9 @@ async def run_literate_agent(
             continue
 
         if not result.continue_requested:
-            return session.rendered
+            # The executed document (values, not `{t}`); the source render is
+            # what goes back to the model below, never what a reader sees.
+            return session.display
 
         # Right + @continue: feed back the CANONICAL source-preserving document
         # (session.rendered) — round-trippable, kernel notes inert — NOT the
@@ -227,7 +229,7 @@ async def run_literate_agent(
             f"Continue writing the document from where @continue left off."
         )
 
-    return session.rendered
+    return session.display
 
 
 def main():

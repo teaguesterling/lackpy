@@ -65,7 +65,7 @@ class TestCompose:
             # wordier than @annotations, and every block gains a closing tag),
             # and the fence-era prompt already sat at 5931. The guard against
             # prompt bloat is kept, just re-based on the new floor.
-            # Task 5: re-based on the stepy lesson (format_preprompt, ~2.5k) plus
+            # Task 5: re-based on the stepy lesson (format_preprompt, ~3k) plus
             # the worked document. The tool list (~400) is gone.
             assert len(result) < 11000, (
                 f"Persona {name!r} composed to {len(result)} chars"
@@ -87,12 +87,16 @@ class TestL5ForgivenessConventions:
         return LiterateInterpreter().system_prompt_hint()
 
     def test_conventions_teach_bind_through_holes(self):
-        """The shipped conventions teach bind-through-the-unknown: an unknown
-        name binds a hole and forward references are legal."""
-        hint = self._hint()
+        """Task 5 fix round (retired: 'forward references are legal'): the hint
+        teaches define-before-use; a hole is named only as recovery."""
+        hint = " ".join(self._hint().split())
         assert "hole" in hint
         assert "⟨name: unbound⟩" in hint  # the merged Hole repr
-        assert "forward" in hint  # forward references are now legal
+        assert "forward references are legal" not in hint
+        assert "may reference results before you define them" not in hint
+        assert "Bind through the unknown" not in hint
+        assert "Define every name before you use it" in hint
+        assert "recovery" in hint
 
     def test_old_define_before_using_hint_removed(self):
         """The REVERSAL: the old 'define before using / no forward references'
@@ -216,4 +220,17 @@ async def test_the_worked_document_in_the_prompt_runs(tmp_path):
     result = await svc.run_program(doc, profile=Profile(execution="literate"))
     assert result.success, result.error
     assert "Carol" in result.stdout
-    assert (ws / "best.txt").read_text()
+    # The prompt's output rule: the last code cell's trailing expression.
+    assert result.output == "Carol"
+    # I2: the file holds the computed winner, not a fixed sentence.
+    assert (ws / "best.txt").read_text() == "Carol"
+
+
+def test_literate_prompt_says_write_is_literal_and_a_refusal_ends_the_document():
+    from lackpy.interpreters.literate.prompt import LITERATE_HINT
+
+    flat = " ".join(LITERATE_HINT.split())
+    assert "literal file content only" in flat
+    assert "A refusal ends the document" in flat
+    assert "line that the full style guide follows: it does not" in flat
+    assert "key=scores.get" not in flat

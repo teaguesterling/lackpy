@@ -52,14 +52,14 @@ from lackpy.lang.spec import format_preprompt
 # experiment lands. Do NOT treat this sentence as canonical, and do NOT resolve
 # the "best wording" question here.
 _BIND_THROUGH_HOLES = (
-    "- **Bind through the unknown.** Using a name before it is bound does NOT "
-    "abort the run. The kernel binds a typed hole — rendered `⟨name: "
-    "unbound⟩` — and keeps going; a cell that reads a hole becomes a "
-    "chained hole (`⟨name: blocked by …⟩`) instead of crashing. "
-    "So you may reference results before you define them. When you later "
-    "assert the name, the kernel supersedes the hole with the real value (a "
-    "new version) and re-runs the dependent cells it can safely replay — you "
-    "close the gap by asserting the name, not by re-typing earlier cells."
+    "- **Define every name before you use it**, in code and in prose. A hole "
+    "is recovery, not a way to write a document. If a cell reads a name that "
+    "nothing has bound yet, the kernel binds a typed hole — rendered `⟨name: "
+    "unbound⟩` — and skips the cell, and a cell that reads a hole becomes a "
+    "chained hole (`⟨name: blocked by …⟩`). A one-shot document that leaves a "
+    "hole has failed. In a multi-round session you may fill the hole later by "
+    "asserting the name; the kernel re-runs the dependent cells it can safely "
+    "replay."
 )
 
 _KERNEL_AUTHORITY = (
@@ -103,6 +103,8 @@ _FORGIVENESS_CONVENTIONS = "\n".join(
 _HINT_HEAD = """\
 # The literate format
 
+Ignore the lesson's line that the full style guide follows: it does not. This format reference comes next.
+
 The lesson above is for one lackpy program. A literate document is many cells, and the cells together are ONE lackpy program: the code of every cell, joined in order, must follow every rule above. A name or an import from an earlier cell is still bound in a later one.
 
 You respond ONLY with a literate document: markdown with <compute> code blocks. Your document is compiled and executed: prose becomes printed output, code runs as lackpy Python. There is no other interface.
@@ -114,6 +116,8 @@ You respond ONLY with a literate document: markdown with <compute> code blocks. 
 - Prose lines print verbatim. Use {expression} to interpolate a value into prose. Use {{double braces}} for literal braces.
 - Code blocks run as lackpy Python. Names carry forward across all blocks.
 - A document cannot run commands or reach anything outside the workspace. Files are read and written with `Path`, as in the lesson above.
+- A refusal ends the document. A cell that the sandbox refuses stops the run; later cells do not run.
+- Define every name before you use it, in code cells and in prose `{expression}`.
 
 ## Syntax
 
@@ -137,7 +141,7 @@ x = 1
 <compute gather>       — runs silently, part of batch exploration
 <compute continue>     — pause: execution stops, results return to you
 <compute read="path">  — prints file contents (an empty body)
-<compute write="path"> — writes the block body, as it is, to the file
+<compute write="path"> — writes the block body, as it is, to the file (literal file content only; to write a computed value, use `Path(p).write_text(value)` in a code cell)
 <compute diff="path">  — applies a unified diff to the file
 <compute scratch>      — runs, prints a summary of the new names only
 
@@ -159,7 +163,7 @@ _HINT_TAIL = """\
 
 ## Writing and Modifying Files
 
-Use <compute write="path"> — the block body becomes the file content. Use
+Use <compute write="path"> for literal file content only: the body is not interpolated. Write a computed value with `Path(p).write_text(value)` in a code cell. Use
 <compute diff="path"> with unified-diff format for targeted changes.
 
 A <compute> block is a channel, not a code marker. Inside a write block the body
@@ -168,7 +172,7 @@ is *file content*: mark code samples there with an ordinary markdown fence
 
 ## Example
 
-This document reads `scores.txt` (lines like `Alice: 90`), reports the best score, and records the winner. It uses `Path` for all file I/O, and it imports `Path` once.
+This document reads `scores.txt` (lines like `Alice: 90`), reports the best score, and writes the winner's name to `best.txt`. It uses `Path` for all file I/O, it imports `Path` once, and it defines every name before it uses it. Its value is the last cell's trailing expression.
 
 === EXAMPLE DOCUMENT ===
 <compute hidden>
@@ -178,26 +182,28 @@ scores = {}
 for row in Path("scores.txt").read_text().splitlines():
     name, value = row.split(": ")
     scores[name] = int(value)
-best = max(scores, key=scores.get)
+winner = ""
+top = 0
+for name in sorted(scores):
+    if scores[name] > top:
+        top = scores[name]
+        winner = name
+Path("best.txt").write_text(winner)
 </compute>
 
 # Score Report
 
-{len(scores)} people took part. The best score is {scores[best]}, by {best}.
-
-<compute write="best.txt">
-This file records the winner of the score report.
-</compute>
+{len(scores)} people took part. The best score is {top}, by {winner}.
 
 <compute>
-Path("best.txt").read_text().strip()
+Path("best.txt").read_text()
 </compute>
 === END EXAMPLE DOCUMENT ===
 
 ## Key Rules
 
 1. Your response IS the document — prose renders as output, code runs.
-2. Cells run top-to-bottom, but forward references are legal — an unknown name binds a hole and is filled when you assert it (see "How the Kernel Forgives").
+2. Cells run top-to-bottom. Define every name before you use it, in code and in prose.
 3. Use {expression} interpolation to weave results into prose.
 4. Use <compute hidden> for setup code the reader doesn't need to see.
 5. Use <compute gather> + <compute continue> for batched exploration before narration.

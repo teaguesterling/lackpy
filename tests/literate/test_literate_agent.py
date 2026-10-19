@@ -89,3 +89,15 @@ def test_the_script_has_no_other_exec_path():
     text = SCRIPT.read_text()
     for word in ("exec(", "eval(", "compile(", "subprocess", "os.system", "LightweightKernel"):
         assert word not in text, word
+
+
+@pytest.mark.asyncio
+async def test_the_cli_shows_the_executed_document(agent, loader, tmp_path):
+    """Ruling: a reader sees values, not `{t}` (session.display, not rendered)."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "n.txt").write_text("forty-two")
+    gen = _stub("<compute hidden>\nfrom pathlib import Path\nt = Path('n.txt').read_text()\n</compute>\n\nGot {t}.\n")
+    out = await agent.run_literate_agent("read it", base_dir=str(ws), generate=gen, policy_loader=loader)
+    assert "Got forty-two." in out
+    assert "{t}" not in out
