@@ -246,7 +246,10 @@ class PathPolicy:
         managed = Path(os.fspath(MANAGED_SETTINGS))
         builtin = [self.workspace / ".claude", self.workspace / ".lackpy", Path.home() / ".claude",
                    Path.home() / ".claude.json", managed, managed.parent / "managed-settings.d"]
-        self.protected = [Path(_norm(self.workspace / p)) for p in (*builtin, *protected)]
+        # dict.fromkeys: one entry per path, in order (a policy built from another
+        # policy's ``protected`` would otherwise list the built-ins twice, M5).
+        self.protected = list(dict.fromkeys(
+            Path(_norm(self.workspace / p)) for p in (*builtin, *protected)))
         self._protected = {b.casefold() for p in self.protected for b in _bases(p)}
 
     def absolute(self, path: Path | str) -> Path:

@@ -144,6 +144,11 @@ class CellSession:
         return out
 
     @property
+    def program(self) -> str:
+        """The program text: the cells that passed validation, joined in order."""
+        return self._program
+
+    @property
     def path_policy(self) -> PathPolicy | None:
         """The ``PathPolicy`` the session's ``Path`` stand-in checks against."""
         return self._path_policy

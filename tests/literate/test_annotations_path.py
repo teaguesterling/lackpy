@@ -376,3 +376,209 @@ class TestStrictModeReadsTheTrace:
                  for e in result.metadata["ledger"].query(entry_type=DIRTY)}
         assert dirty[2].detail["reexecuted"] is False
         assert (ws / "h.out").read_text() == "one"
+
+
+# --- fix round 1 ------------------------------------------------------------------------
+
+from lackpy.interpreters.literate.parser import parse  # noqa: E402
+from lackpy.interpreters.literate.patch import apply_patch  # noqa: E402
+from lackpy.lang.grader import Grade  # noqa: E402
+
+
+class TestDiffBindsNothing:
+    """Ruling I1: @diff's analysis source binds and uses nothing; the kernel
+    never imports Path on the document's behalf. The reviewer's three cases."""
+
+    @pytest.mark.asyncio
+    async def test_a_after_diff_path_is_still_unbound(self, ws, policy):
+        doc = DIFF + "\n```lackpy\nt = Path('hello.txt').read_text()\n```\n"
+        result = await _run(_ctx(ws, policy), doc)
+        holes = result.metadata["ledger"].query(entry_type="hole_opened", name="Path")
+        assert holes and holes[0].detail["reason"] == "unbound"
+        assert "from pathlib import Path" not in compile_document(doc)
+
+    @pytest.mark.asyncio
+    async def test_b_a_code_import_after_diff_validates_in_both(self, ws, policy):
+        doc = DIFF + "\n```lackpy\nfrom pathlib import Path\nt = Path('hello.txt').read_text()\n```\n"
+        result = await _run(_ctx(ws, policy), doc)
+        assert result.success, result.error
+        assert result.metadata["variables"]["t"] == "Hello Universe\n"
+        assert validate(compile_document(doc), allowed_names=set()).valid
+
+    @pytest.mark.asyncio
+    async def test_c_a_failed_diff_reifies_no_path_and_dirties_nothing(self, ws, policy):
+        (ws / "hello.txt").unlink()
+        (ws / "a.txt").write_text("A")
+        doc = DIFF + "\n```lackpy @read(a.txt)\n```\n"
+        result = await _run(_ctx(ws, policy), doc)
+        assert "Path" not in result.metadata["variables"]
+        ledger = result.metadata["ledger"]
+        assert ledger.query(entry_type=DIRTY) == []
+        errors = ledger.query(entry_type="error_reified")
+        assert [e.name for e in errors] == [None]
+        assert "A\n" in result.output
+
+    @pytest.mark.asyncio
+    async def test_the_gate_still_grades_a_diff_as_a_write(self, ws, policy):
+        result = await _run(_ctx(ws, policy, grade_ceiling=Grade(1, 1)), DIFF)
+        assert not result.success
+        assert "effect ceiling exceeded" in result.error
+        assert (ws / "hello.txt").read_text() == "Hello World\n"
+
+
+class TestJoinedDiffIsAComment:
+    """Ruling I2: the joined program does not pretend to apply a diff."""
+
+    def test_the_comment(self):
+        assert compile_document(DIFF) == (
+            "# @diff(hello.txt): applied by lackpy, not by this program")
+
+    def test_no_noop_rewrite(self):
+        program = compile_document(DIFF)
+        assert "write_text" not in program and "read_text" not in program
+
+
+class TestImportDecidedFromProgramText:
+    """Ruling M1/M2: an annotation imports Path unless the cumulative program
+    text binds Path anywhere (AST walk at any depth)."""
+
+    @pytest.mark.asyncio
+    async def test_m1_an_import_after_a_runtime_failure_counts(self, ws, policy):
+        # The import never ran (1/0 first), but the program text has it: the
+        # validator would reject a second import, so the annotation omits it.
+        doc = ("```lackpy\nx = 1 / 0\nfrom pathlib import Path\n```\n\n"
+               "```lackpy @read(hello.txt)\n```\n")
+        result = await _run(_ctx(ws, policy), doc)
+        assert "Rebinding" not in (result.error or "")
+        phases = [e.detail.get("error_phase")
+                  for e in result.metadata["ledger"].query(entry_type="error_reified")]
+        assert "validate" not in phases
+
+    def test_m2_a_nested_import_counts(self):
+        doc = ("```lackpy\nif True:\n    from pathlib import Path\n```\n\n"
+               "```lackpy @read(hello.txt)\n```\n")
+        program = compile_document(doc)
+        assert program.count("from pathlib import Path") == 1
+        # A nested import is the document's own violation; the annotation
+        # adds no rebinding on top of it.
+        messages = [v.message for v in validate(program, allowed_names=set()).violations]
+        assert not any("Rebinding" in m for m in messages)
+
+    def test_a_def_parameter_named_path_counts(self):
+        doc = ("```lackpy\ndef f(Path):\n    return Path\n```\n\n"
+               "```lackpy @read(hello.txt)\n```\n")
+        program = compile_document(doc)
+        assert "from pathlib import Path" not in program
+
+
+class TestRepeatedPathImportHint:
+    """Ruling: a repeated `from pathlib import Path` after an annotation
+    imported it fails with a hint that annotation cells import Path."""
+
+    @pytest.mark.asyncio
+    async def test_the_hint(self, ws, policy):
+        doc = ("```lackpy @read(hello.txt)\n```\n\n"
+               "```lackpy\nfrom pathlib import Path\nx = 1\n```\n")
+        result = await _run(_ctx(ws, policy), doc)
+        assert not result.success
+        assert "Rebinding of imported name: 'Path'" in result.error
+        assert "annotation cells" in result.error and "import Path" in result.error
+
+    @pytest.mark.asyncio
+    async def test_no_hint_when_the_document_imported_twice_itself(self, ws, policy):
+        doc = ("```lackpy\nfrom pathlib import Path\n```\n\n"
+               "```lackpy\nfrom pathlib import Path\nx = 1\n```\n")
+        result = await _run(_ctx(ws, policy), doc)
+        assert "Rebinding of imported name: 'Path'" in result.error
+        assert "annotation cells" not in result.error
+
+
+class TestPatcherVerifies:
+    """Ruling: context and `-` lines must match the file; on a mismatch the
+    cell fails with a clear error and nothing is written."""
+
+    def test_a_removed_line_must_match(self):
+        with pytest.raises(ValueError, match="line 1.*'Something else'.*'Hello World'"):
+            apply_patch("Something else\n", "@@ -1 +1 @@\n-Hello World\n+Hello Universe\n")
+
+    def test_a_context_line_must_match(self):
+        with pytest.raises(ValueError, match="line 1"):
+            apply_patch("a\nb\n", "@@ -1,2 +1,2 @@\n x\n-b\n+c\n")
+
+    def test_a_hunk_past_the_end_fails(self):
+        with pytest.raises(ValueError, match="past the end"):
+            apply_patch("a\n", "@@ -3 +3 @@\n-c\n+d\n")
+
+    def test_a_matching_diff_applies(self):
+        assert apply_patch("a\nb\nc\n", "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n") == "a\nB\nc\n"
+
+    @pytest.mark.asyncio
+    async def test_a_removed_line_mismatch_writes_nothing(self, ws, policy):
+        (ws / "hello.txt").write_text("Something else\n")
+        result = await _run(_ctx(ws, policy), DIFF)
+        assert not result.success
+        assert "does not apply" in result.error
+        assert (ws / "hello.txt").read_text() == "Something else\n"
+        from lackpy.interpreters.literate import _build_kernel
+        kernel = _build_kernel(_ctx(ws, policy))
+        await LiterateInterpreter()._run_document(DIFF, _ctx(ws, policy), kernel)
+        assert [e.tool for e in kernel.session.trace.entries] == ["Path.read_text"]
+
+
+class TestDiffBoundary:
+    """M4: the reviewer's probe-1 boundary cases, as regression tests."""
+
+    @staticmethod
+    def _doc(path):
+        return (f"```lackpy @diff({path})\n@@ -1 +1 @@\n-o\n+PWNED\n```\n\n"
+                "```lackpy\nafter = 1\n```\n")
+
+    async def _assert_refused(self, ws, policy, path, outside):
+        result = await _run(_ctx(ws, policy), self._doc(path))
+        assert not result.success
+        assert [e.detail["cell_index"] for e in _refused(result)] == [0]
+        assert "after" not in result.metadata["variables"]
+        assert outside.read_text() == "o\n"
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        d = tmp_path / "outside"
+        d.mkdir()
+        (d / "o.txt").write_text("o\n")
+        return d / "o.txt"
+
+    @pytest.mark.asyncio
+    async def test_a_symlink_out(self, ws, policy, outside):
+        (ws / "link.txt").symlink_to(outside)
+        await self._assert_refused(ws, policy, "link.txt", outside)
+
+    @pytest.mark.asyncio
+    async def test_a_directory_symlink_out(self, ws, policy, outside):
+        (ws / "linkdir").symlink_to(outside.parent, target_is_directory=True)
+        await self._assert_refused(ws, policy, "linkdir/o.txt", outside)
+
+    @pytest.mark.asyncio
+    async def test_dot_dot(self, ws, policy, outside):
+        await self._assert_refused(ws, policy, "../outside/o.txt", outside)
+
+    @pytest.mark.asyncio
+    async def test_git_config(self, ws, policy):
+        (ws / ".git").mkdir()
+        cfg = ws / ".git" / "config"
+        cfg.write_text("o\n")
+        await self._assert_refused(ws, policy, ".git/config", cfg)
+
+
+class TestEmptyDiffPath:
+    """M6: `@diff()` with empty parentheses is a parse error, not a path taken
+    from the body's first line."""
+
+    def test_empty_parentheses_are_an_error(self):
+        result = parse("```lackpy @diff()\n--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n-a\n+b\n```")
+        assert any("@diff" in e and "empty" in e for e in result.errors)
+
+    @pytest.mark.asyncio
+    async def test_the_document_does_not_run(self, ws, policy):
+        result = await _run(_ctx(ws, policy), "```lackpy @diff()\n--- a/hello.txt\n-a\n+b\n```")
+        assert not result.success
+        assert "empty" in result.error

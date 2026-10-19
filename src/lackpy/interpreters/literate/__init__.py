@@ -31,7 +31,7 @@ from .annotations import kernel_note
 from ...run.cells import CellSession
 from .compiler import compile_cell
 from .display import DEFAULT_DISPLAY_THRESHOLD
-from .effects import as_grade, classify_effects, exceeds_ceiling, path_writes
+from .effects import as_grade, classify_cell, exceeds_ceiling, path_writes
 from .kernel import CellResult, LightweightKernel
 from .kernel.driver import REFUSED
 from .kernel.forgiveness import (
@@ -207,7 +207,7 @@ class LiterateInterpreter:
                     ast.parse(src)
                 except (ValueError, SyntaxError):
                     continue
-                effects = classify_effects(src)
+                effects = classify_cell(cell.cell_type, src)
                 violation = exceeds_ceiling(effects, ceiling)
                 if violation:
                     gate_violations[index] = (

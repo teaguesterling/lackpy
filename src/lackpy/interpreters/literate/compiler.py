@@ -17,8 +17,9 @@ Compilation rules:
   @read    → print(Path(path).read_text())
   @write   → Path(path).write_text(<the body text>); a path with a directory
              part makes its parent first (as the kit's write_file did)
-  @diff    → analysis source only (a Path read and write of the file): the
-             kernel applies the diff on the host side (design D6)
+  @diff    → a comment, ``# @diff(path): applied by lackpy, not by this
+             program``: the kernel applies the diff on the host side (D6),
+             so the cell binds and uses nothing (rulings I1, I2)
   An annotation cell imports Path while the program has not bound it (a
   second import is a rebinding the validator rejects), so the code cells,
   joined, are a plain python3 program.
@@ -203,35 +204,49 @@ def _compile_continue(cell: Cell) -> str:
 _IMPORT_PATH = "from pathlib import Path"
 
 #: The annotation cells whose compiled source starts with ``_IMPORT_PATH``.
-_PATH_CELLS = frozenset({"read", "write", "diff"})
+_PATH_CELLS = frozenset({"read", "write"})
 
 
 def without_path_import(source: str) -> str:
     """``source`` without its leading ``from pathlib import Path`` line.
 
-    The validator rejects a second import of a name (``safety.import``: a
-    rebinding), so an annotation cell imports ``Path`` only while the program
-    has not bound it yet. The kernel drops the line when the session already
-    binds ``Path``; :func:`compile_cells` does the same for the joined program.
+    The validator rejects a second import of a name, and any other binding of
+    an imported name (``safety.import``: a rebinding). So an annotation cell
+    imports ``Path`` only while the program text binds no ``Path``
+    (:func:`binds_path`). The kernel decides from the session's program text;
+    :func:`compile_cells` from the joined program so far. Runtime names never
+    decide it (ruling M1/M2): the validator reads text.
     """
     head = _IMPORT_PATH + "\n"
     return source[len(head):] if source.startswith(head) else source
 
 
-def _binds_path(source: str) -> bool:
-    """Whether ``source`` binds ``Path`` at its top level (an import or an assignment)."""
+def binds_path(source: str) -> bool:
+    """Whether ``source`` binds the name ``Path`` anywhere, at any depth.
+
+    The binding forms are the ones the validator's rebinding check reads: an
+    import, a stored name, a parameter, a def or class name, an ``except ...
+    as`` name. Text that does not parse binds nothing.
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return False
-    for stmt in tree.body:
-        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
-            if any((a.asname or a.name.split(".")[0]) == "Path" for a in stmt.names):
-                return True
-        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
-            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-            if any(isinstance(t, ast.Name) and t.id == "Path" for t in targets):
-                return True
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.asname or a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names = [node.id]
+        elif isinstance(node, ast.arg):
+            names = [node.arg]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names = [node.name]
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names = [node.name]
+        else:
+            continue
+        if "Path" in names:
+            return True
     return False
 
 
@@ -252,12 +267,12 @@ def _compile_write(cell: Cell) -> str:
 
 
 def _compile_diff(cell: Cell) -> str:
-    # ANALYSIS source only, like prose: the kernel never runs it. It names a
-    # read and a write of the file, so the ceiling gate grades the cell a
-    # write; the import defines Path, so the hole pre-pass never skips the
-    # cell. The kernel applies the patch with CellSession.edit_text.
-    path = cell.annotation_args.get("path", "")
-    return f"{_IMPORT_PATH}\nPath({path!r}).write_text(Path({path!r}).read_text())"
+    # The kernel applies the patch on the host side (CellSession.edit_text,
+    # D6). The cell binds and uses nothing (ruling I1), and the joined program
+    # says so rather than pretending to patch (ruling I2). The ceiling gate
+    # grades a @diff cell as a write by its type (effects.classify_cell).
+    path = " ".join(cell.annotation_args.get("path", "").splitlines())
+    return f"# @diff({path}): applied by lackpy, not by this program"
 
 
 def _compile_scratch(cell: Cell) -> str:
@@ -294,21 +309,25 @@ def compile_cell(cell: Cell) -> str:
 def compile_cells(parse_result: ParseResult) -> str:
     """Compile a parsed document into a single Python program.
 
-    An annotation cell imports ``Path`` only when no earlier cell bound it
-    (:func:`without_path_import`), so the program validates as one lackpy
-    program and runs under python3.
+    An annotation cell imports ``Path`` only when the program so far binds no
+    ``Path`` (:func:`without_path_import`), so the program validates as one
+    lackpy program and runs under python3.
+
+    NOT the python3 twin of a document with ``@diff``: a diff is applied by the
+    kernel, and its cell is a comment here (ruling I2). The Task 4 equivalence
+    fixtures exclude documents that use ``@diff``.
     """
     parts: list[str] = []
-    path_bound = False
+    program: list[str] = []  # the code the session would hold: no prose
     for cell in parse_result.cells:
         compiler = _COMPILERS.get(cell.cell_type)
         if compiler is None:
             raise ValueError(f"Unknown cell type: {cell.cell_type}")
         compiled = compiler(cell)
-        if cell.cell_type in _PATH_CELLS and path_bound:
+        if cell.cell_type in _PATH_CELLS and binds_path("\n".join(program)):
             compiled = without_path_import(compiled)
-        elif cell.cell_type != "prose":
-            path_bound = path_bound or _binds_path(compiled)
+        if cell.cell_type != "prose":
+            program.append(compiled)
         if compiled.strip():
             parts.append(compiled)
     return "\n".join(parts)

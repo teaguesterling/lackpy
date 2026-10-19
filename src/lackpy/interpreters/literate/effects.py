@@ -69,6 +69,15 @@ def classify_effects(compiled_source: str) -> CellEffects:
     return CellEffects(grade)
 
 
+def classify_cell(cell_type: str, compiled_source: str) -> CellEffects:
+    """Grade one cell: a ``@diff`` is a write by its type (its compiled source
+    is a comment: the kernel applies it on the host side); any other cell by
+    :func:`classify_effects`."""
+    if cell_type == "diff":
+        return CellEffects(_WRITE)
+    return classify_effects(compiled_source)
+
+
 def path_writes(entries: Iterable[TraceEntry]) -> tuple[str, ...]:
     """The ``Path`` write tools in ``entries``, each once, sorted.
 

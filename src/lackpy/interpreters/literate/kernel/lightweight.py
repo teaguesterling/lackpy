@@ -42,7 +42,7 @@ from typing import Any
 
 from lackpy.run.cells import CellOutcome, CellSession
 
-from ..compiler import _COMPILERS, prose_segments, without_path_import
+from ..compiler import _COMPILERS, _IMPORT_PATH, binds_path, prose_segments, without_path_import
 from ..display import DEFAULT_DISPLAY_THRESHOLD, make_display
 from ..parser import Cell
 from ..patch import apply_patch
@@ -50,6 +50,12 @@ from .forgiveness import is_forgiving
 from .interface import CellResult
 from .static_analysis import StaticAnalysisError, check_cell, collect_bindings
 from .versions import Opaque
+
+#: Appended to the validator's rebinding error for a repeated Path import.
+ANNOTATION_PATH_HINT = (
+    " (annotation cells (@read, @write) import Path for the document;"
+    " use Path without importing it again)")
+
 
 class LightweightKernel:
     def __init__(self, session: CellSession, *,
@@ -65,6 +71,9 @@ class LightweightKernel:
         # The session cell ids that are in the program (validated), so a
         # re-run can use ``rerun_cell``.
         self._in_program: set[int] = set()
+        # Whether an annotation cell (@read, @write) emitted the Path import:
+        # a later repeated import gets ANNOTATION_PATH_HINT.
+        self._annotation_imports = False
         # L7 fail-closed backstop: a failed startup self-test disables the
         # kernel (see ..selftest.run_selftest).  While disabled, every
         # execute_cell/inspect call returns a structured refusal instead of
@@ -130,9 +139,11 @@ class LightweightKernel:
             return self._apply_diff(cell, cell_index)
 
         source = compiler(cell)
-        if cell.cell_type in ("read", "write") and "Path" in self._session.bound_names():
-            # A second import of Path is a rebinding the validator rejects.
-            source = without_path_import(source)
+        if cell.cell_type in ("read", "write"):
+            # A second binding of Path is a rebinding the validator rejects.
+            # Decided from the program text, as the validator decides (M1/M2).
+            if binds_path(self._session.program):
+                source = without_path_import(source)
         if cell.cell_type == "prose":
             try:
                 check_cell(source, self.known_names())
@@ -160,6 +171,8 @@ class LightweightKernel:
             outcome = self._session.run_cell(source)
         if outcome.cell_id is not None and outcome.phase in (None, "runtime"):
             self._in_program.add(outcome.cell_id)
+            if cell.cell_type in ("read", "write") and source.startswith(_IMPORT_PATH):
+                self._annotation_imports = True
 
         # The names this run bound or rebound (review I2): the session reports
         # them by identity, with their type names. A data value goes in the
@@ -185,7 +198,7 @@ class LightweightKernel:
 
         if not outcome.ok:
             return CellResult(success=False, output=outcome.stdout or None,
-                              error=outcome.error, error_phase=outcome.phase,
+                              error=self._hinted(outcome.error), error_phase=outcome.phase,
                               namespace_delta={}, cell_index=cell_index,
                               error_lineno=outcome.line, cell_id=outcome.cell_id)
 
@@ -197,6 +210,13 @@ class LightweightKernel:
         return CellResult(success=True, output=output, error=None, error_phase=None,
                           namespace_delta=delta, cell_index=cell_index,
                           cell_id=outcome.cell_id)
+
+    def _hinted(self, error: str | None) -> str | None:
+        # Ruling: a repeated Path import after an annotation imported it says why.
+        if (error and self._annotation_imports
+                and "Rebinding of imported name: 'Path'" in error):
+            return error + ANNOTATION_PATH_HINT
+        return error
 
     def _apply_diff(self, cell: Cell, cell_index: int) -> CellResult:
         # D6: host side. The session reads and writes the file through its own

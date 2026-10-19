@@ -69,7 +69,6 @@ def test_syntax_error_is_conservative_not_a_crash():
 @pytest.mark.parametrize("doc,w", [
     ("```lackpy @read(a.txt)\n```", 1),
     ("```lackpy @write(a.txt)\nbody\n```", 3),
-    ("```lackpy @diff(a.txt)\n@@ -1 +1 @@\n-a\n+b\n```", 3),
     ("```lackpy @scratch\na = 10\nb = 'x'\n```", 0),
 ])
 def test_classifies_through_the_real_compiler(doc, w):

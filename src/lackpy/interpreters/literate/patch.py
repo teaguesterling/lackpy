@@ -12,46 +12,49 @@ from __future__ import annotations
 def apply_patch(text: str, diff_text: str) -> str:
     """``text`` with the unified diff ``diff_text`` applied.
 
-    Raises ``ValueError`` when a context line does not match.
+    Every context line and every removed (``-``) line must match the line of
+    ``text`` it stands for. On a mismatch, ``ValueError`` names the line, what
+    the file has and what the diff expects; nothing is returned, so the caller
+    writes nothing (ruling: a diff applied to the wrong text corrupts a file).
     """
     return "".join(_apply_unified_diff(text.splitlines(keepends=True), diff_text))
 
 
 def _apply_unified_diff(original: list[str], diff_text: str) -> list[str]:
-    """Apply a unified diff to a list of lines.
-
-    Processes each hunk sequentially: walks the old-file cursor through
-    context and removal lines, inserting additions at the correct position.
-    """
+    """Apply a unified diff to a list of lines, hunk by hunk, verifying as it goes."""
     result = list(original)
-    offset = 0
+    offset = 0  # lines added minus lines removed by the earlier hunks
 
     for old_start, hunk_lines in _parse_hunks(diff_text):
-        pos = old_start - 1 + offset
-        cursor = pos
-        added = 0
-        removed = 0
-
+        cursor = max(old_start - 1, 0) + offset
+        old_line = max(old_start, 1)  # the line number in the original file
         for op, text in hunk_lines:
-            if op == " ":
-                if 0 <= cursor < len(result) and result[cursor].rstrip("\n") != text:
-                    raise ValueError(
-                        f"Context mismatch at line {cursor + 1}: "
-                        f"expected {text!r}, got {result[cursor].rstrip(chr(10))!r}"
-                    )
-                cursor += 1
-            elif op == "-":
-                if 0 <= cursor < len(result):
+            if op in (" ", "-"):
+                _expect(result, cursor, text, old_line, len(original))
+                old_line += 1
+                if op == " ":
+                    cursor += 1
+                else:
                     result.pop(cursor)
-                removed += 1
+                    offset -= 1
             elif op == "+":
                 result.insert(cursor, text + "\n")
                 cursor += 1
-                added += 1
-
-        offset += added - removed
+                offset += 1
 
     return result
+
+
+def _expect(lines: list[str], index: int, text: str, line: int, total: int) -> None:
+    """Raise ``ValueError`` unless ``lines[index]`` is ``text`` (line ``line`` of the file)."""
+    if index >= len(lines):
+        raise ValueError(
+            f"the diff does not apply: line {line} is past the end of the file "
+            f"({total} lines); the diff expects {text!r}")
+    found = lines[index].rstrip("\n")
+    if found != text:
+        raise ValueError(
+            f"the diff does not apply: line {line} is {found!r}, the diff expects {text!r}")
 
 
 def _parse_hunks(diff_text: str):

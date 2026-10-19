@@ -203,8 +203,12 @@ def _parse_info_string(info: str) -> tuple[CellType, dict[str, str], dict[str, s
         return "code", {}, options, errors
 
     annotation_args: dict[str, str] = {}
-    if annotation in _PATH_ANNOTATIONS and annotation_arg:
-        annotation_args["path"] = annotation_arg
+    if annotation in _PATH_ANNOTATIONS and annotation_arg is not None:
+        # Parentheses given: they hold the path. Empty parentheses are an
+        # error, not a cue to take the body's first line as the path (M6).
+        annotation_args["path"] = annotation_arg.strip()
+        if not annotation_args["path"]:
+            errors.append(f"@{annotation}() has an empty path: put the path in the parentheses")
 
     return annotation, annotation_args, options, errors
 

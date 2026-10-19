@@ -223,8 +223,9 @@ class TestWriteCompilation:
 
 
 class TestDiffCompilation:
-    def test_diff_compiles_to_a_path_read_and_write(self):
-        # Analysis source only: the kernel applies a diff on the host side (D6).
+    def test_diff_compiles_to_a_comment(self):
+        # Ruling I1/I2: the kernel applies a diff on the host side (D6). The
+        # joined program says so; it binds and uses nothing.
         diff_content = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new"
         cells = [Cell(
             cell_type="diff",
@@ -232,9 +233,7 @@ class TestDiffCompilation:
             annotation_args={"path": "file.py"},
         )]
         code = compile_cells(_make_result(cells))
-        assert "apply_diff" not in code
-        assert "Path('file.py').read_text()" in code
-        assert "Path('file.py').write_text(" in code
+        assert code == "# @diff(file.py): applied by lackpy, not by this program"
 
 
 class TestScratchCompilation:

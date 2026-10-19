@@ -70,3 +70,10 @@ def test_the_workspace_and_extra_directories_are_kept(ws, home, tmp_path):
     ro.check(extra / "e.txt", "read")
     with pytest.raises(LackpyRefusal):
         ro.check(extra / "e.txt", "write")
+
+
+def test_the_protected_list_is_not_doubled(ws, home):
+    policy = load_policy(ws, home=home, managed=None)
+    ro = read_only_policy(policy)
+    assert ro.protected == policy.protected
+    assert len(ro.protected) == len(set(ro.protected))
