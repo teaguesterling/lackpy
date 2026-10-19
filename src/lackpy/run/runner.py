@@ -152,7 +152,7 @@ class RestrictedRunner:
 _DATA_SCALARS = (type(None), bool, int, float, str, bytes)
 
 
-def _is_data(value: Any, _path: frozenset[int] = frozenset()) -> bool:
+def _is_data(value: Any) -> bool:
     """Whether a program variable is data, for ``variables`` (gate 7, review M1).
 
     An allowlist on the exact type: ``_DATA_SCALARS``, and list, tuple, set and
@@ -160,17 +160,38 @@ def _is_data(value: Any, _path: frozenset[int] = frozenset()) -> bool:
     read, and the containers are iterated; no attribute of ``value`` is read,
     because the ``type`` stand-in and its views refuse every attribute.
     A self-referencing or too-deep container is not data.
+
+    The walk runs on the host after exec, outside any program timeout, so it
+    visits each container once: ``accepted`` memoizes containers already found
+    to be data (``x = [x, x]`` repeated is linear, not exponential; re-review).
+    The ids stay valid because every object is alive for the whole walk.
     """
-    kind = type(value)
-    if kind in _DATA_SCALARS:
-        return True
-    if kind not in (list, tuple, set, dict) or id(value) in _path:
-        return False
-    inner = _path | {id(value)}
-    try:
+    accepted: set[int] = set()
+    on_path: set[int] = set()
+
+    def walk(v: Any) -> bool:
+        kind = type(v)
+        if kind in _DATA_SCALARS:
+            return True
+        if kind not in (list, tuple, set, dict):
+            return False
+        key = id(v)
+        if key in accepted:
+            return True
+        if key in on_path:
+            return False  # a cycle
+        on_path.add(key)
         if kind is dict:
-            return all(_is_data(k, inner) and _is_data(v, inner) for k, v in value.items())
-        return all(_is_data(item, inner) for item in value)
+            ok = all(walk(k) and walk(item) for k, item in v.items())
+        else:
+            ok = all(walk(item) for item in v)
+        on_path.discard(key)
+        if ok:
+            accepted.add(key)
+        return ok
+
+    try:
+        return walk(value)
     except RecursionError:
         return False
 

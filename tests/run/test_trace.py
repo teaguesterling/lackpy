@@ -222,3 +222,15 @@ def test_glob_pattern_that_cannot_be_text_is_traced(ws):
     result = _run("from pathlib import Path\nlist(Path('.').glob(10**5000))", ws)
     assert not result.success
     assert [(e.tool, e.success) for e in result.trace.entries] == [("Path.glob", False)]
+
+
+def test_variables_walk_of_shared_structure_is_linear(ws):
+    # Re-review: x = [x, x] doubles the tree per level; the walk runs on the host
+    # after exec, outside the program timeout, so it must visit each object once.
+    import time
+    start = time.perf_counter()
+    result = _run("x = 0\nfor i in range(40):\n    x = [x, x]\n", ws)
+    elapsed = time.perf_counter() - start
+    assert result.success, result.error
+    assert "x" in result.variables
+    assert elapsed < 1.0, elapsed
