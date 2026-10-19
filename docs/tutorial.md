@@ -1,591 +1,338 @@
 # Tutorial
 
-This walkthrough covers every major feature of lackpy. Follow along in order, or jump to any section.
+This tutorial runs the three worked examples from the lackpy pre-prompt. The
+pre-prompt is the page that teaches a model to write lackpy. Each example
+shows one habit of the language. Then the tutorial shows parameters,
+generation, reuse and the trace.
 
-**Prerequisites:** lackpy installed, workspace initialized with `lackpyctl init`. See [Getting Started](getting-started.md).
+**Prerequisites:** lackpy is installed. See [Getting Started](getting-started.md).
+
+A lackpy program is plain Python 3 that a validator has checked. The full rule
+set is the [style guide](reference/style-guide.md). File access goes through
+`pathlib.Path`, under the [path policy](concepts/paths.md).
 
 ---
 
 ## 1. Setup
 
-Create a project directory and initialize:
+Make a workspace with some files to work on:
 
 ```bash
-mkdir my-lackpy-project && cd my-lackpy-project
-echo "# Hello from lackpy" > README.md
+mkdir lackpy-tour && cd lackpy-tour
 lackpyctl init
+printf 'Status: draft\n' > notes.md
+mkdir -p data src
+printf '{"status": "ok"}\n{"status": "fail"}\nnot json\n{"status": "ok"}\n' > data/rows.jsonl
+printf 'TODO: a\nTODO: b\n' > src/a.cpp
 ```
 
-Confirm the setup:
+The workspace is the directory a run starts in. A relative path in a program
+is relative to it.
+
+---
+
+## 2. Patch one occurrence in a file
+
+Save this program as `patch.py`:
+
+```python
+from pathlib import Path
+
+path = Path("notes.md")
+text = path.read_text()
+assert text.count("Status: draft") == 1, "the status line occurs once"
+path.write_text(text.replace("Status: draft", "Status: final"))
+```
+
+Run it. A program file is the first argument of `lackpy`:
 
 ```bash
-lackpyctl status
+lackpy patch.py
 ```
 
 ```json
 {
-  "workspace": "/path/to/my-lackpy-project",
-  "config_dir": "/path/to/my-lackpy-project/.lackpy",
-  "inference_order": ["templates", "rules"],
-  "profile_default": "debug",
-  "sandbox_enabled": false,
-  "tools": 4
+  "success": true,
+  "output": null,
+  "stdout": "",
+  "error": null
 }
 ```
 
----
+The output above is shortened. `notes.md` now holds `Status: final`.
 
-## 2. Pipeline overview
-
-Every `delegate` call passes through this pipeline:
-
-```
-                    ┌─────────────────────────────────────────┐
-  intent            │  InferenceDispatcher                    │
-  ─────────────────►│                                         │
-                    │  tier 0: templates  (pattern match)     │
-                    │  tier 1: rules      (keyword rules)     │
-                    │  tier 2: ollama     (local LLM)         │
-                    │  tier 3: anthropic  (cloud LLM)         │
-                    └──────────────┬──────────────────────────┘
-                                   │ raw program text
-                                   ▼
-                    ┌──────────────────────────┐
-                    │  Validator (AST check)   │
-                    │  - allowed node types    │
-                    │  - forbidden names       │
-                    │  - namespace check       │
-                    │  - custom rules          │
-                    └──────────────┬───────────┘
-                                   │ ValidationResult
-                                   ▼
-                    ┌──────────────────────────┐
-                    │  RestrictedRunner        │
-                    │  - traced namespace      │
-                    │  - restricted __builtins__│
-                    └──────────────┬───────────┘
-                                   │ ExecutionResult + Trace
-                                   ▼
-                              delegate() result
-```
-
-The tier system means simple intents are handled deterministically and fast; LLMs are only invoked when no cheaper tier can handle the request.
-
----
-
-## 3. Validating programs
-
-The validator checks programs before they run. It operates entirely on the AST — no code is executed during validation.
-
-### A valid program
-
-```bash
-cat > check.py << 'EOF'
-files = find_files("**/*.py")
-count = len(files)
-count
-EOF
-
-lackpy check.py --validate --profile find_files
-```
+Run it again. The `assert` fails, so the program stops before it writes:
 
 ```json
 {
-  "valid": true,
-  "errors": [],
-  "calls": ["find_files", "len"]
+  "success": false,
+  "error": "the status line occurs once"
 }
 ```
 
-### An invalid program
+This is the lackpy way to guard an edit. Do not stop with `exit()` or `raise`.
+State the condition with `assert cond, "why it must hold"`. Every `assert`
+needs a message.
 
-The following example shows what the validator rejects. This program uses `import`, which is a `Forbidden AST node`:
+---
+
+## 3. Read JSON lines, skip bad ones, count
+
+```python
+import json
+from collections import Counter
+from pathlib import Path
+
+counts = Counter()
+text = Path("data/rows.jsonl").read_text()
+for line in text.splitlines():
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    counts[row["status"]] += 1
+for status in sorted(counts):
+    print(status, counts[status])
+```
+
+```text
+fail 1
+ok 2
+```
+
+The `try` block names the error it expects. lackpy refuses
+`except Exception:` and a bare `except:`. A `try` block holds at most 3
+statements. Its handler ends in `continue`, `return`, `pass`, or assignments
+to every name that the body assigns.
+
+lackpy has no `finally:`. Put cleanup code after the `try` block.
+
+The program reads the whole file with `read_text()`, then parses each line
+with `json.loads`. lackpy refuses `open()` and `json.load(f)`.
+
+---
+
+## 4. Scan files with a helper function
+
+```python
+from pathlib import Path
+
+
+def todo_count(text):
+    return text.count("TODO")
+
+
+paths = Path("src").glob("*.cpp")
+for p in sorted(paths):
+    text = p.read_text()
+    print(p.name, todo_count(text))
+```
+
+```text
+a.cpp 2
+```
+
+A `def` is at the top level, has at most 12 statements, and comes before its
+first use. `glob` and `rglob` list files. If the path policy refuses to read an
+entry, the listing omits it.
+
+---
+
+## 5. What the validator refuses
+
+The validator checks a program before any of it runs. Validate a file with
+`--validate`:
+
+```python title="Refused: open() is not approved"
+with open("notes.md") as f:
+    text = f.read()
+print(text)
+```
 
 ```bash
-cat > bad.py << 'EOF'
-import sys
-sys.version
-EOF
-
-lackpy bad.py --validate --profile find_files
+lackpy bad.py --validate
 ```
 
 ```json
 {
   "valid": false,
   "errors": [
-    "Forbidden AST node: Import at line 1",
-    "Unknown function: 'sys' at line 2 (not in kit or builtins)"
+    "Forbidden name: 'open' at line 1"
   ],
-  "calls": []
+  "calls": ["print", "open"]
 }
 ```
 
-### What gets rejected and why
+`run_program` validates first. If the program is not valid, nothing runs.
 
-| Construct | Reason |
-|-----------|--------|
-| `import` / `from ... import` | Arbitrary module access |
-| `def` / `class` | Code definition introduces opaque scope |
-| `while` | Unbounded loops |
-| `try` / `except` | Error suppression can hide security violations |
-| `lambda` | Anonymous functions bypass namespace checks |
-| `open`, `getattr`, `setattr` | Direct resource or reflection access |
-| Strings containing `__` | Prevents `getattr(obj, "__class__")` patterns |
-| Unknown function names | Every call must be in the kit or allowed builtins |
+The [style guide](reference/style-guide.md) lists every rule, with an
+approved and a not-approved example. The [language spec](concepts/language-spec.md)
+gives a summary.
 
-### Python API
+---
+
+## 6. Parameters
+
+A program takes its inputs from one top-level `params` literal. The values in
+the literal are the defaults:
 
 ```python
-from lackpy.service import LackpyService
+from pathlib import Path
 
-svc = LackpyService()
-result = svc.validate(
-    'files = find_files("**/*.py")\nlen(files)',
-    profile=["find_files"],
-)
-print(result.valid)     # True
-print(result.errors)    # []
-print(result.calls)     # ['find_files', 'len']
+params = {"name": "notes.md"}
+text = Path(params["name"]).read_text()
+print(len(text.splitlines()))
+```
+
+Pass a value on the command line with `--param`:
+
+```bash
+lackpy count.py --param name=src/a.cpp
+```
+
+lackpy puts the passed value into the literal before the program runs. The
+program reads `params["name"]`, as it does under `python3`. A param binds no
+other name.
+
+Rules for passed params:
+
+- Each key must be a key of the program's `params` literal.
+- Each value must have the type of its default. An `int` is accepted for a
+  `float` default. A `None` default accepts any type.
+- Each value must have a literal form: a string, number, bool, `None`, or a
+  list, tuple, set or dict of these.
+- The program must assign `params` exactly once.
+
+```python title="Python API: pass params"
+result = await svc.run_program(program, params={"name": "src/a.cpp"})
 ```
 
 ---
 
-## 4. Working with kits
+## 7. Generate a program from an intent
 
-A **kit** is a named subset of tools from the toolbox. Kits control which function names are visible to the validator and runner.
-
-### List available tools
-
-```bash
-lackpyctl toolbox list
-```
-
-### Use a comma-separated kit
+`delegate` turns an intent into a program, then runs it. It is the default
+mode of `lackpy -c`:
 
 ```bash
-lackpy -c "read the file README.md" --profile read_file,find_files
+lackpy -c "read the file notes.md"
 ```
 
-### Create a named kit
+`--generate` gives the program without a run:
 
 ```bash
-lackpyctl profile create filesystem --tools read glob write --description "File system tools"
+lackpy -c "read the file notes.md" --generate
 ```
-
-This creates `.lackpy/kits/filesystem.kit`:
-
-```
----
-name: filesystem
-description: File system tools
----
-read
-glob
-write
-```
-
-### Use the named kit
-
-```bash
-lackpy -c "find all Python files" --profile filesystem
-```
-
-### Kit info
-
-```bash
-lackpyctl profile info filesystem
-```
-
-```json
-{
-  "tools": {
-    "read_file": {"description": "", "grade_w": 3, "effects_ceiling": 3},
-    "find_files": {"description": "", "grade_w": 3, "effects_ceiling": 3},
-    "write_file": {"description": "", "grade_w": 3, "effects_ceiling": 3}
-  },
-  "grade": {"w": 3, "d": 3},
-  "description": "  read_file(path) -> Any: \n  find_files(pattern) -> Any: \n  write_file(path, content) -> Any: "
-}
-```
-
-### Python API — kit forms
 
 ```python
-svc = LackpyService()
+from pathlib import Path
 
-# Named kit (from .lackpy/kits/filesystem.kit)
-result = await svc.delegate("find all Python files", profile="filesystem")
-
-# List of tool names
-result = await svc.delegate("find all Python files", profile=["find_files"])
-
-# Dict with aliases
-result = await svc.delegate(
-    "find all Python files",
-    profile={"ls": "find_files"},  # calls are `ls(...)` in the program
-)
+text = Path('notes.md').read_text()
+print(text, end="")
 ```
+
+The generator tries tiers in the order of `[inference] order`:
+
+1. `templates`: a saved program whose pattern matches the intent.
+2. `rules`: keyword rules for simple intents, such as "read the file X".
+3. A model provider, such as the local Ollama provider that `lackpyctl init` adds.
+
+A model receives the pre-prompt, the style guide and a program skeleton. The
+generated program goes through the same validator as a program you wrote.
+
+```python title="Python API: delegate"
+result = await svc.delegate("read the file notes.md")
+print(result["program"])
+print(result["stdout"])
+```
+
+!!! note "Refused inference modes"
+    Mode `staged-dsl` and the `literate` execution axis are refused. They
+    wait for a migration to the path policy. Use mode `1-shot` or `spm`.
 
 ---
 
-## 5. Generating programs
+## 8. Save a program for reuse
 
-The `--generate` flag runs the inference pipeline without executing the result:
+### Lackey files
 
-```bash
-lackpy -c "find all Python files" --generate --profile find_files
-```
-
-```python
-files = find_files('**/*.py')
-files
-```
-
-### Inference tiers
-
-=== "Tier 0: Templates"
-
-    Templates are matched first. If a template pattern matches the intent, the stored program is returned — no LLM required.
-
-    ```bash
-    lackpy -c "read the file config.toml" --generate --profile read_file
-    # → matched by rules tier: content = read_file('config.toml')
-    ```
-
-=== "Tier 1: Rules"
-
-    The rules tier uses keyword-based matching for common patterns. It handles intents like "read file X", "find definitions of Y", "glob Z".
-
-=== "Tier 2: Local model"
-
-    If templates and rules fail, the LLM tier is tried. Model calls go through
-    woollama's core (a built-in dependency); a local model just needs a running
-    Ollama server.
-
-    ```toml
-    # .lackpy/config.toml
-    [inference.providers.local]
-    plugin = "woollama"
-    model = "ollama/qwen2.5-coder:1.5b"
-    base_url = "http://localhost:11434/v1"
-    ```
-
-=== "Tier 2: Cloud fallback"
-
-    Same provider, a cloud model. Just needs the relevant API key in the
-    environment (e.g. `ANTHROPIC_API_KEY`).
-
-    ```toml
-    [inference.providers.cloud-fallback]
-    plugin = "woollama"
-    model = "anthropic/claude-haiku-4-5"
-    ```
-
-### Python API
-
-```python
-result = await svc.generate("find all Python files", profile=["find_files"])
-print(result.program)          # the generated program
-print(result.provider_name)    # which tier produced it
-print(result.generation_time_ms)
-```
-
----
-
-## 6. Running programs directly
-
-When you already have a program file, pass its path as the first positional argument (there is no `run` subcommand). A plain program file needs `--profile` or `--tools` to supply its namespace; a Lackey file carries its own tools and needs neither:
+`--create` generates a program and saves it as a Lackey file under
+`.lackpy/templates/`:
 
 ```bash
-cat > list_py.py << 'EOF'
-files = find_files("**/*.py")
-files
-EOF
-
-lackpy list_py.py --profile find_files
+lackpy -c "read the file notes.md" --create --name ReadNotes
 ```
 
-```json
-{
-  "success": true,
-  "output": ["src/lackpy/__init__.py", "src/lackpy/cli.py"],
-  "error": null
-}
+```text
+Created .lackpy/templates/read_notes.py
 ```
 
-The program is validated before execution. If validation fails, the runner returns an error without running anything.
-
-### Python API
-
-```python
-result = await svc.run_program(
-    'files = find_files("**/*.py")\nfiles',
-    profile=["find_files"],
-)
-print(result.success)
-print(result.output)
-print(result.trace.entries)   # list of TraceEntry
-```
-
----
-
-## 7. Using parameters
-
-Parameters let you pass values into programs without interpolating them into the intent string:
-
-```python
-result = await svc.delegate(
-    intent="read the target file",
-    profile=["read_file"],
-    params={
-        "target_file": {
-            "value": "README.md",
-            "type": "str",
-            "description": "file to read",
-        }
-    },
-)
-```
-
-Inside the program, `target_file` is available as a pre-set variable:
-
-```python
-# generated program
-content = read_file(target_file)
-content
-```
-
-!!! warning "Name collisions"
-    Parameter names must not collide with tool names or allowed builtins. `LackpyService` raises `ValueError` if they do.
-
----
-
-## 8. Saving programs for reuse (the ratchet)
-
-lackpy gives you two ways to reuse a validated program. They're distinct mechanisms:
-
-### Lackey files (saved program, run by path)
-
-The `--create` flag generates a program from your intent and saves it as a **Lackey file** — a Python class wrapping the program, plus its tools — under `.lackpy/templates/`:
+Run a Lackey file by path. This skips generation:
 
 ```bash
-lackpy -c "read the file README.md" --create --name ReadFile --profile read_file
+lackpy .lackpy/templates/read_notes.py
 ```
 
-The output is plain text:
+### Templates
 
-```
-Created .lackpy/templates/ReadFile.py
-```
+A template is a program with an intent pattern. The `templates` tier matches
+it before any model runs:
 
-A Lackey file carries its own tools and a validated program. You run it by path — this skips inference entirely:
-
-```bash
-lackpy .lackpy/templates/ReadFile.py
-```
-
-A Lackey file is **not** matched against future intents; it's a saved program you invoke directly.
-
-### Templates (pattern-matched at tier 0)
-
-To make *intent matching* deterministic, save a `.tmpl` template with a `pattern`. This is exposed through the Python API (`svc.create`), which writes a `.tmpl` file with frontmatter:
-
-```python
+```python title="Python API: save a template"
 result = await svc.create(
-    program="content = read_file('{path}')\ncontent",
-    profile=["read_file"],
+    program='from pathlib import Path\n\nprint(Path("{path}").read_text())\n',
     name="read-file",
     pattern="read the file {path}",
 )
 print(result["path"])  # .lackpy/templates/read-file.tmpl
 ```
 
-This writes `.lackpy/templates/read-file.tmpl`:
-
-```
----
-name: read-file
-pattern: "read the file {path}"
-success_count: 0
-fail_count: 0
----
-content = read_file('{path}')
-content
-```
-
-Now a delegate call (the default `lackpy -c` mode) for `"read the file README.md"` matches the template at tier 0, with `{path}` substituted to `README.md`. No LLM is called.
-
 ---
 
 ## 9. Custom rules
 
-Custom rules let you tighten the validator beyond the built-in checks. They're callables: `ast.Module -> list[str]`.
+A custom rule makes the validator stricter. A rule is a callable that takes an
+`ast.Module` and returns a list of error strings:
 
-```python
-from lackpy.lang.rules import no_loops, max_calls, max_depth, no_nested_calls
+```python title="Python API: custom rules"
+from lackpy.lang.rules import no_loops, max_calls
 
-# Use in validate
-result = svc.validate(
-    program,
-    profile=["find_files"],
-    rules=[no_loops, max_calls(5)],
-)
-
-# Use in delegate (enforced on the generated program)
-result = await svc.delegate(
-    "find all Python files",
-    profile=["find_files"],
-    rules=[no_loops, max_depth(2)],
-)
+result = svc.validate(program, rules=[no_loops, max_calls(5)])
 ```
 
-### Built-in rules
-
-| Rule | Description |
-|------|-------------|
-| `no_loops` | Rejects any `for` loop |
-| `max_depth(n)` | Limits nesting depth (if/for/with) |
-| `max_calls(n)` | Limits total number of function calls |
-| `no_nested_calls` | Forbids using a call result directly as an argument |
-
-See [Custom Rules](extending/custom-rules.md) for writing your own.
+See [Custom Rules](extending/custom-rules.md).
 
 ---
 
-## 10. Reading the trace
+## 10. Read the trace
 
-Every program run produces a `Trace` with an entry for each tool call:
+Each `Path` I/O call adds one trace entry:
 
-```python
-result = await svc.run_program(
-    'files = find_files("**/*.py")\ncount = len(files)\ncount',
-    profile=["find_files"],
-)
-
+```python title="Python API: read the trace"
+result = await svc.run_program(program)
 for entry in result.trace.entries:
-    print(
-        f"Step {entry.step}: {entry.tool}({entry.args}) "
-        f"-> {entry.result} ({entry.duration_ms:.1f}ms)"
-    )
+    print(entry.step, entry.tool, entry.args, entry.success)
 ```
 
-```
-Step 0: find_files({'pattern': '**/*.py'}) -> ['src/lackpy/__init__.py', ...] (1.3ms)
-```
-
-`len` is a builtin, not a tool, so it doesn't appear in the trace. Only kit tools are traced.
-
-### Trace fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `step` | `int` | Call order (0-indexed) |
-| `tool` | `str` | Tool name |
-| `args` | `dict` | Arguments by name |
-| `result` | `Any` | Return value (truncated if large) |
-| `duration_ms` | `float` | Wall-clock call time |
-| `success` | `bool` | Whether the call succeeded |
-| `error` | `str \| None` | Exception message if failed |
-
-The `Trace` also has `files_read` and `files_modified` lists, populated when tools are configured with effects metadata.
-
----
-
-## 11. Tools from an MCP server
-
-With `pip install lackpy[mcp]`, an MCP server's tools become lackpy tools. Declare
-the server and the whole surface appears in your toolbox:
-
-```toml
-# .lackpy/config.toml
-[mcp_servers.build]
-transport = "stdio"
-command = "blq"
-args = ["mcp", "serve"]
-cwd = "/path/to/repo"          # set this; a server rooted elsewhere answers about elsewhere
+```text
+0 Path.read_text ['notes.md'] True
 ```
 
-```bash
-lackpy --workspace . -c "return the number of error events from the test run" \
-       --profile none --tools status,events
-```
+| Field | Meaning |
+| --- | --- |
+| `step` | The call order, from 0. |
+| `tool` | `Path.<member>`, for example `Path.read_text`. |
+| `args` | The path as the program wrote it, and the pattern for `glob` and `rglob`. |
+| `result` | The return value. Listings record no result. |
+| `success`, `error` | A refused or failed call has `success=False` and the error text. |
 
-### Curate the tools you expose
-
-There is no "all tools" mode — `--profile` (or `--tools`) is required, and that is
-deliberate. A three-server toolbox can be ~95 tools and ~6,900 prompt tokens; a
-task-sized selection is 1–2 tools and ~200–470. Fewer tools is a smaller prompt,
-which is faster *and* more reliable.
-
-Note the invocation form: a bare `--profile status` is read as a profile *name*,
-not a tool. Use `--profile none --tools status,events`, or a `.profile` file.
-
-### What the generator knows about a discovered tool
-
-Discovery gives each tool its name, its description and its argument schema, plus
-a return annotation derived from the server's `outputSchema`:
-
-```
-  events(limit, run_id, severity, …) -> dict{events, total_count}: Get events with optional severity filter.
-  log(n, branch) -> list[dict]: Condensed commit history.
-```
-
-That `-> dict{events, total_count}` is doing real work. Without it the generator
-sees only the *arguments* and has to guess the return shape — and a wrong guess
-produces a program that validates, runs, and answers incorrectly:
-
-```python
-# what a guess looks like
-events(severity='error')            # -> {'events': [...], 'total_count': 1}
-len(events(severity='error'))       # 2 -- the number of KEYS, not events
-```
-
-Some servers publish a keyless `{"type": "object"}`, which can only become `dict`.
-For those, name the keys in your intent.
-
-### Teaching a tool its idiom
-
-Nothing in an MCP schema says how a tool is *used*. Attach worked examples and
-they join the retrieval pool, so the most relevant are injected at generation
-time:
-
-```toml
-[[mcp_servers.build.tools.events.examples]]
-intent = "how many errors did the last run produce"
-code = "result = events(severity='error')\nlen(result['events'])"
-
-[[mcp_servers.build.tools.events.examples]]
-intent = "which file did the failure come from"
-code = "result = events(severity='error')\nresult['events'][0]['ref_file']"
-```
-
-These are additive — description, arguments and grade are untouched. That is the
-difference from a top-level `[[tools]]` entry of the same name, which would
-replace the tool outright and break the call.
-
-**Measured caveat: this did not beat naming the shape in the intent.** On a
-six-task battery over blq/jetsam/squackit with `Qwen3-Coder-30B-A3B-Instruct`,
-with retrieval verified to be injecting the examples:
-
-| what the prompt carried | correct |
-|---|---|
-| nothing | 2/6 |
-| per-tool examples | 2/6 |
-| the return shape stated in the intent | **5/6** |
-
-So examples are worth attaching when a tool has a genuine idiom to teach, but if
-you need a specific run to work, **say the shape in the intent**. One model, one
-battery, temperature 0.2 — treat 2 vs 5 as real and 1 vs 2 as noise.
+Builtins and module functions, such as `len` or `json.loads`, are not traced.
 
 ---
 
 ## Next steps
 
-- [Concepts: Architecture](concepts/architecture.md) — internals of the pipeline
-- [Concepts: Language Spec](concepts/language-spec.md) — full allowed/forbidden reference
-- [Concepts: Kits & Toolbox](concepts/profiles.md) — provider system in depth
-- [Concepts: Inference Pipeline](concepts/inference.md) — tier system and config
-- [Extending: Custom Rules](extending/custom-rules.md) — write your own validation rules
-- [Extending: Tool Providers](extending/tool-providers.md) — register custom tools
-- [Extending: Inference Providers](extending/inference-providers.md) — add LLM backends
+- [File access](concepts/paths.md): the path policy and its rules.
+- [Style guide](reference/style-guide.md): every rule of the language.
+- [Profiles](concepts/profiles.md): model and mode per task.
+- [Inference Pipeline](concepts/inference.md): tiers and providers.

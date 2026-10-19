@@ -2,41 +2,36 @@
 
 ## Installation
 
-=== "Base (no inference)"
-
-    The core validator, runner, and trace work with no extra dependencies:
+=== "Base"
 
     ```bash
     pip install lackpy
     ```
 
-    With the base install you can validate and run programs, manage kits and templates, and use the full Python API — but inference (delegate and `--generate`) will only work via the built-in `templates` and `rules` tiers. Compositional intents won't generate until you configure a local Ollama model with `lackpyctl init --ollama-model`.
+    The base install validates and runs programs. It includes model inference
+    through woollama's core, a dependency. With no model configured, only the
+    `templates` and `rules` tiers generate programs.
 
 === "With Ollama"
 
-    Local LLM inference using [Ollama](https://ollama.com) works with the base
-    install — model calls route through woollama's core (a dependency), no extra
-    needed:
+    Local inference with [Ollama](https://ollama.com) works with the base
+    install. Pull a model that your Ollama host serves well. The choice is per
+    machine, not a package default:
 
     ```bash
     pip install lackpy
+    ollama pull qwen2.5-coder:7b
     ```
 
-    Then pull whatever model your Ollama host serves best — the choice is per-machine, not a package default:
+=== "Full"
 
-    ```bash
-    ollama pull qwen2.5-coder:1.5b
-    ```
-
-=== "Full (Ollama + Anthropic)"
-
-    For all inference providers:
+    All optional features (sandbox, MCP server, blq, kibitzer):
 
     ```bash
     pip install "lackpy[full]"
     ```
 
-    Set your Anthropic key if using the Anthropic provider:
+    A cloud backend needs its API key in your environment:
 
     ```bash
     export ANTHROPIC_API_KEY=sk-ant-...
@@ -46,43 +41,37 @@
 
 ## Optional dependencies
 
-| Extra | Package | Required for |
-|-------|---------|-------------|
-| `ollama` | `ollama` | Local model inference via Ollama |
-| `anthropic` | `anthropic` | Cloud inference via Anthropic API |
-| `tomli` | `tomli` | TOML config parsing on Python < 3.11 |
-
-Python 3.11+ ships `tomllib` in the standard library; `tomli` is only needed on older versions.
+| Extra | Required for |
+|-------|-------------|
+| `mcp` | The MCP server (`lackpyctl mcp serve`) |
+| `sandbox` | The nsjail sandbox executor (Python 3.12 and later) |
+| `blq`, `fledgling`, `kibitzer` | Integrations with those tools |
+| `full` | All of the above |
 
 ---
 
 ## Initialize a workspace
 
-lackpy stores configuration, kits, and templates under `.lackpy/` in your workspace directory. Create this structure with `lackpyctl`:
+The workspace is the directory a run starts in. lackpy keeps its configuration
+and templates under `.lackpy/` there:
 
 ```bash
 cd my-project
-lackpyctl init
+lackpyctl init --ollama-model qwen2.5-coder:7b
 ```
 
-This creates:
+This makes:
 
 ```
 .lackpy/
-  config.toml       # inference order, kit defaults, sandbox settings
-  kits/             # .kit files defining tool subsets
-  templates/        # .tmpl files for the ratchet pattern
-```
-
-The inference order wires in a local Ollama provider so compositional intents work once a model is served. The model choice is **per-machine** — configure it at init time:
-
-```bash
-lackpyctl init --ollama-model codellama:7b
+  config.toml       # inference order, providers, profiles, [paths] rules
+  templates/        # saved programs: Lackey files and .tmpl templates
+  kits/             # not used: tool kits were removed
 ```
 
 ### Config file
 
-The generated `.lackpy/config.toml` looks like:
+The generated `.lackpy/config.toml` looks like this:
 
 ```toml
 [inference]
@@ -90,100 +79,98 @@ order = ["templates", "rules", "local"]
 
 [inference.providers.local]
 plugin = "woollama"
-model = "ollama/qwen2.5-coder:1.5b"
+model = "ollama/qwen2.5-coder:7b"
 base_url = "http://localhost:11434/v1"
-
-[kit]
-default = "debug"
-
-[sandbox]
-enabled = false
-timeout_seconds = 120
-memory_mb = 512
 ```
 
-See [Concepts: Inference Pipeline](concepts/inference.md) for all config options.
+Add a `[paths]` table to change which files a program can read and write. See
+[File access](concepts/paths.md). With no rules, a program can read and write
+inside the workspace only.
+
+See [Concepts: Inference Pipeline](concepts/inference.md) for the inference options.
 
 ---
 
-## First use — CLI
+## First use: CLI
 
-Check what tools are available:
+Write a program, and save it as `count.py`:
 
-```bash
-lackpyctl toolbox list
+```python
+from pathlib import Path
+
+params = {"name": "README.md"}
+text = Path(params["name"]).read_text()
+print(len(text.splitlines()))
 ```
 
-Generate and run a program (delegate is the default `lackpy -c` mode):
+Run it. A program file is the first argument of `lackpy`:
 
 ```bash
-lackpy -c "read the file README.md" --profile read_file
+lackpy count.py
+lackpy count.py --param name=pyproject.toml
 ```
 
-The output is JSON with the generated program, trace, and result:
+The result is JSON. `stdout` holds what the program printed:
 
 ```json
 {
   "success": true,
-  "program": "content = read_file('README.md')\ncontent",
-  "grade": {"w": 1, "d": 1},
-  "generation_tier": "rules",
-  "generation_time_ms": 0.4,
-  "execution_time_ms": 1.2,
-  "total_time_ms": 1.6,
-  "trace": [
-    {"step": 0, "tool": "read_file", "args": {"path": "README.md"}, "result": "...", "duration_ms": 1.1, "success": true, "error": null}
-  ],
-  "output": "# My Project\n...",
-  "stdout": "",
+  "output": "42",
+  "stdout": "42\n",
   "error": null
 }
 ```
 
-!!! note "Printed output is captured"
-    When a generated program `print()`s its answer instead of leaving a bare final expression, the printed text is captured in `stdout` and surfaced as `output` (so `print(...)` no longer yields `output: null`).
+Generate and run a program from an intent:
 
-!!! tip "Check inference tier"
-    The `generation_tier` field tells you which provider handled the request: `templates` (tier 0), `rules` (tier 1), `ollama` (tier 2), or `anthropic` (tier 3).
+```bash
+lackpy -c "read the file README.md"
+```
+
+!!! tip "Which tier answered"
+    The `generation_tier` field names the tier that wrote the program:
+    `templates`, `rules`, or the name of a model provider.
 
 ---
 
-## First use — Python API
+## First use: Python API
 
-```python
+```python title="Python API: validate and delegate"
 import asyncio
 from lackpy.service import LackpyService
+
+PROGRAM = 'from pathlib import Path\n\nprint(Path("pyproject.toml").read_text())\n'
 
 async def main():
     svc = LackpyService()
 
-    # Validate a program manually
-    result = svc.validate(
-        'content = read_file("pyproject.toml")\ncontent',
-        profile=["read_file"],
-    )
-    print(result.valid)   # True
-    print(result.errors)  # []
+    result = svc.validate(PROGRAM)
+    print(result.valid, result.errors)
 
-    # Generate and run
-    result = await svc.delegate(
-        intent="read the file pyproject.toml",
-        profile=["read_file"],
-    )
-    print(result["output"])
+    result = await svc.run_program(PROGRAM)
+    print(result.stdout)
+
+    result = await svc.delegate("read the file pyproject.toml")
+    print(result["stdout"])
 
 asyncio.run(main())
 ```
 
 !!! note "Async API"
-    `delegate`, `generate`, and `run_program` are all `async` — they must be awaited inside an async context or wrapped with `asyncio.run()`.
+    `delegate`, `generate` and `run_program` are `async`. Await them in an async
+    function, or wrap them with `asyncio.run()`.
+
+!!! note "No tool kits"
+    lackpy no longer has tool kits. A program uses `pathlib.Path` for file
+    access. A profile or a `--profile` value that names tools fails with
+    `tool kits were removed in lackpy stepy100; use pathlib.Path (docs/concepts/paths.md)`.
 
 ---
 
 ## Next steps
 
-- [Tutorial](tutorial.md) — hands-on walkthrough of every feature
-- [Concepts: Architecture](concepts/architecture.md) — understand the pipeline
-- [Concepts: Language Spec](concepts/language-spec.md) — what Python constructs are allowed
-- [Concepts: Kits & Toolbox](concepts/profiles.md) — tool organization
-- [CLI Reference](reference/cli.md) — complete CLI documentation
+- [Tutorial](tutorial.md): the three worked examples, step by step
+- [File access](concepts/paths.md): the path policy
+- [Style guide](reference/style-guide.md): every rule of the language
+- [Profiles](concepts/profiles.md): model and mode per task
+- [CLI Reference](reference/cli.md)

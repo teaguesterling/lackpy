@@ -1,5 +1,5 @@
 site_name: lackpy
-site_description: Python that lacks most of Python. Restricted program generation and execution for tool composition.
+site_description: Python that lacks most of Python. lackpy runs plain Python that a validator has checked.
 site_url: https://lackpy.readthedocs.io
 
 repo_url: https://github.com/teague/lackpy
@@ -47,7 +47,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [src]
+          paths: [src, packages/lackpy-lang/src]
           options:
             show_source: false
             show_root_heading: true
@@ -65,7 +65,8 @@ nav:
   - Concepts:
     - Architecture: concepts/architecture.md
     - Language Spec: concepts/language-spec.md
-    - Profiles & Toolbox: concepts/profiles.md
+    - File Access: concepts/paths.md
+    - Profiles: concepts/profiles.md
     - Inference Pipeline: concepts/inference.md
     - Interpreter Plugins: concepts/interpreters.md
     - Policy Layer: concepts/policy-layer.md
@@ -84,6 +85,11 @@ nav:
     - Python API: reference/api.md
     - CLI: reference/cli.md
     - Style Guide: reference/style-guide.md
+    - Former tools:
+      - read_file: tools/read_file.md
+      - write_file: tools/write_file.md
+      - find_files: tools/find_files.md
+      - edit_file: tools/edit_file.md
 
 extra_css:
   - css/extra.css
