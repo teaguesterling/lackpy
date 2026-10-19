@@ -346,3 +346,13 @@ def test_quoted_program_text_is_not_renumbered(session):
     out = session.run_cell('p["line 9"].y = 2')
     assert not out.ok and out.phase == "validate"
     assert "'p['line 9'].y' at line 1" in out.error
+
+
+def test_rerun_of_a_cell_that_failed_at_runtime_runs_it_again(session):
+    # Forgiveness: a cell that failed on missing data is re-run once a later cell fixes it.
+    _ok(session.run_cell("d = {}"))
+    failed = session.run_cell("v = d['k']")
+    assert failed.phase == "runtime"
+    _ok(session.run_cell("d = {'k': 1}"))
+    again = _ok(session.rerun_cell(failed.cell_id))
+    assert again.delta == {"v": 1}

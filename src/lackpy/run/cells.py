@@ -72,7 +72,6 @@ class ExprOutcome:
 @dataclass
 class _Cell:
     code: CodeType | None  # None: the cell failed validation and is not in the program
-    rerunnable: bool = False  # its first run was ok
 
 
 # A validator line reference is ``line N`` outside quoted program text. Rules quote
@@ -119,17 +118,21 @@ class CellSession:
             return self._failure(cell_id, e)
 
     def rerun_cell(self, cell_id: int) -> CellOutcome:
-        """Exec the stored code of a cell whose first run was ok, again.
+        """Exec the stored code of a cell in the program, again.
 
-        The code is not validated again and not added to the program again: the
-        program text does not change. An unknown cell, or one whose first run
-        failed, gives a failed outcome with ``phase="validate"`` (nothing ran).
+        A cell is in the program when it passed validation: its first run was ok
+        or failed at runtime (the forgiveness case: re-run once a dependency
+        changes). The code is not validated again and not added to the program
+        again: the program text does not change. An unknown cell, or one that
+        failed validation, gives a failed outcome with ``phase="validate"``
+        (nothing ran). After a refusal the session is closed, so a refused cell
+        gives ``phase="refused"``.
         """
         if self._refusal is not None:
             return self._closed(cell_id)
         cell = self._cells.get(cell_id)
-        if cell is None or not cell.rerunnable or cell.code is None:
-            reason = "is not a cell of this session" if cell is None else "did not run ok the first time"
+        if cell is None or cell.code is None:
+            reason = "is not a cell of this session" if cell is None else "failed validation"
             return CellOutcome(ok=False, phase="validate", cell_id=cell_id,
                                error=f"cell {cell_id} cannot be re-run: it {reason}")
         self._captured.clear()
@@ -175,9 +178,7 @@ class CellSession:
         code = compile(tree, "<lackpy>", "exec")
         self._cells[cell_id].code = code
         self._join(cell_id, source)
-        outcome = self._exec(cell_id, code)
-        self._cells[cell_id].rerunnable = outcome.ok
-        return outcome
+        return self._exec(cell_id, code)
 
     def _exec(self, cell_id: int, code: CodeType) -> CellOutcome:
         # References, not ids: an id can be reused once its object is freed.
