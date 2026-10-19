@@ -403,3 +403,49 @@ class TestReexecutionThroughTheSession:
         assert [e.detail["cell_index"] for e in refused] == [1]
         assert "/etc/hostname" in result.error
         assert result.metadata["variables"]["t"] == "ok"  # never reified
+
+
+class TestNonDataBindingsAreTrackedByName:
+    """Review I2: a binding to a non-data value (a def, a Path) supersedes and
+    dirties by name; a hole it fills heals."""
+
+    @pytest.mark.asyncio
+    async def test_a_hole_filled_by_a_def_heals(self, context):
+        session = LiterateSession(context)
+        await session.step(
+            "```lackpy\ny = f(1)\n```\n\n```lackpy\ndef f(n):\n    return n * 2\n```\n\n"
+            "Y is {y}\n")
+        ns = session._kernel.get_namespace()
+        assert ns["y"] == 2
+        assert not isinstance(session.versions.current("f").value, Hole)
+        assert session.ledger.query(entry_type="superseded", name="f")
+        later = await session.step("Later y={y}\n")
+        assert later.ok and "Later y=2" in later.clean_doc
+
+    @pytest.mark.asyncio
+    async def test_a_hole_filled_by_a_path_heals(self, tmp_path, tmp_home):
+        context = ExecutionContext(base_dir=tmp_path, config={
+            "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)})
+        result = await _run(
+            context,
+            "```lackpy\nn = p.name\n```\n\n"
+            "```lackpy\nfrom pathlib import Path\np = Path('a.txt')\n```\n")
+        assert result.metadata["variables"]["n"] == "a.txt"
+        versions = result.metadata["versions"]
+        assert not isinstance(versions.current("p").value, Hole)
+        assert [e.detail["cell_index"] for e in _dirty(result.metadata["ledger"])] == [0]
+
+    @pytest.mark.asyncio
+    async def test_data_then_a_def_supersedes_and_dirties(self, context):
+        result = await _run(
+            context,
+            "```lackpy\nf = 3\n```\n\n```lackpy\ny = f + 1\n```\n\n"
+            "```lackpy\ndef f(n):\n    return n\n```\n")
+        ledger = result.metadata["ledger"]
+        sup = ledger.query(entry_type="superseded", name="f")
+        assert sup and sup[-1].detail["cell_index"] == 2
+        dirty = _dirty(ledger)
+        assert [e.detail["cell_index"] for e in dirty] == [1]
+        assert dirty[0].detail["reexecuted"] is True
+        # The re-run sees the function: f + 1 raises, so y is no longer the stale 4.
+        assert result.metadata["variables"]["y"] != 4

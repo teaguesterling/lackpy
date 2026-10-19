@@ -213,3 +213,85 @@ class TestReifiedValues:
         kernel.bind("x", Hole("x"))
         kernel.execute_cell(Cell(cell_type="code", content="x = 5"), 0)
         assert kernel.lookup("x") == 5
+
+
+class TestTheLatchAtEveryEntryPoint:
+    """Review I1: after a refusal every cell type and inspect refuse, also the
+    ones that never call the session (prose text, @continue)."""
+
+    @pytest.fixture
+    def refused(self, kernel):
+        result = kernel.execute_cell(Cell(cell_type="code", content="from pathlib import Path"), 0)
+        assert result.error_phase == "refused"
+        return kernel
+
+    @pytest.mark.parametrize("cell", [
+        Cell(cell_type="prose", content="Plain text"),
+        Cell(cell_type="prose", content="   "),
+        Cell(cell_type="continue", content=""),
+        Cell(cell_type="scratch", content=""),
+        Cell(cell_type="code", content="   "),
+        Cell(cell_type="code", content="x = 1"),
+        Cell(cell_type="code", content="x = "),  # a static failure too
+    ])
+    def test_every_cell_refuses_after_a_refusal(self, refused, cell):
+        result = refused.execute_cell(cell, 1)
+        assert not result.success and result.error_phase == "refused"
+        assert "earlier refusal" in result.error and "pathlib" in result.error
+
+    def test_rerun_refuses_after_a_refusal(self, refused):
+        result = refused.rerun_cell(Cell(cell_type="prose", content="T"), 1, None)
+        assert result.error_phase == "refused"
+
+    def test_inspect_reports_the_latch(self, refused):
+        assert "earlier refusal" in refused.inspect("1 + 1")
+        assert refused.refusal is not None
+
+    def test_a_refusing_inspect_latches(self, tmp_policy):
+        kernel = make_kernel(tmp_policy)
+        kernel.execute_cell(Cell(cell_type="code", content="from pathlib import Path"), 0)
+        assert kernel.refusal is None
+        assert "/etc/hostname" in kernel.inspect("Path('/etc/hostname').read_text()")
+        assert kernel.refusal is not None
+
+
+class TestNamesNotValues:
+    """Review I2: a non-data binding is tracked by name, with an opaque marker."""
+
+    def test_a_def_appears_in_the_delta_as_an_opaque_marker(self, kernel):
+        from lackpy.interpreters.literate.kernel.versions import Opaque
+
+        result = kernel.execute_cell(Cell(cell_type="code", content="def f(n):\n    return n"), 0)
+        assert result.success
+        assert isinstance(result.namespace_delta["f"], Opaque)
+        assert result.namespace_delta["f"].type_name == "function"
+        assert kernel.lookup("f") is result.namespace_delta["f"]
+        assert "f" not in kernel.get_namespace()  # variables stay data only
+
+    def test_a_rebind_gives_a_new_marker(self, kernel):
+        assert kernel.execute_cell(Cell(cell_type="code", content="xs = zip([1], [2])"), 0).success
+        first = kernel.lookup("xs")
+        assert first is not None
+        kernel.execute_cell(Cell(cell_type="code", content="ys = 1"), 1)
+        assert kernel.lookup("xs") is first
+        kernel.execute_cell(Cell(cell_type="code", content="xs = zip([3], [4])"), 2)
+        assert kernel.lookup("xs") is not first
+
+    def test_scratch_names_the_type_of_a_non_data_value(self, kernel):
+        result = kernel.execute_cell(
+            Cell(cell_type="scratch", content="def f():\n    return 1\na = 1"), 0)
+        assert result.output == "[scratch: a=int, f=function]\n"
+
+
+class TestProseOutputAndRepr:
+    def test_prose_keeps_what_an_expression_printed(self, kernel):
+        # Review M2: as python3's print(f"...") would: the side output first.
+        result = kernel.execute_cell(Cell(cell_type="prose", content="A {print('side')} B"), 0)
+        assert result.output == "side\nA None B\n"
+
+    def test_prose_repr_of_a_function_has_no_address(self, kernel):
+        # Review M7.
+        kernel.execute_cell(Cell(cell_type="code", content="import json"), 0)
+        result = kernel.execute_cell(Cell(cell_type="prose", content="{json.dumps}"), 1)
+        assert result.success and "0x" not in result.output
+        assert result.output == "<function dumps>\n"

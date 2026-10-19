@@ -303,12 +303,15 @@ _PROBES: tuple[tuple[str, str, _ProbeFn], ...] = (
 def run_selftest(kernel: LightweightKernel, interpreter: Any) -> SelfTestReport:
     """Run the probe battery BEFORE ``kernel`` accepts work.
 
-    The probes run on a throwaway kernel over a fresh ``CellSession`` (see
-    the module text). Returns the report; on any failure ``kernel`` is
+    The probes run on a throwaway kernel over a fresh ``CellSession`` with
+    ``kernel``'s path policy (see the module text). What they prove: the
+    shared runtime evaluates, reifies and round-trips under that policy. What
+    they do not prove: anything about ``kernel``'s own session state, which
+    the probes never touch (review M6). Returns the report; on any failure ``kernel`` is
     DISABLED (fail-closed) so even a caller that ignores the report cannot
     execute through it.  Never raises: a probe that raises is a failed probe.
     """
-    probe_kernel = LightweightKernel(CellSession(path_policy=None))
+    probe_kernel = LightweightKernel(CellSession(path_policy=kernel.session.path_policy))
     results: list[ProbeResult] = []
     for name, semantic_class, fn in _PROBES:
         ledger = Ledger(session_id="selftest")

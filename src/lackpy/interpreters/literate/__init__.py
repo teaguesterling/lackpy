@@ -50,7 +50,6 @@ from .kernel.forgiveness import (
     Hole,
     Unavailable,
     describe_failure,
-    is_forgiving,
     reified_failures,
 )
 from .kernel.formats import render_markdown_from_cells
@@ -284,7 +283,7 @@ class LiterateInterpreter:
             # SKIPPED — never executed, so the refused effect never happens.
             # Gate-first: the refusal is about the cell's required effects,
             # independent of whether its names would resolve.
-            if index in gate_violations:
+            if index in gate_violations and kernel.refusal is None:
                 output_parts.append(
                     _reify_unavailable_for_cell(
                         cell, index, gate_violations[index], kernel, ledger,
@@ -324,7 +323,7 @@ class LiterateInterpreter:
 
         elapsed = (time.perf_counter() - start) * 1000
 
-        raw_ns = kernel.get_namespace()
+        raw_ns = kernel.get_namespace(assigned_names)
         variables = {
             k: v for k, v in raw_ns.items()
             if k in assigned_names
@@ -414,12 +413,15 @@ class LiterateInterpreter:
         """
         # Forgiveness pre-pass (L1.1): a cell whose names cannot resolve binds
         # typed holes, is ledgered, and is SKIPPED (never executed, so a hole
-        # can't flow into arithmetic).
-        reified = _reify_holes_for_cell(
-            cell, index, kernel, ledger, versions, assigned_names
-        )
-        if reified is not None:
-            return _CellOutcome(rendered=reified, continue_requested=False)
+        # can't flow into arithmetic). Not after a refusal (review I1): a
+        # closed session refuses every cell, so the kernel's refused result
+        # below is the outcome, never a hole.
+        if kernel.refusal is None:
+            reified = _reify_holes_for_cell(
+                cell, index, kernel, ledger, versions, assigned_names
+            )
+            if reified is not None:
+                return _CellOutcome(rendered=reified, continue_requested=False)
 
         known_before = kernel.known_names()
         # Observe the execution we are doing anyway: the audit hook records
@@ -942,7 +944,7 @@ def _reify_holes_for_cell(
     blocked = {
         n
         for n in (referenced - defined) & known
-        if is_forgiving(kernel.lookup(n))
+        if kernel.is_reified(n)
     }
     if not undefined and not blocked:
         return None

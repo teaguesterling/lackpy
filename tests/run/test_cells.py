@@ -425,13 +425,71 @@ def test_a_refusal_raised_by_rerun_cell_latches_the_session(session, workspace):
 
 # -- Task 2 additions: what the literate kernel reads back ----------------------
 
-def test_snapshot_gives_the_bound_data_values_only(session):
+def test_data_gives_the_data_values_of_the_names_asked_for(session):
     _ok(session.run_cell("import json\nrows = [1, 2]\nname = 'a'\ndef f():\n    return 1"))
-    snap = session.snapshot()
-    assert snap == {"rows": [1, 2], "name": "a"}
+    assert session.data(["rows", "f", "json", "missing"]) == {"rows": [1, 2]}
     # The values are the namespace's own objects: an in-place change shows (M5).
     _ok(session.run_cell("rows.append(3)"))
-    assert session.snapshot()["rows"] == [1, 2, 3]
+    assert session.data(["rows"])["rows"] == [1, 2, 3]
+
+
+def test_data_walks_only_the_names_asked_for(session, monkeypatch):
+    # Review M3: the host-side data walk is not run over the whole namespace.
+    from lackpy.run import cells
+    _ok(session.run_cell("big = list(range(1000))\nsmall = 1"))
+    seen = []
+    real = cells._is_data
+    monkeypatch.setattr(cells, "_is_data", lambda v: seen.append(v) or real(v))
+    session.data(["small"])
+    assert seen == [1]
+
+
+def test_rebound_names_every_name_a_cell_bound_with_its_type(session):
+    out = _ok(session.run_cell("x = 1\ndef f():\n    return 1"))
+    assert out.rebound == {"x": "int", "f": "function"}
+    assert _ok(session.run_cell("x.bit_length()")).rebound == {}
+    assert _ok(session.run_cell("f = 3")).rebound == {"f": "int"}
+
+
+def test_rebound_is_by_identity_not_by_value(session):
+    _ok(session.run_cell("rows = [1]"))
+    assert _ok(session.run_cell("rows.append(2)")).rebound == {}  # in place: not a rebind
+    assert _ok(session.run_cell("rows = rows")).rebound == {}
+    assert _ok(session.run_cell("rows = [1, 2]")).rebound == {"rows": "list"}
+
+
+def test_rebound_covers_the_bindings_before_a_runtime_failure(session):
+    out = session.run_cell("a = 1\nb = 1 // 0")
+    assert out.phase == "runtime" and out.rebound == {"a": "int"}
+
+
+def test_refusal_and_closed_report_the_latch(session):
+    assert session.refusal is None and not session.closed
+    _ok(session.run_cell("from pathlib import Path"))
+    out = session.run_cell("t = Path('/etc/hostname').read_text()")
+    assert out.phase == "refused"
+    assert session.closed and "/etc/hostname" in session.refusal
+
+
+def test_path_policy_is_the_session_policy(workspace, tmp_home):
+    policy = load_policy(workspace, home=tmp_home, managed=None)
+    assert CellSession(path_policy=policy).path_policy is policy
+    assert CellSession(path_policy=None).path_policy is None
+
+
+def test_eval_expr_keeps_what_the_expression_printed(session):
+    # Review M2: as an f-string would, the printed text is not lost.
+    out = session.eval_expr("print('side', 1)")
+    assert out.ok and out.value is None and out.stdout == "side 1\n"
+    _ok(session.run_cell("x = 1"))
+    assert session.eval_expr("x").stdout == ""
+
+
+def test_eval_expr_repr_text_has_no_host_address(session):
+    # Review M7: renders are deterministic.
+    _ok(session.run_cell("import json\ndef f():\n    return 1"))
+    assert session.eval_expr("f").value == "<function f>"
+    assert "0x" not in session.eval_expr("json.dumps").value
 
 
 def test_a_runtime_error_names_its_exception_type(session):

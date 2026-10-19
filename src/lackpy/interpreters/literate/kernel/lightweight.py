@@ -34,6 +34,7 @@ Called by: StreamingDriver, LiterateInterpreter.execute()
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterable
 from typing import Any
 
 from lackpy.run.cells import CellOutcome, CellSession
@@ -44,6 +45,7 @@ from ..parser import Cell
 from .forgiveness import is_forgiving
 from .interface import CellResult
 from .static_analysis import StaticAnalysisError, check_cell, collect_bindings
+from .versions import Opaque
 
 class LightweightKernel:
     def __init__(self, session: CellSession, *,
@@ -53,6 +55,9 @@ class LightweightKernel:
         # Reified forgiveness values, by name (see the module text). Never
         # passed to the session.
         self._reified: dict[str, Any] = {}
+        # The current Opaque marker of each name bound to a value that is not
+        # data (review I2). A rebind gets a new marker.
+        self._markers: dict[str, Opaque] = {}
         # The session cell ids that are in the program (validated), so a
         # re-run can use ``rerun_cell``.
         self._in_program: set[int] = set()
@@ -78,6 +83,11 @@ class LightweightKernel:
         """The disable reason, or ``None`` while the kernel accepts work."""
         return self._disabled
 
+    @property
+    def refusal(self) -> str | None:
+        """The refusal that closed the session (D4), or ``None``."""
+        return self._session.refusal
+
     # -- running cells ---------------------------------------------------------
 
     def execute_cell(self, cell: Cell, cell_index: int) -> CellResult:
@@ -99,6 +109,11 @@ class LightweightKernel:
     def _execute(self, cell: Cell, cell_index: int, rerun_id: int | None) -> CellResult:
         if self._disabled is not None:
             return _failed(cell_index, f"kernel disabled: {self._disabled}", "disabled")
+        closed = self._session.closed_text()
+        if closed is not None:
+            # Review I1: the latch holds at every entry point, also for a cell
+            # that would never call the session (prose text, @continue).
+            return _failed(cell_index, closed, "refused")
         compiler = _COMPILERS.get(cell.cell_type)
         if compiler is None:
             return _failed(cell_index, f"Unknown cell type: {cell.cell_type}", "static")
@@ -127,7 +142,6 @@ class LightweightKernel:
     def _run_program_cell(self, cell: Cell, cell_index: int, source: str,
                           rerun_id: int | None) -> CellResult:
         names_before = self._session.bound_names()
-        before = self._session.snapshot()
         if not source.strip():
             outcome = CellOutcome(ok=True)  # an empty @scratch body: nothing to run
         elif rerun_id is not None:
@@ -137,19 +151,26 @@ class LightweightKernel:
         if outcome.cell_id is not None and outcome.phase in (None, "runtime"):
             self._in_program.add(outcome.cell_id)
 
-        after = self._session.snapshot()
-        # Names this run (re)bound, as far as the host can see: data values by
-        # identity (a rebind to a non-data value, or to the identical object,
-        # does not show), and new names of any kind.
-        delta = {k: v for k, v in after.items() if k not in before or before[k] is not v}
-        new_names = self._session.bound_names() - names_before
+        # The names this run bound or rebound (review I2): the session reports
+        # them by identity, with their type names. A data value goes in the
+        # delta as it is; any other value as a fresh Opaque marker, so a def or
+        # a Path supersedes, dirties and fills a hole like data does.
+        data = self._session.data(outcome.rebound)
+        delta: dict[str, Any] = {}
+        for name, type_name in outcome.rebound.items():
+            if name in data:
+                self._markers.pop(name, None)
+                delta[name] = data[name]
+            else:
+                marker = Opaque(type_name)
+                self._markers[name] = marker
+                delta[name] = marker
+            self._reified.pop(name, None)
         if outcome.ok:
-            # A cell that ran binds its module-level names again: an earlier
-            # reified value for any of them is replaced.
-            for name in _static_bindings(source) | set(delta) | new_names:
-                self._reified.pop(name, None)
-        else:
-            for name in set(delta) | new_names:
+            # A cell that ran binds its module-level names again (also to the
+            # identical object, which identity cannot see): an earlier reified
+            # value for any of them is replaced.
+            for name in _static_bindings(source):
                 self._reified.pop(name, None)
 
         if not outcome.ok:
@@ -160,25 +181,31 @@ class LightweightKernel:
 
         output = outcome.stdout
         if cell.cell_type == "scratch":
-            parts = [f"{n}={_type_name(after.get(n, _NOT_DATA))}" for n in sorted(new_names)]
+            new = sorted(n for n in outcome.rebound if n not in names_before)
+            parts = [f"{n}={outcome.rebound[n]}" for n in new]
             output += f"[scratch: {', '.join(parts)}]\n"
         return CellResult(success=True, output=output, error=None, error_phase=None,
                           namespace_delta=delta, cell_index=cell_index,
                           cell_id=outcome.cell_id)
 
     def _render_prose(self, cell: Cell, cell_index: int) -> CellResult:
+        # As python3's print(f"...") does: what an expression prints comes out
+        # while the line is built, so before the line itself (review M2).
+        printed: list[str] = []
         parts: list[str] = []
         for seg in prose_segments(cell):
             if seg.expr is None:
                 parts.append(seg.text or "")
                 continue
             out = self._session.eval_expr(seg.expr)
+            printed.append(out.stdout)
             if not out.ok:
                 return _failed(cell_index, out.error or "evaluation failed",
-                               out.phase or "runtime", output="".join(parts) or None)
+                               out.phase or "runtime", output="".join(printed) or None)
             parts.append(self._display(out.value) if seg.display else str(out.value))
-        return CellResult(success=True, output="".join(parts) + "\n", error=None,
-                          error_phase=None, namespace_delta={}, cell_index=cell_index)
+        return CellResult(success=True, output="".join(printed) + "".join(parts) + "\n",
+                          error=None, error_phase=None, namespace_delta={},
+                          cell_index=cell_index)
 
     # -- the host's view of the names --------------------------------------------
 
@@ -191,13 +218,18 @@ class LightweightKernel:
         return self._session.bound_names() | set(self._reified)
 
     def lookup(self, name: str, default: Any = None) -> Any:
-        """The value bound to ``name``: a reified value, or a data value.
-
-        A name bound to a value that is not data (a function, a module) gives
-        ``default``: the host never holds a live object."""
+        """The value bound to ``name``: a reified value, a data value, or the
+        name's :class:`Opaque` marker when its value is not data (the host
+        never holds a live object)."""
         if name in self._reified:
             return self._reified[name]
-        return self._session.snapshot().get(name, default)
+        if name in self._markers:
+            return self._markers[name]
+        return self._session.data([name]).get(name, default)
+
+    def is_reified(self, name: str) -> bool:
+        """Whether ``name`` holds a reified forgiveness value (no data walk)."""
+        return name in self._reified
 
     def bind(self, name: str, value: Any) -> None:
         """Bind a reified forgiveness value (``Hole``, ``ErrorValue``, ``Unavailable``).
@@ -214,6 +246,9 @@ class LightweightKernel:
         """Evaluate ``expr`` in the session (``eval_expr``) and return its repr, or the error."""
         if self._disabled is not None:
             return f"kernel disabled: {self._disabled}"
+        closed = self._session.closed_text()
+        if closed is not None:
+            return closed
         out = self._session.eval_expr(expr)
         if not out.ok:
             return out.error or "evaluation failed"
@@ -221,32 +256,32 @@ class LightweightKernel:
 
     def get_scope(self) -> dict[str, str]:
         scope: dict[str, str] = {}
-        data = self._session.snapshot()
-        for k in sorted(self._session.bound_names() | set(self._reified)):
+        names = self._session.bound_names() | set(self._reified)
+        data = self._session.data(names)
+        for k in sorted(names):
             if k.startswith("_"):
                 continue
             if k in self._reified:
                 v = self._reified[k]
             elif k in data:
                 v = data[k]
+            elif k in self._markers:
+                scope[k] = f"{self._markers[k].type_name}: (not data)"
+                continue
             else:
                 scope[k] = "object: (not data)"
                 continue
             scope[k] = f"{type(v).__name__}: {repr(v)[:80]}"
         return scope
 
-    def get_namespace(self) -> dict[str, Any]:
-        """The data values and reified values by name (no live objects)."""
-        ns = {k: v for k, v in self._session.snapshot().items() if not k.startswith("_")}
-        ns.update(self._reified)
+    def get_namespace(self, names: Iterable[str] | None = None) -> dict[str, Any]:
+        """The data values and reified values by name (no live objects).
+
+        ``names`` limits the result (and the data walk, review M3) to those names."""
+        wanted = self._session.bound_names() if names is None else set(names)
+        ns = {k: v for k, v in self._session.data(wanted).items() if not k.startswith("_")}
+        ns.update({k: v for k, v in self._reified.items() if names is None or k in wanted})
         return ns
-
-
-_NOT_DATA = object()
-
-
-def _type_name(value: Any) -> str:
-    return "object" if value is _NOT_DATA else type(value).__name__
 
 
 def _static_bindings(source: str) -> set[str]:

@@ -247,6 +247,21 @@ class StreamingDriver:
                 # as its error text, never as a host eval.
                 while action.kind == "inspect":
                     inspect_result = self._kernel.inspect(action.expr or "None")
+                    refusal = getattr(self._kernel, "refusal", None)
+                    if refusal is not None:
+                        # Review I1: a refused inspect ends the document (D4);
+                        # recovery is not consulted again.
+                        self._notify_recovery_result(cell, False, attempt)
+                        return CellExecutionEvent(
+                            cell=cell, cell_index=index,
+                            result=CellResult(
+                                success=False, output=None, error=inspect_result,
+                                error_phase=REFUSED, namespace_delta={},
+                                cell_index=index,
+                            ),
+                            status=REFUSED, recovery_attempts=attempt,
+                            generation=self._generation,
+                        )
                     action = self._recovery.on_inspect_result(ctx, inspect_result)
                 if action.kind != "fix":
                     attempt += 1

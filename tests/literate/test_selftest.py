@@ -103,6 +103,25 @@ class TestProbesRunThroughACellSession:
         assert kernel.get_namespace() == {}
 
 
+class TestProbesUseTheRealPolicy:
+    def test_the_probe_session_has_the_kernels_policy(self, tmp_policy, monkeypatch):
+        """Review M6: the probes run with the policy of the session about to
+        accept work, so a fault in that configuration is probed too."""
+        from lackpy.interpreters.literate import selftest
+
+        made = []
+        real = selftest.CellSession
+
+        def spy(*args, **kwargs):
+            made.append(kwargs.get("path_policy"))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(selftest, "CellSession", spy)
+        kernel = make_kernel(tmp_policy)
+        assert run_selftest(kernel, LiterateInterpreter()).ok
+        assert made == [tmp_policy]
+
+
 class TestInducedBreakageRefusesNotGarbage:
     @pytest.mark.asyncio
     async def test_induced_breakage_refuses_not_garbage(self, context, monkeypatch):

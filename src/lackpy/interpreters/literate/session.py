@@ -436,6 +436,16 @@ class LiterateSession:
                 ok=False, raw=raw, errors=self._selftest.refusal_lines()
             )
 
+        # D4 / review I1: a refusal closed this session's CellSession. Every
+        # later round is a refused Left, whatever it holds (prose only, a
+        # hole, a bare pause marker): nothing runs and nothing is reified.
+        refusal = self._kernel.refusal
+        if refusal is not None:
+            return StepResult(
+                ok=False, raw=raw,
+                errors=[f"refused: {self._kernel.session.closed_text()}"],
+            )
+
         # L4 budget consumption: every fold of a writer emission — including
         # ones that end in a Left or a marker-only pause — consumed one model
         # call in the client loop, so it consumes one budget unit here.

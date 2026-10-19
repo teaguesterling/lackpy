@@ -232,3 +232,37 @@ class TestRefusalStopsTheStream:
         assert FixHandler.calls == 0
         assert all(e.status == "pending" for e in events[1:])
         assert driver.ledger.query(entry_type="refused")
+
+
+class TestARefusedInspectEndsTheStream:
+    """Review I1: a refusal raised by recovery's inspect ends the stream with
+    REFUSED; recovery is not consulted again."""
+
+    @pytest.mark.asyncio
+    async def test_a_refused_inspect_ends_the_stream(self, tmp_policy):
+        from ..conftest import make_kernel as _mk
+
+        calls = []
+
+        class InspectHandler:
+            max_attempts = 3
+
+            def on_cell_error(self, ctx):
+                calls.append("error")
+                return RecoveryAction(kind="inspect", expr="Path('/etc/hostname').read_text()")
+
+            def on_inspect_result(self, ctx, result):
+                calls.append("inspect")
+                return RecoveryAction(kind="skip")
+
+        driver = StreamingDriver(kernel=_mk(tmp_policy), recovery=InspectHandler())
+        text = ("```lackpy\nfrom pathlib import Path\n```\n\n"
+                "```lackpy\ny = undefined_name\n```\n\n```lackpy\nz = 1\n```\n")
+        events = await driver.feed(text) + await driver.flush()
+        statuses = [e.status for e in events]
+        assert statuses[0] == "executed"
+        assert statuses[1] == "refused"
+        assert "/etc/hostname" in events[1].result.error
+        assert events[1].result.error_phase == "refused"
+        assert calls == ["error"]  # on_inspect_result never saw the refusal
+        assert all(s == "pending" for s in statuses[2:])

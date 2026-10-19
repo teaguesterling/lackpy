@@ -324,3 +324,22 @@ class TestRefusalEndsTheSession:
         assert again.ok is False
         assert "earlier refusal" in again.errors[0]
         assert session.ledger.query(entry_type="error_reified") == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("later", [
+        "Just a wrap-up paragraph.",                      # prose only: never asks the session
+        "```lackpy\ny = never_bound + 1\n```",            # a hole round: the pre-pass runs first
+        "```lackpy @continue\n```",
+        "@continue",                                      # the bare pause marker
+    ])
+    async def test_every_round_after_a_refusal_is_a_refused_left(self, context, later):
+        """Review I1: the latch holds for every later round, whatever it holds."""
+        session = LiterateSession(context)
+        assert (await session.step("```lackpy\nfrom pathlib import Path\n```")).ok is False
+        mark = len(session.ledger)
+        result = await session.step(later)
+        assert result.ok is False
+        assert result.errors and result.errors[0].startswith("refused: ")
+        assert "earlier refusal" in result.errors[0] or "pathlib" in result.errors[0]
+        later_entries = session.ledger.entries()[mark:]
+        assert not [e for e in later_entries if e.entry_type in ("hole_opened", "error_reified")]

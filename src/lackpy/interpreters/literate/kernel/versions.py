@@ -155,6 +155,22 @@ class BindingVersion:
         )
 
 
+@dataclass(frozen=True, eq=False)
+class Opaque:
+    """The host-side record of a binding whose value is not data (literate stepy).
+
+    The session never hands a live function, module or ``Path`` to the host
+    (ruling N1), so the kernel versions such a binding with this marker: the
+    name and its type's name, never the object. Each (re)bind gets a new
+    marker, so identity tells a rebind from no change, as it does for data.
+    """
+
+    type_name: str
+
+    def __repr__(self) -> str:
+        return f"<{self.type_name}>"
+
+
 def value_kind(value: Any) -> str:
     """``"hole"`` / ``"error"`` / ``"unavailable"`` / ``"value"`` — the
     binding-layer kind of a version's value, for the ``superseded`` entry's
