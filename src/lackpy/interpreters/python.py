@@ -17,6 +17,7 @@ from typing import Any, Callable
 from ..lang.validator import validate
 from ..profiles import KIT_REMOVED
 from ..run.paths import PathPolicy, load_policy
+from ..run.refusal import LackpyRefusal
 from ..run.runner import RestrictedRunner
 from .base import (
     ExecutionContext,
@@ -105,7 +106,7 @@ class PythonInterpreter:
         loader = self._path_policy_loader or load_policy
         try:
             policy = loader(Path(context.base_dir))
-        except Exception as e:  # host code; never raises out (review M4)
+        except (Exception, LackpyRefusal) as e:  # host code; never raises out (review M4, I4)
             from ..service import _policy_error
             return InterpreterExecutionResult(
                 success=False,

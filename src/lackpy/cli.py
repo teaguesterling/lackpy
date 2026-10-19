@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import json
 import sys
@@ -46,6 +47,39 @@ def _parse_params(param_list: list[str] | None) -> dict[str, str]:
     return params
 
 
+def _coerce_params(raw: dict[str, str], defaults: dict[str, Any]) -> dict[str, Any]:
+    """Type each ``--param`` text like the program's default (review I6).
+
+    The runner compares a passed value's type with its default's. A key whose
+    default is a ``str`` keeps the raw text, so ``--param name=5`` gives
+    ``"5"``. Every other value is read with ``ast.literal_eval`` (``5``,
+    ``2.5``, ``True``, ``[1, 2]``), and text that is not a literal stays a
+    string (``--param p=src/*.py``).
+    """
+    out: dict[str, Any] = {}
+    for key, text in raw.items():
+        if type(defaults.get(key)) is str:
+            out[key] = text
+            continue
+        try:
+            out[key] = ast.literal_eval(text)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            out[key] = text
+    return out
+
+
+def _program_defaults(content: str) -> dict[str, Any]:
+    """The defaults in a program's top-level ``params = {...}`` literal, or {}."""
+    from .run.runner import _params_literal
+    try:
+        literal = _params_literal(ast.parse(content))
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return {}
+    if literal is None:
+        return {}
+    return {k.value: ast.literal_eval(v) for k, v in zip(literal.keys, literal.values)}  # type: ignore[union-attr]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lackpy",
@@ -79,8 +113,10 @@ async def _run_file(svc: Any, path: Path, profile: str | None, params: dict[str,
     """Run a file — a Lackey file, or a plain program."""
     content = path.read_text()
     if "Lackey" in content and "def run" in content:
-        return await svc.run_lackey(path, params=params, sandbox=sandbox)
-    exec_result = await svc.run_program(content, profile=profile, params=params)
+        defaults = {n: spec.get("default") for n, spec in svc.parse_lackey(path).params.items()}
+        return await svc.run_lackey(path, params=_coerce_params(params, defaults), sandbox=sandbox)
+    exec_result = await svc.run_program(content, profile=profile,
+                                        params=_coerce_params(params, _program_defaults(content)))
     return {"success": exec_result.success, "output": exec_result.effective_output,
             "stdout": exec_result.stdout, "error": exec_result.error}
 

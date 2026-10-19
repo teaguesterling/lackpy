@@ -832,3 +832,114 @@ class TestResolveParams:
         cfg = {"value": 1, "k": 2}
         values, _ = service._resolve_params({"cfg": cfg})
         assert values == {"cfg": cfg}
+
+
+class TestFinalReviewFixes:
+    """Fixes from the Plan 2 whole-branch review (final-review.md)."""
+
+    @pytest.mark.asyncio
+    async def test_validation_error_carries_the_hint(self, service):
+        # I3, spec D17: the static message names the approved alternative.
+        from lackpy.lang import validate
+        program = 'open("a.txt").read()'
+        (violation,) = [v for v in validate(program, allowed_names=set()).violations if v.hint]
+        result = await service.run_program(program)
+        assert not result.success
+        assert f"{violation.message} ({violation.hint})" in result.error
+        assert "Path(p).read_text()" in result.error
+
+    @pytest.mark.asyncio
+    async def test_a_symlink_loop_in_a_deny_rule_is_a_failed_result(self, tmp_path, tmp_home):
+        # I4: the reviewer's reproduction. The refusal escaped run_program.
+        ws = tmp_path / "loopws"
+        ws.mkdir()
+        (ws / "loop").symlink_to(ws / "loop")
+        (ws / ".claude").mkdir()
+        (ws / ".claude" / "settings.json").write_text(
+            json.dumps({"permissions": {"deny": ["Read(./loop/secret)"]}}))
+        result = await _make_service(ws, tmp_home).run_program("x = 1\nx")
+        assert not result.success
+        assert "Read(./loop/secret)" in result.error
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_from_the_loader_is_a_failed_result(self, tmp_path):
+        from lackpy.run.refusal import LackpyRefusal
+
+        def loader(workspace):
+            raise LackpyRefusal("access to loop")
+        svc = LackpyService(workspace=tmp_path, path_policy_loader=loader)
+        result = await svc.run_program("x = 1")
+        assert not result.success
+        assert "access to loop" in result.error
+
+    def test_rule_names_resolve_in_validate(self, service):
+        # M1: MCP advertises rules as list[str]; a string raised TypeError.
+        assert not service.validate("for i in []:\n    pass", rules=["no_loops"]).valid
+        assert service.validate("x = 1", rules=["no_loops"]).valid
+        assert not service.validate("len([])\nlen([])", rules=["max_calls(1)"]).valid
+
+    def test_unknown_rule_name_is_an_invalid_result(self, service):
+        result = service.validate("x = 1", rules=["no_such_rule"])
+        assert not result.valid
+        assert "no_such_rule" in result.errors[0]
+
+    @pytest.mark.asyncio
+    async def test_unknown_rule_name_is_a_failed_run(self, service):
+        result = await service.run_program("x = 1", rules=["no_such_rule"])
+        assert not result.success
+        assert "no_such_rule" in result.error
+
+    @pytest.mark.asyncio
+    async def test_unknown_rule_name_is_a_failed_delegate(self, service):
+        result = await service.delegate("x", rules=["no_such_rule"], _program_override="x = 1")
+        assert result["success"] is False
+        assert "no_such_rule" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_delegate_reports_files_read_and_modified(self, service):
+        # M3: the Path stand-in's trace fills files_read and files_modified.
+        program = ("from pathlib import Path\n"
+                   "t = Path('test.txt').read_text()\n"
+                   "Path('out.txt').write_text(t)\n"
+                   "Path('test.txt').read_bytes()\n"
+                   "Path('missing.txt').exists()\n"
+                   "len(t)")
+        result = await service.delegate("copy", _program_override=program)
+        assert result["success"], result["error"]
+        assert result["files_read"] == ["test.txt"]
+        assert result["files_modified"] == ["out.txt"]
+
+    @pytest.mark.asyncio
+    async def test_kibitzer_violation_result_has_the_common_keys(self, service, monkeypatch):
+        # M4: every other delegate result has stdout, output and trace.
+        service._kibitzer = _FakeKibitzer(violations=[_Violation("blocked")])
+        monkeypatch.setattr(service, "_planned_tool_calls", lambda program, rp: ["x"])
+        result = await service.delegate("x", _program_override="x = 1")
+        assert result["success"] is False
+        assert {"stdout", "output", "trace"} <= result.keys()
+        assert (result["stdout"], result["output"], result["trace"]) == ("", None, [])
+
+    @pytest.mark.asyncio
+    async def test_delegate_reapplies_the_callers_rules_at_execution(self, service):
+        # M5: a rule applied at generation is applied at the execution boundary too.
+        def reject_all(tree):
+            return ["rejected by the caller's rule"]
+        result = await service.delegate("x", rules=[reject_all], _program_override="x = 1")
+        assert result["success"] is False
+        assert "rejected by the caller's rule" in result["error"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", ["../../../x", "a/b", "a\\b", "..", "/abs", "nul\x00"])
+    async def test_create_refuses_a_name_that_is_not_a_plain_file_name(self, service, tmp_path, name):
+        # M7: the name was joined unsanitized, so ../ escaped .lackpy/templates.
+        before = {p for p in tmp_path.rglob("*")}
+        result = await service.create("x = 1", name=name)
+        assert result["success"] is False
+        assert "name" in result["errors"][0]
+        assert {p for p in tmp_path.rglob("*")} == before
+
+    @pytest.mark.asyncio
+    async def test_create_keeps_a_plain_name(self, service):
+        result = await service.create("x = 1", name="count_lines")
+        assert result["success"], result
+        assert Path(result["path"]).name == "count_lines.tmpl"

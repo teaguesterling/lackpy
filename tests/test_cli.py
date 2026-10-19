@@ -104,3 +104,52 @@ class TestNoDeprecatedSubcommands:
         parser = build_parser()
         help_text = parser.format_help()
         assert "lackpyctl" in help_text
+
+
+class TestTypedParams:
+    """Review I6: ``--param k=v`` is typed like the program's default."""
+
+    def _run(self, tmp_path, capsys, program, *params):
+        prog = tmp_path / "prog.py"
+        prog.write_text(program)
+        argv = [str(prog), "--workspace", str(tmp_path)]
+        for p in params:
+            argv += ["--param", p]
+        code = main(argv)
+        return code, json.loads(capsys.readouterr().out)
+
+    def test_int_param_against_an_int_default(self, tmp_path, capsys):
+        code, out = self._run(tmp_path, capsys, 'params = {"n": 3}\nparams["n"] * 2', "n=5")
+        assert code == 0, out
+        assert out["output"] == 10
+
+    def test_literal_params_of_other_types(self, tmp_path, capsys):
+        program = 'params = {"xs": [0], "flag": False, "ratio": 0.5}\n[params["xs"], params["flag"], params["ratio"]]'
+        code, out = self._run(tmp_path, capsys, program, "xs=[1, 2]", "flag=True", "ratio=2")
+        assert code == 0, out
+        assert out["output"] == [[1, 2], True, 2]
+
+    def test_str_default_keeps_the_raw_text(self, tmp_path, capsys):
+        # "5" and "[1]" stay strings when the default is a str.
+        program = 'params = {"name": "x", "tag": "y"}\n[params["name"], params["tag"]]'
+        code, out = self._run(tmp_path, capsys, program, "name=5", "tag=[1]")
+        assert code == 0, out
+        assert out["output"] == ["5", "[1]"]
+
+    def test_text_that_is_not_a_literal_stays_a_string(self, tmp_path, capsys):
+        code, out = self._run(tmp_path, capsys, 'params = {"p": None}\nparams["p"]', "p=src/*.py")
+        assert code == 0, out
+        assert out["output"] == "src/*.py"
+
+    def test_lackey_int_param(self, tmp_path, capsys):
+        lackey = tmp_path / "double.py"
+        lackey.write_text(
+            "from lackpy.lackey import Lackey\n\n"
+            "class Double(Lackey):\n"
+            "    n: int = 3\n\n"
+            "    def run(self) -> int:\n"
+            "        return self.n * 2\n")
+        code = main([str(lackey), "--workspace", str(tmp_path), "--param", "n=5"])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 0, out
+        assert out["output"] == 10

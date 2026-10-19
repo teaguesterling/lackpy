@@ -123,6 +123,28 @@ class TestPythonExecution:
         assert "TypeError" in result.error
 
     @pytest.mark.asyncio
+    async def test_a_refusal_from_the_loader_is_a_failed_result(self, ws):
+        # Review I4: LackpyRefusal is a BaseException; `except Exception` let it out.
+        from lackpy.run.refusal import LackpyRefusal
+
+        def loader(base_dir):
+            raise LackpyRefusal("access to loop")
+        result = await run_interpreter(PythonInterpreter(path_policy_loader=loader), "x = 1",
+                                       ExecutionContext(base_dir=ws))
+        assert not result.success
+        assert "access to loop" in result.error
+
+    @pytest.mark.asyncio
+    async def test_a_symlink_loop_in_a_deny_rule_is_a_failed_result(self, interp, ws):
+        (ws / "loop").symlink_to(ws / "loop")
+        (ws / ".claude").mkdir()
+        (ws / ".claude" / "settings.json").write_text(
+            json.dumps({"permissions": {"deny": ["Read(./loop/secret)"]}}))
+        result = await run_interpreter(interp, "x = 1\nx", ExecutionContext(base_dir=ws))
+        assert not result.success
+        assert "Read(./loop/secret)" in result.error
+
+    @pytest.mark.asyncio
     async def test_deeply_nested_settings_name_the_file(self, interp, ws):
         settings = ws / ".claude" / "settings.json"
         settings.parent.mkdir()

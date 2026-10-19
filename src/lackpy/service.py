@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -26,19 +27,77 @@ from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.paths import PathPolicy, load_policy
 from .run.runner import RestrictedRunner, _binds_params
+from .run.refusal import LackpyRefusal
 from .run.trace import error_text
 
 logger = logging.getLogger(__name__)
 
-def _policy_error(e: Exception) -> str:
+
+def validation_error(validation: ValidationResult) -> str:
+    """The failed-result text for a rejected program (review I3, spec D17).
+
+    Each violation reads ``message (hint)`` when the rule names an approved
+    alternative, so the caller learns the path forward from the error alone.
+    """
+    if validation.violations:
+        parts = [f"{v.message} ({v.hint})" if v.hint else v.message for v in validation.violations]
+    else:
+        parts = list(validation.errors)
+    return f"Validation failed: {'; '.join(parts)}"
+
+
+_RULE_NAME = re.compile(r"^\s*([a-z_]+)\s*(?:\(\s*(\d+)\s*\))?\s*$")
+
+
+def resolve_rules(rules: list | None) -> list | None:
+    """Turn the rule names a caller passes (MCP ``rules: list[str]``) into rule callables.
+
+    A callable is kept as it is. A name is one of ``lackpy.lang.rules``:
+    ``no_loops``, ``no_nested_calls``, or ``max_depth(N)`` / ``max_calls(N)``
+    with an int ``N`` (review M1). Raises ``ValueError`` naming an unknown or
+    malformed rule; each public method turns that into a failed result.
+    """
+    if not rules:
+        return rules
+    from .lang import rules as lang_rules
+    plain = {"no_loops": lang_rules.no_loops, "no_nested_calls": lang_rules.no_nested_calls}
+    factories = {"max_depth": lang_rules.max_depth, "max_calls": lang_rules.max_calls}
+    resolved = []
+    for rule in rules:
+        if callable(rule):
+            resolved.append(rule)
+            continue
+        match = _RULE_NAME.match(rule) if isinstance(rule, str) else None
+        name, arg = (match.group(1), match.group(2)) if match else (None, None)
+        if name in plain and arg is None:
+            resolved.append(plain[name])
+        elif name in factories and arg is not None:
+            resolved.append(factories[name](int(arg)))
+        else:
+            known = ", ".join([*plain, *(f"{f}(N)" for f in factories)])
+            raise ValueError(f"unknown rule {rule!r}; the known rules are {known}")
+    return resolved
+
+def _policy_error(e: BaseException) -> str:
     """The failed-result text for a PathPolicy that cannot be loaded.
 
     ``load_policy`` raises ``ValueError`` naming the settings file; any other
     type is named too, so a loader defect is not mistaken for a settings one.
+    A ``LackpyRefusal`` (a ``BaseException``) is caught by the callers too
+    (review I4), so a settings state never escapes to FastMCP.
     """
     if type(e) is ValueError:
         return f"cannot load the path policy: {error_text(e)}"
     return f"cannot load the path policy ({type(e).__name__}): {error_text(e)}"
+
+
+def _traced_paths(trace: Any, tools: tuple[str, ...]) -> list[str]:
+    """The paths, as the program built them, of the successful ``tools`` calls; no repeats."""
+    seen: dict[str, None] = {}
+    for entry in trace.entries:
+        if entry.success and entry.tool in tools and entry.args:
+            seen.setdefault(str(entry.args[0]), None)
+    return list(seen)
 
 
 def _check_mode(mode: str | None) -> None:
@@ -465,7 +524,8 @@ class LackpyService:
         """
         try:
             self._resolve_profile(profile)
-        except ProfileError as e:
+            rules = resolve_rules(rules)
+        except (ProfileError, ValueError) as e:
             return ValidationResult(valid=False, errors=[str(e)])
         return validate(program, allowed_names=set(), extra_rules=rules)
 
@@ -504,6 +564,7 @@ class LackpyService:
 
         rp = self._resolve_profile(profile)
         resolved = rp.tools
+        rules = resolve_rules(rules)
         _, params_desc = self._resolve_params(params)
 
         # Inference selections: an explicit call arg wins over the profile's; both fall
@@ -603,7 +664,7 @@ class LackpyService:
         loader = self._path_policy_loader or load_policy
         try:
             policy = loader(self._workspace)
-        except Exception as e:  # host code; run_program never raises (review M4)
+        except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
         prev_cwd = os.getcwd()
         try:
@@ -633,10 +694,7 @@ class LackpyService:
 
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
-            return ExecutionResult(
-                success=False,
-                error=f"Validation failed: {'; '.join(validation.errors)}",
-            )
+            return ExecutionResult(success=False, error=validation_error(validation))
         return await self._execute(program, param_values)
 
     async def _execute_literate(
@@ -786,7 +844,8 @@ class LackpyService:
         """
         try:
             rp = self._resolve_profile(profile)
-        except ProfileError as e:
+            rules = resolve_rules(rules)
+        except (ProfileError, ValueError) as e:
             return ExecutionResult(success=False, error=str(e))
         param_values, _ = self._resolve_params(params)
         # The execution axis (one-shot restricted-Python vs literate) decides both
@@ -830,7 +889,8 @@ class LackpyService:
             rp = self._resolve_profile(profile)
             if not _program_override:  # only generation runs the strategy
                 _check_mode(mode or rp.mode or self._config.inference_mode)
-        except ProfileError as e:
+            rules = resolve_rules(rules)
+        except (ProfileError, ValueError) as e:
             return {"success": False, "program": _program_override, "output": None,
                     "stdout": "", "error": str(e), "trace": []}
         # The model actually used (per-call override or the profile's, else configured) —
@@ -873,6 +933,8 @@ class LackpyService:
                         "program": gen_result.program,
                         "generation_tier": gen_result.provider_name,
                         "error": "Kibitzer mode policy violation: " + "; ".join(v.reason for v in violations),
+                        # The keys every other delegate result has (review M4).
+                        "output": None, "stdout": "", "trace": [],
                         "correction_strategy": gen_result.correction_strategy,
                         "correction_attempts": gen_result.correction_attempts,
                     }
@@ -884,7 +946,9 @@ class LackpyService:
         # The restricted-Python path parses the identical source deterministically,
         # so this closes the validate/execute gap without a differential; the
         # literate path validates internally by parsing.
-        exec_result = await self._execute_program(gen_result.program, rp, param_values)
+        # Review M5: the caller's rules are re-applied here too.
+        exec_result = await self._execute_program(gen_result.program, rp, param_values,
+                                                  rules=rules)
 
         # Kibitzer: get coaching suggestions after execution
         if self._kibitzer:
@@ -927,8 +991,10 @@ class LackpyService:
             "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
                         "duration_ms": e.duration_ms, "success": e.success, "error": e.error}
                        for e in exec_result.trace.entries],
-            "files_read": exec_result.trace.files_read,
-            "files_modified": exec_result.trace.files_modified,
+            # Review M3: from the Path stand-in's successful trace entries.
+            "files_read": _traced_paths(exec_result.trace, ("Path.read_text", "Path.read_bytes")),
+            "files_modified": _traced_paths(exec_result.trace,
+                                            ("Path.write_text", "Path.write_bytes")),
             # Prefer the typed last-expression value; if the program instead
             # printed its answer (a common small-model habit), fall back to the
             # captured stdout so the result isn't silently dropped. stdout is
@@ -1051,6 +1117,11 @@ class LackpyService:
             self._resolve_profile(profile)
         except ProfileError as e:
             return {"success": False, "errors": [str(e)]}
+        # Review M7: the name is a file name stem, never a path.
+        if any(c in name for c in ("/", "\\", "\x00", "..")) or name == ".":
+            return {"success": False,
+                    "errors": [f"template name {name!r} must be a plain file name: "
+                               "no '/', '\\', NUL, '.' or '..'"]}
         validation = validate(program, allowed_names=set())
         if not validation.valid:
             return {"success": False, "errors": validation.errors}
