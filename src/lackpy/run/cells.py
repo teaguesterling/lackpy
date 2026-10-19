@@ -31,7 +31,7 @@ from ..lang import validate
 from .namespace import build_namespace
 from .paths import PathPolicy
 from .refusal import LackpyRefusal
-from .runner import RUNTIME_FAILURES, _run_validated_code, data_variables, make_print_capture
+from .runner import RUNTIME_FAILURES, _is_data, _run_validated_code, data_variables, make_print_capture
 from .trace import Trace, error_text
 
 Phase = Literal["validate", "runtime", "refused"]
@@ -61,7 +61,11 @@ class CellOutcome:
 
 @dataclass
 class ExprOutcome:
-    """The result of :meth:`CellSession.eval_expr`. ``value`` is the raw value, not filtered."""
+    """The result of :meth:`CellSession.eval_expr`.
+
+    ``value`` is data (``runner._is_data``) as it is, or else its ``repr`` text,
+    as ``f"{...}"`` would show it under python3: a lazy value is never consumed.
+    """
 
     ok: bool
     value: Any = None
@@ -144,8 +148,9 @@ class CellSession:
     def eval_expr(self, source: str) -> ExprOutcome:
         """Validate ``source`` as one expression line after the program, then evaluate it.
 
-        The value is returned as it is: no data filter (the host-side display formats
-        it). Text the expression prints is discarded. Nothing is raised: a rejected
+        A data value is returned as it is; any other value as its ``repr`` text, made
+        here, so the host never holds a live object (ruling N1). The host-side display
+        formats the result. Text the expression prints is discarded. Nothing is raised: a rejected
         source gives ``phase="validate"``, an exception ``phase="runtime"``, and a
         refusal ``phase="refused"``, which closes the session (ruling, review M2).
         """
@@ -205,7 +210,13 @@ class CellSession:
             return ExprOutcome(ok=False, phase="validate", error=error)
         code = compile(tree, "<lackpy>", "eval")
         # Validated above as part of the program; the namespace is the restricted one.
-        return ExprOutcome(ok=True, value=eval(code, self._namespace))  # noqa: S307
+        value = eval(code, self._namespace)  # noqa: S307
+        if not _is_data(value):
+            # Ruling N1: no live callable, iterator or stand-in reaches the host, where
+            # consuming it would run cell code outside this guard. repr runs here, so a
+            # refusal it raises closes the session (eval_expr's handlers).
+            value = repr(value)
+        return ExprOutcome(ok=True, value=value)
 
     def _failure(self, cell_id: int, e: BaseException) -> CellOutcome:
         text = error_text(e)

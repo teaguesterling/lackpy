@@ -7,6 +7,7 @@ import pytest
 from lackpy.lang import validate
 from lackpy.run.cells import CellSession
 from lackpy.run.paths import load_policy
+from lackpy.run.refusal import refuse
 
 
 @pytest.fixture
@@ -191,9 +192,11 @@ def test_eval_expr_never_raises_a_refusal(session):
     assert "outside the workspace" in out.error
 
 
-def test_eval_expr_returns_the_value_unfiltered(session):
+def test_eval_expr_gives_a_function_as_repr_text(session):
+    # Ruling N1: the value is data or its repr text, never a live callable.
     _ok(session.run_cell("def f():\n    return 1"))
-    assert callable(_value(session.eval_expr("f")))
+    value = _value(session.eval_expr("f"))
+    assert type(value) is str and value.startswith("<function f")
 
 
 # -- I1: no violation the prefix lacked, wherever it lands -----------------------
@@ -356,3 +359,65 @@ def test_rerun_of_a_cell_that_failed_at_runtime_runs_it_again(session):
     _ok(session.run_cell("d = {'k': 1}"))
     again = _ok(session.rerun_cell(failed.cell_id))
     assert again.delta == {"v": 1}
+
+
+# -- N1: eval_expr gives data or repr text, never a live object ---------------------
+
+LAZY_SETUP = ("from pathlib import Path\n"
+              "def rd(p):\n    return Path(p).read_text()\n"
+              "ps = ['/etc/hostname']")
+
+
+@pytest.mark.parametrize("expr, kind", [
+    ("zip((rd(p) for p in ps), ps)", "zip"),
+    ("enumerate(rd(p) for p in ps)", "enumerate"),
+    ("iter(rd(p) for p in ps)", "generator"),
+    ("rd", "function"),
+])
+def test_eval_expr_gives_a_lazy_value_as_repr_text(session, expr, kind):
+    _ok(session.run_cell(LAZY_SETUP))
+    out = session.eval_expr(expr)
+    # repr does not iterate or call, so nothing refuses: the value is text, as in f"{...}".
+    assert out.ok and type(out.value) is str and kind in out.value
+    # No refusal happened, so D4 does not close the session.
+    _ok(session.run_cell("y = 1"))
+
+
+def test_eval_expr_keeps_a_data_value(session):
+    _ok(session.run_cell("rows = [1, {'a': (2, None)}]"))
+    assert _value(session.eval_expr("rows")) == [1, {"a": (2, None)}]
+
+
+class _RefusingRepr:
+    def __repr__(self):
+        refuse("repr of this value")
+
+
+def test_eval_expr_value_whose_repr_refuses_latches_the_session(session):
+    # No program-reachable value has a refusing repr today, so the test puts one in the
+    # namespace: it checks that the repr text is made inside the guarded region.
+    session._namespace["odd"] = _RefusingRepr()
+    out = session.eval_expr("odd")
+    assert not out.ok and out.phase == "refused" and out.value is None
+    assert session.run_cell("y = 1").phase == "refused"
+
+
+def test_eval_expr_value_whose_repr_fails_gives_phase_runtime(session):
+    # An int over the str-digits limit is not data, and its repr raises ValueError.
+    _ok(session.run_cell("x = 1\nfor i in range(1500):\n    x = x * 1000"))
+    out = session.eval_expr("x")
+    assert not out.ok and out.phase == "runtime" and out.value is None
+    _ok(session.run_cell("y = 1"))
+
+
+def test_a_refusal_raised_by_rerun_cell_latches_the_session(session, workspace):
+    # N2: the cell ran ok; a dependency changed, so its re-run refuses.
+    (workspace / "in.txt").write_text("ok")
+    _ok(session.run_cell("from pathlib import Path"))
+    _ok(session.run_cell(f"d = {{'p': {str(workspace / 'in.txt')!r}}}"))
+    cell = _ok(session.run_cell("t = Path(d['p']).read_text()"))
+    _ok(session.run_cell("d = {'p': '/etc/hostname'}"))
+    again = session.rerun_cell(cell.cell_id)
+    assert not again.ok and again.phase == "refused" and "/etc/hostname" in again.error
+    after = session.run_cell("y = 1")
+    assert after.phase == "refused" and "/etc/hostname" in after.error
