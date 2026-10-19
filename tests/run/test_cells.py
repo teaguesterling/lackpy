@@ -5,9 +5,8 @@ from __future__ import annotations
 import pytest
 
 from lackpy.lang import validate
-from lackpy.run.cells import CellRejected, CellSession
+from lackpy.run.cells import CellSession
 from lackpy.run.paths import load_policy
-from lackpy.run.refusal import LackpyRefusal
 
 
 @pytest.fixture
@@ -148,41 +147,144 @@ def test_json_in_a_container_from_an_earlier_cell_is_refused_statically(session)
 
 # -- eval_expr ------------------------------------------------------------------
 
+def _value(outcome):
+    assert outcome.ok, (outcome.phase, outcome.error)
+    assert outcome.phase is None and outcome.error is None
+    return outcome.value
+
+
 def test_eval_expr_evaluates_in_the_namespace(session):
     _ok(session.run_cell("rows = [1, 2, 3]"))
-    assert session.eval_expr("len(rows)") == 3
+    assert _value(session.eval_expr("len(rows)")) == 3
 
 
 def test_eval_expr_rejects_a_private_attribute(session):
     _ok(session.run_cell("rows = [1, 2, 3]"))
-    with pytest.raises(CellRejected) as info:
-        session.eval_expr("rows.__class__")
-    assert "line 1" in str(info.value)
+    out = session.eval_expr("rows.__class__")
+    assert not out.ok and out.phase == "validate" and out.value is None
+    assert "line 1" in out.error
 
 
 def test_eval_expr_uses_the_cumulative_context(session):
     _ok(session.run_cell("import json"))
-    with pytest.raises(CellRejected):
-        session.eval_expr("json.codecs")
+    out = session.eval_expr("json.codecs")
+    assert not out.ok and out.phase == "validate"
 
 
 def test_eval_expr_rejects_a_statement_and_a_second_line(session):
-    with pytest.raises(CellRejected):
-        session.eval_expr("x = 1")
-    with pytest.raises(CellRejected):
-        session.eval_expr("1\n2")
+    assert session.eval_expr("x = 1").phase == "validate"
+    assert session.eval_expr("1\n2").phase == "validate"
     assert "x" not in session.bound_names()
 
 
-def test_eval_expr_raises_a_refusal_to_the_caller(session):
+def test_eval_expr_gives_phase_runtime_for_an_exception(session):
+    _ok(session.run_cell("d = {}"))
+    out = session.eval_expr("d['k']")
+    assert not out.ok and out.phase == "runtime" and "k" in out.error
+
+
+def test_eval_expr_never_raises_a_refusal(session):
+    # Ruling (M2): the kernel's ``except BaseException`` must never see a refusal.
     _ok(session.run_cell("from pathlib import Path"))
-    with pytest.raises(LackpyRefusal):
-        session.eval_expr('Path("/etc/hostname").read_text()')
+    out = session.eval_expr('Path("/etc/hostname").read_text()')
+    assert not out.ok and out.phase == "refused"
+    assert "outside the workspace" in out.error
 
 
 def test_eval_expr_returns_the_value_unfiltered(session):
     _ok(session.run_cell("def f():\n    return 1"))
-    assert callable(session.eval_expr("f"))
+    assert callable(_value(session.eval_expr("f")))
+
+
+# -- I1: no violation the prefix lacked, wherever it lands -----------------------
+
+def test_a_forward_reference_def_cannot_alias_json(session):
+    # As one program: "Forbidden use of module: 'json' at line 2" (review I1).
+    _ok(session.run_cell("def f():\n    return json"))
+    out = session.run_cell("import json")
+    assert not out.ok and out.phase == "validate"
+    assert "line 2 of cell 1" in out.error and "made invalid by this cell" in out.error
+    assert "json" not in session.bound_names()
+
+
+def test_a_forward_reference_def_cannot_alias_pathlib(session):
+    _ok(session.run_cell("def m():\n    return pathlib"))
+    out = session.run_cell("import pathlib")
+    assert not out.ok and out.phase == "validate"
+    assert "line 2 of cell 1" in out.error
+
+
+def test_a_forward_reference_def_cannot_reach_json_codecs(session):
+    _ok(session.run_cell("def g():\n    return json.codecs"))
+    out = session.run_cell("import json")
+    assert not out.ok and out.phase == "validate"
+    assert "json.codecs" in out.error
+
+
+def test_json_through_a_cell_that_failed_at_runtime_is_refused_statically(session):
+    # The failed cell stays in the program, so the validator knows json is a module.
+    assert session.run_cell("import json\nx = {}['k']").phase == "runtime"
+    out = session.run_cell("y = json.codecs")
+    assert not out.ok and out.phase == "validate"
+
+
+# -- the latch: a refusal ends the session (D4) ---------------------------------
+
+def test_after_a_refusal_every_cell_is_refused_without_running(session):
+    _ok(session.run_cell("from pathlib import Path"))
+    first = session.run_cell('import json\ntext = Path("/etc/hostname").read_text()')
+    assert first.phase == "refused"
+    # The refused cell bound json; a later cell must not reach it (security finding, M1).
+    out = session.run_cell("x = json")
+    assert not out.ok and out.phase == "refused"
+    assert "/etc/hostname" in out.error
+    assert "x" not in session.bound_names()
+    expr = session.eval_expr("1")
+    assert not expr.ok and expr.phase == "refused" and "/etc/hostname" in expr.error
+
+
+def test_a_refusal_from_eval_expr_latches_the_session(session):
+    _ok(session.run_cell("from pathlib import Path"))
+    assert session.eval_expr('Path("/etc/hostname").read_text()').phase == "refused"
+    out = session.run_cell("print(1)")
+    assert out.phase == "refused" and out.stdout == "" and "/etc/hostname" in out.error
+
+
+# -- re-runs ---------------------------------------------------------------------
+
+def test_each_cell_gets_its_own_cell_id(session):
+    a = session.run_cell("x = 1")
+    b = session.run_cell("import os")
+    assert a.cell_id is not None and b.cell_id is not None and a.cell_id != b.cell_id
+
+
+def test_rerun_cell_re_executes_the_stored_code(session):
+    _ok(session.run_cell("n = 0"))
+    bump = _ok(session.run_cell("n = n + 1\nprint(n)"))
+    again = _ok(session.rerun_cell(bump.cell_id))
+    assert again.cell_id == bump.cell_id
+    assert again.stdout == "2\n" and again.delta == {"n": 2}
+
+
+def test_rerun_of_a_def_cell_does_not_append_it_again(session):
+    cell = _ok(session.run_cell("def f():\n    return 1"))
+    _ok(session.rerun_cell(cell.cell_id))
+    # Appended twice, style.def-shadow would now reject the next cell.
+    _ok(session.run_cell("x = f()"))
+
+
+def test_rerun_of_an_unknown_or_failed_cell_fails(session):
+    assert not session.rerun_cell(999).ok
+    rejected = session.run_cell("import os")
+    out = session.rerun_cell(rejected.cell_id)
+    assert not out.ok and out.error
+
+
+def test_rerun_in_a_latched_session_is_refused(session):
+    cell = _ok(session.run_cell("from pathlib import Path"))
+    assert session.run_cell('Path("/etc/hostname").read_text()').phase == "refused"
+    out = session.rerun_cell(cell.cell_id)
+    assert not out.ok and out.phase == "refused"
 
 
 # -- stdout and delta -------------------------------------------------------------
@@ -230,10 +332,17 @@ def test_path_refuses_without_a_policy():
     assert not out.ok and out.phase == "refused"
 
 
-def test_a_line_of_an_earlier_cell_in_a_message_says_so(session):
-    # style.def-shadow names both defs; the earlier one keeps its cumulative number.
-    # It also means a cell re-run through run_cell with a def fails validation.
+def test_a_line_of_an_earlier_cell_in_a_message_names_the_cell(session):
+    # style.def-shadow names both defs; the earlier one is named by cell and line.
     _ok(session.run_cell("x = 1\ndef f():\n    return 1"))
     out = session.run_cell("def f():\n    return 2")
     assert not out.ok and out.phase == "validate"
-    assert "line 2 of the earlier cells" in out.error and "line 1" in out.error
+    assert "line 2 of cell 1" in out.error and "line 1" in out.error
+
+
+def test_quoted_program_text_is_not_renumbered(session):
+    # M4: only the validator's own line references change, not text it quotes.
+    _ok(session.run_cell("p = [1]"))
+    out = session.run_cell('p["line 9"].y = 2')
+    assert not out.ok and out.phase == "validate"
+    assert "'p['line 9'].y' at line 1" in out.error
