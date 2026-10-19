@@ -44,6 +44,7 @@ _STATE: dict[int, pathlib.Path] = {}
 
 _ALLOWED = frozenset(dictionary.PATH_MEMBERS)
 _CLASS_NAME = type(pathlib.Path()).__name__
+_CLASS_MODULE = type(pathlib.Path()).__module__  # "pathlib._local" on 3.13+
 
 
 def _is_dunder(name: str) -> bool:
@@ -267,7 +268,7 @@ def make_path_class(policy: PathPolicy) -> type:
             with as_built(self):
                 absolute.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
 
-    type.__setattr__(Path, "__module__", "pathlib")
+    type.__setattr__(Path, "__module__", _CLASS_MODULE)
     type.__setattr__(Path, "__name__", _CLASS_NAME)
     type.__setattr__(Path, "__qualname__", _CLASS_NAME)
     return Path
