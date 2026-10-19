@@ -174,3 +174,51 @@ def test_variables_hold_data_only(ws):
     result = _run(program, ws, namespace={"tool": lambda: 0})
     assert result.success, result.error
     assert result.variables == {"x": 1, "s": "text"}
+
+
+# --- Task 5 fix round: M1 (recursive data allowlist) and M4 (pattern args traced) ---
+
+@pytest.mark.parametrize("program", [
+    "v = (i for i in range(3))",           # generator
+    "v = {'a': 1}.items()",                # dict view
+    "try:\n    int('x')\nexcept ValueError as e:\n    v = e",  # exception instance
+    "import json\nv = [json]",            # proxy nested in a list
+    "from pathlib import Path\nv = [Path('a.txt')]",
+    "v = {'f': len}",
+    "v = (1, [type(1)])",
+    "v = range(3)",
+    "v = 1j",                              # complex is not in the allowlist
+    "v = frozenset({1})",
+])
+def test_variables_drop_non_data_at_any_depth(ws, program):
+    result = _run(program + "\nkeep = 1", ws)
+    assert result.success, result.error
+    assert result.variables == {"keep": 1}
+
+
+def test_variables_keep_nested_data(ws):
+    program = "v = {'a': [1, (2.5, b'x', None, True)], 's': {1, 'b'}, (1, 2): 'k'}"
+    result = _run(program, ws)
+    assert result.success, result.error
+    assert result.variables == {"v": {"a": [1, (2.5, b"x", None, True)], "s": {1, "b"}, (1, 2): "k"}}
+
+
+def test_variables_drop_a_self_referencing_list(ws):
+    result = _run("v = []\nv.append(v)\nkeep = 1", ws)
+    assert result.success, result.error
+    assert result.variables == {"keep": 1}
+
+
+def test_glob_pattern_refusal_is_traced(ws):
+    # Review M4 (measured): str() of a type view refused before the trace entry existed.
+    result = _run("from pathlib import Path\nlist(Path('.').glob(type(1)))", ws)
+    assert not result.success
+    assert [(e.tool, e.success) for e in result.trace.entries] == [("Path.glob", False)]
+    assert "not allowed in lackpy" in result.trace.entries[0].error
+
+
+def test_glob_pattern_that_cannot_be_text_is_traced(ws):
+    # Review M4 (measured): str(10**5000) raised ValueError with no trace entry.
+    result = _run("from pathlib import Path\nlist(Path('.').glob(10**5000))", ws)
+    assert not result.success
+    assert [(e.tool, e.success) for e in result.trace.entries] == [("Path.glob", False)]

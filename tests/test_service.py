@@ -363,3 +363,16 @@ class TestLiterateModePolicy:
             "```lackpy\nw = write_file\nw('o', 'x')\n```", rp, allowed)
         assert "write_file" not in attribute      # os.system(...) surfaces nothing
         assert "write_file" not in aliased         # only the alias name 'w' surfaces
+
+
+class TestResolveParams:
+    """Review M7: only the single-key {"value": x} shape is unwrapped; dict params are data."""
+
+    def test_single_key_value_shape_is_unwrapped(self, service):
+        values, _, _ = service._resolve_params({"n": {"value": 3}}, None)
+        assert values == {"n": 3}
+
+    def test_dict_param_with_a_value_key_is_kept(self, service):
+        cfg = {"value": 1, "k": 2}
+        values, _, _ = service._resolve_params({"cfg": cfg}, None)
+        assert values == {"cfg": cfg}

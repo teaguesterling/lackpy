@@ -73,11 +73,6 @@ class _PathMeta(type):
         refuse(f"del Path.{attr}")
 
 
-def is_path_stand_in(value: Any) -> bool:
-    """Whether ``value`` is a ``Path`` stand-in class or instance (for the gate-7 filter)."""
-    return isinstance(value, _PathMeta) or isinstance(type(value), _PathMeta)
-
-
 def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
     """Return a ``Path`` stand-in class bound to ``policy``; I/O calls go to ``trace`` when given."""
 
@@ -135,7 +130,10 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
                lazy: bool = False) -> Any:
         if trace is None:
             return call()
-        args = [str(raw(p)), *(str(unwrap(x)) for x in extra)]
+        # The args are built inside the traced region: str() of a pattern can
+        # refuse or raise, and that must be a failed entry too (review M4).
+        def args() -> list[str]:
+            return [str(raw(p)), *(str(unwrap(x)) for x in extra)]
         return record_call(trace, f"Path.{name}", args, call, summarize=not lazy)
 
     def io(name: str, op: str) -> Callable[..., Any]:

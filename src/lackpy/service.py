@@ -388,7 +388,8 @@ class LackpyService:
             return {}, None, set()
         values: dict[str, Any] = {}
         for name, val in params.items():
-            if isinstance(val, dict) and "value" in val:
+            # Only the single-key {"value": x} wrapper; any other dict is a dict param (review M7).
+            if isinstance(val, dict) and val.keys() == {"value"}:
                 values[name] = val["value"]
             else:
                 values[name] = val

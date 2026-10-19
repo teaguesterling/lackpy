@@ -55,7 +55,8 @@ class AsyncBridge:
             return fut.result(timeout)
         except FuturesTimeout:
             fut.cancel()
-            raise LackpyRefusal("a tool call timed out") from None
+            raise LackpyRefusal("waiting on a tool call past its timeout",
+                                hint="make the call smaller") from None
 
 
 def mark_async(fn: Any) -> Any:

@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import ast
-import types
 from typing import Any, Callable
 
 from .base import ExecutionResult
-from .modules import ModuleProxy
 from .namespace import build_namespace
 from .paths import PathPolicy
-from .paths.proxy import is_path_stand_in
 from .refusal import LackpyRefusal
 from .trace import Trace, error_text, make_traced
 
@@ -39,18 +36,24 @@ class RestrictedRunner:
 
         The program's last expression (if any) is captured as the output.
         The other top-level names that hold data are returned in
-        ``variables``: callables, classes, modules, module proxies and ``Path``
-        stand-ins are left out (design §8, gate 7).
+        ``variables`` (design §8, gate 7). Data is an exact None, bool, int,
+        float, str or bytes, or a list, tuple, set or dict made only of data,
+        at any depth. Every other value is left out: functions, classes,
+        modules, proxies, ``Path`` stand-ins, generators, views, exceptions.
 
         Args:
             program: The lackpy program source to execute.
             namespace: Optional kit tools (name -> callable), bound as traced
                 globals. Kept for backward compatibility until stepy100 Task 7.
             params: Values that replace the defaults in the program's
-                ``params`` literal. An unknown key, a value of another type
-                (``int`` is accepted for a ``float`` default; ``bool`` is not
-                ``int``), a value with no literal form, or a program without the
-                literal gives a failed result that names the key.
+                ``params`` literal. An unknown key, a value of another type,
+                a value with no literal form, or a program without the literal
+                gives a failed result that names the key. Only the outer type
+                is compared, never element types. ``int`` is accepted for a
+                ``float`` default and stays an ``int``; ``bool`` is not ``int``.
+                A ``None`` default has no type to compare, so it accepts any
+                value that has a literal form (Plan 3's ``[params]`` types
+                tighten this).
             kibitzer_session: Optional KibitzerSession for per-call tracking.
             program_file: The program's path, for ``__file__``.
             path_policy: Passed to :func:`build_namespace`; None leaves
@@ -146,18 +149,30 @@ class RestrictedRunner:
                                variables=variables, stdout="".join(captured))
 
 
-def _is_data(value: Any) -> bool:
-    """Whether a program variable is data, for ``variables`` (gate 7).
+_DATA_SCALARS = (type(None), bool, int, float, str, bytes)
 
-    Only ``type(value)`` is inspected, never an attribute of ``value``: the
-    ``type`` stand-in and its views refuse every attribute, ``__class__`` too.
-    ``callable()`` drops functions, classes, the ``type`` stand-in and its
-    views; the rest drops modules, module proxies and ``Path`` stand-ins.
+
+def _is_data(value: Any, _path: frozenset[int] = frozenset()) -> bool:
+    """Whether a program variable is data, for ``variables`` (gate 7, review M1).
+
+    An allowlist on the exact type: ``_DATA_SCALARS``, and list, tuple, set and
+    dict whose items (and keys) are data, at any depth. Only ``type(value)`` is
+    read, and the containers are iterated; no attribute of ``value`` is read,
+    because the ``type`` stand-in and its views refuse every attribute.
+    A self-referencing or too-deep container is not data.
     """
     kind = type(value)
-    if callable(value) or issubclass(kind, (type, types.ModuleType, ModuleProxy)):
+    if kind in _DATA_SCALARS:
+        return True
+    if kind not in (list, tuple, set, dict) or id(value) in _path:
         return False
-    return not is_path_stand_in(value)
+    inner = _path | {id(value)}
+    try:
+        if kind is dict:
+            return all(_is_data(k, inner) and _is_data(v, inner) for k, v in value.items())
+        return all(_is_data(item, inner) for item in value)
+    except RecursionError:
+        return False
 
 
 class _NotLiteral(Exception):
@@ -185,7 +200,12 @@ def _literal_node(value: Any) -> ast.expr:
 
 
 def _binds_params(node: ast.AST) -> bool:
-    """Whether ``node`` binds (or deletes) the name ``params``."""
+    """Whether ``node`` binds (or deletes) the name ``params``.
+
+    Every scope counts, so a function-local ``params`` counts too (review M6).
+    That fails loud where python3 would leave the module ``params`` alone.
+    A function argument named ``params`` (``ast.arg``) does not count.
+    """
     if isinstance(node, ast.Name):
         return node.id == "params" and not isinstance(node.ctx, ast.Load)
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.ExceptHandler)):
@@ -229,15 +249,16 @@ def _apply_params(tree: ast.Module, params: dict[str, Any]) -> str | None:
                 f"params = {{...}} literal to hold them")
     literal = _params_literal(tree)
     if bindings > 1 or literal is None:
-        return (f"params {keys} were passed, but the program does not bind params exactly once, "
-                f'as a top-level params = {{"name": <literal>, ...}}')
+        return (f"params {keys} were passed, but the program does not bind params exactly once "
+                f'anywhere in the program, as a top-level params = {{"name": <literal>, ...}}')
     for key, value in params.items():
         slots = [i for i, k in enumerate(literal.keys) if k.value == key]  # type: ignore[union-attr]
         if not slots:
             return f"param {key!r} is not a key of the program's params literal"
         default = ast.literal_eval(literal.values[slots[-1]])
         expected = type(default)
-        if not (type(value) is expected or (expected is float and type(value) is int)):
+        if not (default is None or type(value) is expected
+                or (expected is float and type(value) is int)):
             return f"param {key!r} must be {expected.__name__} like its default, not {type(value).__name__}"
         try:
             for i in slots:

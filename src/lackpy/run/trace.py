@@ -89,7 +89,8 @@ def make_traced(name: str, fn: Callable, trace: Trace,
     return wrapper
 
 
-def record_call(trace: Trace, tool: str, args: dict[str, Any] | list[Any],
+def record_call(trace: Trace, tool: str,
+                args: dict[str, Any] | list[Any] | Callable[[], list[Any]],
                 call: Callable[[], Any],
                 on_done: Callable[[bool], None] | None = None,
                 summarize: bool = True) -> Any:
@@ -98,10 +99,16 @@ def record_call(trace: Trace, tool: str, args: dict[str, Any] | list[Any],
     A raised ``Exception`` or ``LackpyRefusal`` is recorded as a failed entry
     whose error is ``str(e)`` (for a refusal, that text carries the hint), then
     re-raised. ``summarize=False`` records no result (for a lazy iterator).
+    ``args`` may be a function that builds them; it runs inside the recorded
+    region, and when it fails the entry's args are ``[]``.
     """
     step = len(trace.entries)
     start = time.perf_counter()
     try:
+        if callable(args):
+            built = args
+            args = []
+            args = built()
         result = call()
     except (Exception, LackpyRefusal) as e:
         trace.entries.append(TraceEntry(

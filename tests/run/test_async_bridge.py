@@ -75,7 +75,7 @@ async def test_async_tool_timeout_yields_failed_result(tmp_path):
     res = await svc.run_program("y = hang(1)\ny", profile=["hang"])
 
     assert not res.success
-    assert "timed out" in (res.error or "")
+    assert "waiting on a tool call past its timeout" in (res.error or "")
     # Failure is recorded in the trace like any other tool error.
     assert res.trace.entries and res.trace.entries[0].success is False
 
@@ -98,7 +98,8 @@ async def test_async_tool_timeout_cannot_be_caught(tmp_path):
     res = await svc.run_program(program, profile=["hang"])
 
     assert not res.success
-    assert "a tool call timed out" in (res.error or "")
+    assert res.error == ("waiting on a tool call past its timeout is not allowed in lackpy: "
+                         "make the call smaller")
     # One call, refused; the handler never ran the retry.
     assert [e.success for e in res.trace.entries] == [False]
 

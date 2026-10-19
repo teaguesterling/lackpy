@@ -50,6 +50,18 @@ class TestOverride:
         assert result.success, result.error
         assert result.output == 2
 
+    @pytest.mark.parametrize("passed", [5, "text", [1, "a"], {"k": (1, None)}, None])
+    def test_none_default_accepts_any_literal_value(self, runner, passed):
+        # Review M3: a None default has no type to infer; Plan 3 docblock types tighten it.
+        result = runner.run('params = {"limit": None}\nparams["limit"]', params={"limit": passed})
+        assert result.success, result.error
+        assert result.output == passed
+
+    def test_none_default_still_needs_a_literal_form(self, runner):
+        result = runner.run('params = {"limit": None}\nparams', params={"limit": len})
+        assert not result.success
+        assert "'limit'" in result.error
+
     def test_params_bind_no_bare_name(self, runner):
         result = runner.run('params = {"n": 3}\nn', params={"n": 5})
         assert not result.success
@@ -112,6 +124,13 @@ class TestErrors:
         result = runner.run(program, params={"n": 5})
         assert not result.success
         assert "'n'" in result.error
+
+    def test_function_local_params_binding_is_counted(self, runner):
+        # Review M6: any binding of the name counts, so the message says "anywhere in the program".
+        program = 'params = {"n": 3}\ndef f():\n    params = 2\n    return params\nparams'
+        result = runner.run(program, params={"n": 5})
+        assert not result.success
+        assert "anywhere in the program" in result.error
 
     def test_odd_shapes_run_unchanged_without_passed_params(self, runner):
         result = runner.run('k = "n"\nparams = {k: 3}\nparams = dict(params)\nparams')
