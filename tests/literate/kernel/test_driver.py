@@ -3,7 +3,6 @@
 import pytest
 
 from lackpy.interpreters.literate.kernel.driver import CellExecutionEvent, StreamingDriver
-from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
 from lackpy.interpreters.literate.kernel.recovery import (
     NoRecoveryHandler,
     RecoveryAction,
@@ -12,10 +11,12 @@ from lackpy.interpreters.literate.kernel.recovery import (
 from lackpy.interpreters.literate.kernel.plugins import PluginAdvice
 from lackpy.interpreters.literate.parser import Cell
 
+from ..conftest import make_kernel
+
 
 @pytest.fixture
 def kernel():
-    return LightweightKernel()
+    return make_kernel()
 
 
 @pytest.fixture
@@ -127,7 +128,7 @@ class TestRecoveryIntegration:
                 self.inspected = None
 
             def on_cell_error(self, ctx: RecoveryContext) -> RecoveryAction:
-                return RecoveryAction(kind="inspect", expr="type(x).__name__")
+                return RecoveryAction(kind="inspect", expr="isinstance(x, int)")
 
             def on_inspect_result(self, ctx: RecoveryContext, result: str) -> RecoveryAction:
                 self.inspected = result
@@ -141,7 +142,7 @@ class TestRecoveryIntegration:
         text = "```lackpy\ny = str(undefined)\n```\n"
         await driver.feed(text)
         await driver.flush()
-        assert handler.inspected == "'int'"
+        assert handler.inspected == "True"
 
 
 class TestContinueSemantics:
@@ -205,3 +206,29 @@ class TestTruncationWarning:
         await driver.flush()
         assert "[warning:" in driver.rendered_output
         assert "truncated" in driver.rendered_output
+
+
+class TestRefusalStopsTheStream:
+    """D4: a refusal ends the document; recovery is never consulted for it."""
+
+    @pytest.mark.asyncio
+    async def test_a_refused_cell_interrupts_without_recovery(self, kernel):
+        class FixHandler:
+            max_attempts = 2
+            calls = 0
+
+            def on_cell_error(self, ctx):
+                FixHandler.calls += 1
+                return RecoveryAction(kind="fix", cells=[Cell(cell_type="code", content="y = 1")])
+
+            def on_inspect_result(self, ctx, result):
+                return RecoveryAction(kind="abort")
+
+        driver = StreamingDriver(kernel=kernel, recovery=FixHandler())
+        text = "```lackpy\nfrom pathlib import Path\n```\n\n```lackpy\nz = 2\n```\n"
+        events = await driver.feed(text) + await driver.flush()
+        assert events[0].status == "refused"
+        assert events[0].result.error_phase == "refused"
+        assert FixHandler.calls == 0
+        assert all(e.status == "pending" for e in events[1:])
+        assert driver.ledger.query(entry_type="refused")

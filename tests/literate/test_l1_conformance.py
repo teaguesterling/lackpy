@@ -54,11 +54,15 @@ from lackpy.interpreters.literate.kernel.forgiveness import (
 from lackpy.interpreters.literate.kernel.reactive import DIRTY
 from lackpy.interpreters.literate.kernel.versions import SUPERSEDED
 from lackpy.lang.grader import Grade
+from lackpy.run.paths import load_policy
 
 
 @pytest.fixture
-def context(tmp_path):
-    return ExecutionContext(base_dir=tmp_path)
+def context(tmp_path, tmp_home):
+    # Literate stepy: cells write through Path under a policy whose workspace
+    # is tmp_path (the kit's write_file and host os are gone).
+    return ExecutionContext(base_dir=tmp_path, config={
+        "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)})
 
 
 def lackpy_doc(*cells: str) -> str:
@@ -271,9 +275,9 @@ class TestSemantic5DirtySubgraph:
         result = await run_batch(
             context,
             lackpy_doc(
-                "a = 1",                                  # 0: upstream
+                "from pathlib import Path\na = 1",        # 0: upstream
                 "b = a + 1",                              # 1: pure dependent
-                "w = write_file('log.txt', str(a))",      # 2: effectful dependent
+                "w = Path('log.txt').write_text(str(a))", # 2: effectful dependent
                 "c = 99",                                 # 3: independent
                 "a = 2",                                  # 4: re-assertion
             ),
@@ -578,7 +582,7 @@ class TestReassertionFailureConformance:
         result = await run_batch(
             context,
             lackpy_doc(
-                "import pathlib\ntarget = pathlib.Path(%r)" % str(out),
+                "from pathlib import Path\ntarget = Path('tick.txt')",
                 "a = 1",
                 "n = target.write_text(f'tick{a}')",
                 "a = 0",
@@ -619,7 +623,8 @@ class TestRuntimeEffectObservation:
     """
 
     HELPER_WRITE_DOC = (
-        "def save(v):\n    return write_file('helper_out.txt', v)",  # 0
+        "from pathlib import Path\n"
+        "def save(v):\n    return Path('helper_out.txt').write_text(v)",  # 0
         "seed = 'one'",                                              # 1
         "res = save(seed)",   # 2: helper-wrapped write — statically "pure"
         "seed = 'two'",       # 3: re-assert → cell 2 dirty
@@ -648,13 +653,15 @@ class TestRuntimeEffectObservation:
 
     @pytest.mark.asyncio
     async def test_helper_wrapped_write_reruns_in_permissive_mode(
-        self, tmp_path
+        self, tmp_path, tmp_home
     ):
         # The SAME document under permissive mode re-runs the effectful
         # dependent — the effect re-fires, and the ledger says so.  This test
         # exists to document the mode difference.
         context = ExecutionContext(
-            base_dir=tmp_path, config={"reactive_mode": "permissive"}
+            base_dir=tmp_path, config={
+                "reactive_mode": "permissive",
+                "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)},
         )
         result = await run_batch(context, lackpy_doc(*self.HELPER_WRITE_DOC))
         dirty = {
@@ -692,39 +699,6 @@ class TestRuntimeEffectObservation:
         assert dirty[1].detail["reexecuted"] is True
         assert dirty[1].detail["outcome"] == "clean"
         assert result.metadata["variables"]["label"] == "BOB"
-
-    @pytest.mark.asyncio
-    async def test_stdlib_fs_mutation_is_observed_and_withheld(
-        self, context, tmp_path
-    ):
-        # Event-set completeness (third review): os.symlink and Path.touch
-        # fire PROPER audit events (os.symlink / os.utime — not the accepted
-        # flags-based os.open gap), so a cell using them must tag effectful
-        # and be withheld in strict mode: each effect fires exactly once.
-        base = str(tmp_path)
-        doc = lackpy_doc(
-            "import os, pathlib",
-            f"base = pathlib.Path({base!r})\nseed = 'a'",
-            "os.symlink(base / 'target', base / ('lnk_' + seed))\n"
-            "(base / ('touched_' + seed)).touch()\n"
-            "done = seed",
-            "seed = 'b'",  # re-assert → dirties the effectful cell
-        )
-        result = await run_batch(context, doc)
-        dirty = {
-            e.detail["cell_index"]: e
-            for e in result.metadata["ledger"].query(entry_type=DIRTY)
-        }
-        assert dirty[2].detail["reexecuted"] is False
-        assert dirty[2].detail["mode"] == "strict"
-        observed = dirty[2].detail["observed_effects"]
-        assert "os.symlink" in observed
-        assert "os.utime" in observed  # Path.touch's observable half
-        # Fired once: only the 'a' artifacts exist, never the 'b' ones.
-        assert (tmp_path / "lnk_a").is_symlink()
-        assert not (tmp_path / "lnk_b").exists()
-        assert (tmp_path / "touched_a").exists()
-        assert not (tmp_path / "touched_b").exists()
 
     @pytest.mark.asyncio
     async def test_invalid_reactive_mode_rejected(self, tmp_path):
@@ -785,15 +759,6 @@ class TestInjectedAndIdentityRebindConformance:
         ]
         assert err and err[-1].detail["kept_injected"] == ["config"]
         assert round_is_left(ledger.entries())
-
-    @pytest.mark.asyncio
-    async def test_injected_tool_failed_rebind_keeps_tool(self, context):
-        # Same gate for an injected TOOL name: a failing re-bind must not
-        # replace the live callable with an ErrorValue.
-        session = LiterateSession(context)
-        await session.step(lackpy_doc("read_file = 1 // 0"))
-        assert callable(session._kernel.lookup("read_file"))
-        assert not session.ledger.query(entry_type=SUPERSEDED, name="read_file")
 
     @pytest.mark.asyncio
     async def test_document_asserted_name_still_reifies_on_failed_rebind(

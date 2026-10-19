@@ -4,7 +4,8 @@ Called by StreamingDriver._handle_failure() when a cell fails.
 The handler receives RecoveryContext (failed cell, error, scope,
 plugin advice) and returns a RecoveryAction:
   - fix: execute replacement cells (handler parses model response)
-  - inspect: evaluate an expression, feed result back to handler
+  - inspect: evaluate an expression (kernel.inspect, i.e. CellSession.eval_expr:
+    validated, restricted), feed result back to handler
   - skip: mark cell skipped, continue with next
   - abort: stop execution
 

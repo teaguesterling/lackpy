@@ -1,13 +1,16 @@
 """Bounded rendering of interpolated values in prose (L6).
 
-Prose interpolation (``{expr}`` -> f-string) used to render the FULL str() of
-arbitrarily large values: a 500-element list printed all 500 elements into the
-document. The compiler now routes interpolated expressions through
-:data:`DISPLAY_HELPER_NAME` (``__literate_display__``), a namespace-injected
-callable built here, which truncates large collections to a head + count +
+Prose interpolation used to render the FULL str() of arbitrarily large values:
+a 500-element list printed all 500 elements into the document. The kernel now
+formats each ``{expr}`` value on the HOST side (design D3): it evaluates the
+expression with ``CellSession.eval_expr`` and passes the value to the
+display built here, which truncates large collections to a head + count +
 tail form::
 
     [1, 2, 3, … n=500 … 497, 498, 499]
+
+The value is data (``runner._is_data``) or a ``repr`` text, never a live
+object, so nothing here can run document code.
 
 Contract:
 
@@ -21,21 +24,13 @@ Contract:
     back into a cell as a binding fails at the syntax level rather than
     silently re-materializing a partial value.
   - The threshold is configurable per run via
-    ``ExecutionContext.config["display_threshold"]`` (see
-    ``_build_namespace``); the kernel injects a default-threshold helper when
-    none is provided, so the streaming path is covered too.
-
-Like the ``@continue`` sentinel (``__literate_continue__``), compiled prose
-that interpolates values requires the literate runtime namespace; compiled
-source is not standalone-executable without it.
+    ``ExecutionContext.config["display_threshold"]``; a kernel built without
+    one uses the default, so the streaming path is covered too.
 """
 
 from __future__ import annotations
 
 from typing import Any, Callable
-
-#: Name the compiler emits and the kernel/namespace builders inject.
-DISPLAY_HELPER_NAME = "__literate_display__"
 
 #: Collections with more elements than this render truncated. Chosen so a
 #: screenful of scalars still prints whole while "I interpolated the whole
@@ -101,8 +96,8 @@ def _elide(head_items: list[str], tail_items: list[str], n: int) -> str:
 
 
 def make_display(threshold: int = DEFAULT_DISPLAY_THRESHOLD) -> Callable[[Any], str]:
-    """Build the ``__literate_display__`` callable for a namespace, binding
-    the (possibly context-configured) threshold."""
+    """Build the host-side display for a kernel, binding the (possibly
+    context-configured) threshold."""
 
     def _display(value: Any) -> str:
         return truncated_display(value, threshold)

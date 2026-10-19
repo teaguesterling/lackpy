@@ -21,16 +21,20 @@ class CellResult:
     success: bool
     output: str | None
     error: str | None
-    error_phase: str | None  # "static" | "runtime"
+    #: "static" | "validate" | "runtime" | "refused" | "disabled"
+    error_phase: str | None
     namespace_delta: dict[str, Any]
     cell_index: int
     #: For a RUNTIME failure: the line (in the compiled cell source, the
-    #: ``"<cell>"`` frame) that was executing at top level when the cell
+    #: cell's ``"<lackpy>"`` frame) that was executing at top level when the cell
     #: raised.  Lets the error-reification path tell which top-level
     #: statements completed before the failure (e.g. an identity rebind like
     #: ``x = x`` that the identity-based namespace delta cannot see).
     #: ``None`` on success and for static failures.
     error_lineno: int | None = None
+    #: The ``CellSession`` id of the run (for ``rerun_cell``); ``None`` for a
+    #: cell that ran nothing in the session (prose, ``@continue``, a static failure).
+    cell_id: int | None = None
 
 
 class KernelInterface(IncrementalInterpreter, Protocol):
@@ -38,7 +42,7 @@ class KernelInterface(IncrementalInterpreter, Protocol):
     :class:`~lackpy.interpreters.base.IncrementalInterpreter` (RFC 0001 Addendum E).
 
     The runtime base owns the incremental core (``execute_cell`` + ``get_namespace``);
-    literate adds the kernel-only affordances (``inspect``/``get_scope``/``restart``) the
+    literate adds the kernel-only affordances (``inspect``/``get_scope``) the
     streaming driver and recovery handler use. Declaring the inheritance makes the lift
     explicit rather than coincidental — ``LightweightKernel`` is one concrete
     ``IncrementalInterpreter``, and the one-shot ``Interpreter`` is "run the whole program
@@ -47,5 +51,4 @@ class KernelInterface(IncrementalInterpreter, Protocol):
     def execute_cell(self, cell: Cell, cell_index: int) -> CellResult: ...
     def inspect(self, expr: str) -> str: ...
     def get_scope(self) -> dict[str, str]: ...
-    def restart(self) -> None: ...
     def get_namespace(self) -> dict[str, Any]: ...

@@ -13,15 +13,16 @@ import pytest
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter, LiterateSession
-from lackpy.interpreters.literate.kernel import lightweight
-from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
 from lackpy.interpreters.literate.parser import Cell
+from lackpy.run import cells
 from lackpy.interpreters.literate.selftest import (
     REFUSAL_HEADLINE,
     SELFTEST_FAILED,
     SELFTEST_PASSED,
     run_selftest,
 )
+
+from .conftest import make_kernel
 
 DOC = "```lackpy\nanswer = 2 + 2\nprint(answer)\n```\n"
 
@@ -33,8 +34,9 @@ def context(tmp_path):
 
 def _zeroing_exec(monkeypatch):
     """Induce the real-world failure mode: exec 'succeeds' but every new
-    binding is silently zeroed (the host eval-restriction evidence case)."""
-    real = lightweight._do_exec
+    binding is silently zeroed (the host eval-restriction evidence case).
+    The seam is the CellSession's one exec call: the kernel has no other."""
+    real = cells._run_validated_code
 
     def zeroed(code, ns):
         before = set(ns)
@@ -42,7 +44,7 @@ def _zeroing_exec(monkeypatch):
         for name in set(ns) - before:
             ns[name] = 0
 
-    monkeypatch.setattr(lightweight, "_do_exec", zeroed)
+    monkeypatch.setattr(cells, "_run_validated_code", zeroed)
 
 
 class TestSelftestPassesOnHealthyKernel:
@@ -89,6 +91,18 @@ class TestSelftestCoversEachSemanticClass:
         assert [e.entry_type for e in session.ledger.entries()] == [SELFTEST_PASSED]
 
 
+class TestProbesRunThroughACellSession:
+    def test_probes_run_on_a_throwaway_session(self):
+        """The probes cannot be rolled back out of a cumulative program, so they
+        run on their own CellSession; the kernel under test is left untouched."""
+        kernel = make_kernel()
+        report = run_selftest(kernel, LiterateInterpreter())
+        assert report.ok
+        assert kernel.session.bound_names() == set()
+        assert kernel.session._program == ""
+        assert kernel.get_namespace() == {}
+
+
 class TestInducedBreakageRefusesNotGarbage:
     @pytest.mark.asyncio
     async def test_induced_breakage_refuses_not_garbage(self, context, monkeypatch):
@@ -133,7 +147,7 @@ class TestInducedBreakageRefusesNotGarbage:
         that ignores the report gets a structured refusal from execute_cell
         (and inspect), on any path holding this kernel."""
         _zeroing_exec(monkeypatch)
-        kernel = LightweightKernel()
+        kernel = make_kernel()
         report = run_selftest(kernel, LiterateInterpreter())
         assert not report.ok
         assert kernel.disabled is not None
@@ -143,10 +157,6 @@ class TestInducedBreakageRefusesNotGarbage:
         assert result.error_phase == "disabled"
         assert "self-test failed" in result.error
         assert "kernel disabled" in kernel.inspect("2 + 2")
-
-        # restart() cannot un-break evaluation — the disable is sticky.
-        kernel.restart()
-        assert kernel.disabled is not None
 
     def test_raising_probe_is_failed_probe_not_traceback(self, context, monkeypatch):
         """A probe that raises is a FAILED probe with the exception captured

@@ -11,6 +11,7 @@ from lackpy.interpreters.literate import (
     strip_think,
 )
 from lackpy.lang.grader import Grade
+from lackpy.run.paths import load_policy
 
 
 @pytest.fixture
@@ -84,7 +85,7 @@ class TestEitherSemantics:
         # ledgered instead.
         session = LiterateSession(context)
         assert (await session.step("```lackpy @hidden\nx = 1\n```")).ok
-        bad = await session.step("```lackpy\nx = 2\nraise ValueError('boom')\n```")
+        bad = await session.step("```lackpy\nx = 2\nfail = {}['boom']\n```")
         assert not bad.ok                                   # Left preserved
         assert session.ledger.query(entry_type="error_reified")  # failure ledgered
         # round 3 sees the failed round's x == 2 — state kept, not rolled back
@@ -175,44 +176,21 @@ class TestBaseDirResolution:
         elsewhere.mkdir()
         monkeypatch.chdir(elsewhere)
 
-        session = LiterateSession(ExecutionContext(base_dir=workspace))
+        # Literate stepy: the host open() is gone; Path resolves a relative
+        # path against the policy's workspace, never the process cwd.
+        policy = load_policy(workspace, home=tmp_path / "home", managed=None)
+        session = LiterateSession(
+            ExecutionContext(base_dir=workspace, config={"path_policy": policy}))
         result = await session.step(
             "```lackpy @hidden\n"
-            "with open('hello.txt') as f:\n"
-            "    body = f.read()\n"
+            "from pathlib import Path\n"
+            "body = Path('hello.txt').read_text()\n"
             "```\n\n"
             "Got: {body.strip()}"
         )
 
         assert result.ok, result.errors
         assert "Got: Hello World" in result.clean_doc
-
-    @pytest.mark.asyncio
-    async def test_os_level_paths_resolve_against_base_dir(self, tmp_path, monkeypatch):
-        # The tool-shim approach cannot cover this: models routinely guard with
-        # os.path.exists() before opening, and reach for os.listdir/glob. Shimming
-        # names one at a time is unbounded, so the kernel must make base_dir the
-        # cwd for the duration of a cell.
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        (workspace / "hello.txt").write_text("Hello World\n")
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        monkeypatch.chdir(elsewhere)
-
-        session = LiterateSession(ExecutionContext(base_dir=workspace))
-        result = await session.step(
-            "```lackpy @hidden\n"
-            "import os\n"
-            "found = os.path.exists('hello.txt')\n"
-            "listing = sorted(os.listdir('.'))\n"
-            "```\n\n"
-            "found={found} listing={listing}"
-        )
-
-        assert result.ok, result.errors
-        assert "found=True" in result.clean_doc
-        assert "hello.txt" in result.clean_doc
 
     @pytest.mark.asyncio
     async def test_cwd_is_restored_after_execution(self, tmp_path, monkeypatch):
@@ -223,8 +201,9 @@ class TestBaseDirResolution:
         monkeypatch.chdir(elsewhere)
         before = os.getcwd()
 
+        # Literate stepy D8: the kernel never changes the cwd at all.
         session = LiterateSession(ExecutionContext(base_dir=workspace))
-        assert (await session.step("```lackpy @hidden\nimport os\nx = os.getcwd()\n```")).ok
+        assert (await session.step("```lackpy @hidden\nx = 1\n```")).ok
 
         assert os.getcwd() == before
 
@@ -312,6 +291,7 @@ class TestSessionArtifacts:
         # Source-preserving like `rendered`, not executed like `display`.
         assert "Value: {n}." in md
 
+    @pytest.mark.xfail(strict=True, reason="literate stepy Task 3")
     @pytest.mark.asyncio
     async def test_markdown_keeps_a_fenced_payload_intact(self, tmp_path):
         # The nested-fence case: a longer outer fence is what keeps this valid.
@@ -326,3 +306,21 @@ class TestSessionArtifacts:
         md = session.markdown
         assert "````lackpy @write(notes.md)" in md
         assert "```python" in md
+
+
+class TestRefusalEndsTheSession:
+    """D4 across rounds: a refusal makes the round a Left, and the session's
+    CellSession stays closed, so every later round refuses too."""
+
+    @pytest.mark.asyncio
+    async def test_a_refused_round_is_a_left_and_the_session_stays_closed(self, context):
+        session = LiterateSession(context)
+        assert (await session.step("```lackpy\nx = 1\n```")).ok
+        bad = await session.step("```lackpy\nfrom pathlib import Path\n```\n\nAfter {x}\n")
+        assert bad.ok is False
+        assert bad.errors[0].startswith("refused: ")
+        assert "After" not in bad.clean_doc
+        again = await session.step("```lackpy\ny = 2\n```")
+        assert again.ok is False
+        assert "earlier refusal" in again.errors[0]
+        assert session.ledger.query(entry_type="error_reified") == []

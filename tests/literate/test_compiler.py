@@ -1,15 +1,14 @@
 """Tests for the literate document compiler."""
 
-import sys
-
 import pytest
 
 from lackpy.interpreters.literate.compiler import (
     CONTINUE_SENTINEL,
+    ProseSegment,
     compile_cells,
     compile_document,
+    prose_segments,
 )
-from lackpy.interpreters.literate.display import DISPLAY_HELPER_NAME, make_display
 from lackpy.interpreters.literate.parser import Cell, Frontmatter, ParseResult
 
 
@@ -17,124 +16,77 @@ def _make_result(cells: list[Cell]) -> ParseResult:
     return ParseResult(frontmatter=Frontmatter(), cells=cells)
 
 
-class TestProseCompilation:
+def _segs(content: str):
+    return prose_segments(Cell(cell_type="prose", content=content))
+
+
+class TestProseSegments:
+    """D3: prose compiles to text and expression segments, not to code.
+
+    The kernel renders a text segment as it is and an expression segment
+    through ``CellSession.eval_expr``; nothing here is executed."""
+
     def test_simple_prose(self):
-        cells = [Cell(cell_type="prose", content="Hello world")]
-        code = compile_cells(_make_result(cells))
-        assert "print(" in code and "Hello world" in code
+        assert _segs("Hello world") == [ProseSegment(text="Hello world")]
 
     def test_prose_with_interpolation(self):
-        # Interpolated expressions route through the display helper so large
-        # values render truncated (see display.py).
-        cells = [Cell(cell_type="prose", content="Value is {x}")]
-        code = compile_cells(_make_result(cells))
-        assert "print(" in code and f"{{{DISPLAY_HELPER_NAME}(x)}}" in code
+        assert _segs("Value is {x}") == [
+            ProseSegment(text="Value is "), ProseSegment(expr="x", display=True)]
 
     def test_empty_prose(self):
-        cells = [Cell(cell_type="prose", content="   \n  ")]
-        code = compile_cells(_make_result(cells))
-        assert "print()" in code
+        assert _segs("   \n  ") == []
 
     def test_prose_with_triple_quotes(self):
-        cells = [Cell(cell_type="prose", content='Has """quotes"""')]
-        code = compile_cells(_make_result(cells))
-        assert "print(" in code
+        assert _segs('Has """quotes"""') == [ProseSegment(text='Has """quotes"""')]
 
     def test_prose_with_json_braces_not_interpolated(self):
-        cells = [Cell(cell_type="prose", content='Config: {"key": "value"}')]
-        code = compile_cells(_make_result(cells))
-        assert 'f"""' not in code
-        assert "print(" in code
+        assert _segs('Config: {"key": "value"}') == [
+            ProseSegment(text='Config: {"key": "value"}')]
 
     def test_prose_with_attribute_interpolation(self):
-        cells = [Cell(cell_type="prose", content="Type: {obj.name}")]
-        code = compile_cells(_make_result(cells))
-        assert f"{DISPLAY_HELPER_NAME}(obj.name)" in code
+        assert _segs("Type: {obj.name}")[1] == ProseSegment(expr="obj.name", display=True)
 
     def test_prose_with_function_call_interpolation(self):
-        cells = [Cell(cell_type="prose", content="Count: {len(items)}")]
-        code = compile_cells(_make_result(cells))
-        assert f"{DISPLAY_HELPER_NAME}(len(items))" in code
+        assert _segs("Count: {len(items)}")[1] == ProseSegment(expr="len(items)", display=True)
 
     def test_prose_with_nested_call_interpolation(self):
-        cells = [Cell(cell_type="prose", content="Count: {len(inv.items())}")]
-        code = compile_cells(_make_result(cells))
-        assert f"{DISPLAY_HELPER_NAME}(len(inv.items()))" in code
+        assert _segs("Count: {len(inv.items())}")[1] == ProseSegment(
+            expr="len(inv.items())", display=True)
 
     def test_prose_with_format_spec_interpolation(self):
-        # A format spec can't be helper-wrapped; the plain f-string remains
-        # (a formatted value is already user-bounded).
-        cells = [Cell(cell_type="prose", content="Price: {total:.2f}")]
-        code = compile_cells(_make_result(cells))
-        assert "{total:.2f}" in code
-        assert DISPLAY_HELPER_NAME not in code
+        # A format spec or conversion is applied as Python does: the segment is
+        # an f-string, evaluated in the session, and its text is not truncated.
+        seg = _segs("Price: {total:.2f}")[1]
+        assert seg.display is False
+        assert seg.expr.startswith("f") and "total:.2f" in seg.expr
+
+    def test_prose_with_conversion_interpolation(self):
+        seg = _segs("S: {s!r}")[1]
+        assert seg.display is False and "s!r" in seg.expr
 
     def test_prose_with_subscript_interpolation(self):
-        cells = [Cell(cell_type="prose", content="First: {items[0]}")]
-        code = compile_cells(_make_result(cells))
-        assert f"{DISPLAY_HELPER_NAME}(items[0])" in code
+        assert _segs("First: {items[0]}")[1] == ProseSegment(expr="items[0]", display=True)
 
+    def test_every_expression_is_one_line(self):
+        for content in ("{a +\n b}", "{chr(10).join([f'{k}\\t{v}' for k, v in d.items()])}"):
+            for seg in _segs(content):
+                if seg.expr is not None:
+                    assert "\n" not in seg.expr
 
-class TestProseCompilationEdgeCases:
-    """Edge cases that previously caused SyntaxError with repr()-based compilation."""
+    def test_a_malformed_expression_is_kept_for_the_error_path(self):
+        seg = _segs("Bad: {x +}")[1]
+        assert seg.expr == "x +"
 
-    def test_multiline_prose_with_interpolation(self):
-        content = "# Title\n\nFound {count} items.\n\nDone."
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        ns = {"count": 5}
-        compiled = compile(code, "<test>", "exec")
-        _safe_exec(compiled, ns)
+    def test_compiled_prose_is_analysis_source_only(self):
+        # compile_cell(prose) gives the expressions, one per line, for static
+        # analysis (references, the dependency graph). It has no print and no
+        # display helper: the kernel never execs it.
+        code = compile_cells(_make_result([Cell(cell_type="prose", content="A {x} b {len(ys)}")]))
+        assert code == "x\nlen(ys)"
+        assert "print" not in code and "__literate" not in code
 
-    def test_dict_subscript_with_quotes_in_interpolation(self):
-        content = "Value: {data['key']}"
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        ns = {"data": {"key": 42}, "print": print}
-        compiled = compile(code, "<test>", "exec")
-        _safe_exec(compiled, ns)
-
-    def test_nested_braces_in_interpolation(self):
-        content = "Items: {chr(10).join([f'- {x}' for x in items])}"
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        ns = {"items": ["a", "b"], "chr": chr, "print": print}
-        compiled = compile(code, "<test>", "exec")
-        _safe_exec(compiled, ns)
-
-    @pytest.mark.skipif(
-        sys.version_info < (3, 12),
-        reason="backslash in an f-string expression part requires Python 3.12+",
-    )
-    def test_backslash_in_nested_fstring(self):
-        r"""Backslash-n in nested f-string expression should not cause SyntaxError."""
-        content = r"Rows: {chr(10).join([f'{k}\t{v}' for k, v in data.items()])}"
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        ns = {"data": {"a": 1}, "chr": chr, "print": print}
-        compiled = compile(code, "<test>", "exec")
-        _safe_exec(compiled, ns)
-
-    def test_multiple_interpolations_in_multiline_prose(self):
-        content = "Found {total} files totaling {loc} lines.\n\nAverage: {avg} lines per file."
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        ns = {"total": 100, "loc": 5000, "avg": 50}
-        compiled = compile(code, "<test>", "exec")
-        _safe_exec(compiled, ns)
-
-    def test_triple_quotes_in_prose_with_interpolation(self):
-        content = 'Result is {x} with """emphasis"""'
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        assert "print(" in code
-        compile(code, "<test>", "exec")
-
-    def test_prose_with_literal_backslash(self):
-        content = r"Path: C:\Users\{name}"
-        cells = [Cell(cell_type="prose", content=content)]
-        code = compile_cells(_make_result(cells))
-        compile(code, "<test>", "exec")
+    def test_prose_without_interpolation_compiles_to_nothing(self):
+        assert compile_cells(_make_result([Cell(cell_type="prose", content="Hello")])) == ""
 
 
 class TestSplitInterpolation:
@@ -285,26 +237,19 @@ class TestDiffCompilation:
 
 
 class TestScratchCompilation:
-    def test_scratch_captures_variables(self):
+    def test_scratch_compiles_to_its_body(self):
+        # The kernel runs the body through the session and writes the
+        # [scratch: ...] summary on the host side (no locals(), which the
+        # validator rejects).
         cells = [Cell(cell_type="scratch", content="x = 42\ny = 'hello'")]
-        code = compile_cells(_make_result(cells))
-        assert "_scratch_names_before" in code
-        assert "_scratch_names_after" in code
-        assert "x = 42" in code
-        assert "[scratch:" in code
-
-    def test_scratch_empty_body(self):
-        cells = [Cell(cell_type="scratch", content="")]
-        code = compile_cells(_make_result(cells))
-        assert "pass" in code
+        assert compile_cells(_make_result(cells)) == "x = 42\ny = 'hello'"
 
 
 class TestFullDocumentCompilation:
     def test_compile_document_string(self):
         doc = "Hello {name}\n\n```lackpy\nname = 'World'\n```\n\nGoodbye"
         code = compile_document(doc)
-        assert "print(" in code
-        assert "name = 'World'" in code
+        assert code == "name\nname = 'World'"
 
     def test_compile_document_with_errors_raises(self):
         doc = "```lackpy @read\n```"
@@ -333,57 +278,51 @@ Total: {total}"""
 
         code = compile_document(doc)
         lines = code.split("\n")
-        assert any("print(" in l and "Report" in l for l in lines)
+        assert not any("Report" in l for l in lines)  # prose text is not code
         assert any("data = [1, 2, 3]" in l for l in lines)
-        assert any("len(data)" in l for l in lines)
+        assert "len(data)" in lines
         assert any("total = sum(data)" in l for l in lines)
-        assert any(f"{DISPLAY_HELPER_NAME}(total)" in l for l in lines)
+        assert lines[-1] == "total"
 
 
-class TestCompilationExecutable:
-    """Verify compiled code actually runs.
+class TestCompiledDocumentsRunInTheKernel:
+    """The compiled output is never exec'd by the host (anti-goal); these
+    documents run through the kernel and its CellSession instead."""
 
-    These tests use exec() intentionally to validate that the compiler
-    output is syntactically valid and semantically correct Python.
-    """
+    @staticmethod
+    def _render(doc: str) -> str:
+        from lackpy.interpreters.literate.parser import parse
 
-    def _run(self, code: str, namespace: dict | None = None) -> list[str]:
-        """Run compiled code, capturing print output."""
-        output: list[str] = []
-        ns = namespace or {}
-        ns["print"] = lambda *a, **kw: output.append(" ".join(str(x) for x in a))
-        compiled = compile(code, "<test>", "exec")
-        _safe_exec(compiled, ns)
-        return output
+        from .conftest import make_kernel
 
+        kernel = make_kernel()
+        out = []
+        for i, cell in enumerate(parse(doc).cells):
+            result = kernel.execute_cell(cell, i)
+            assert result.success, result.error
+            out.append(result.output or "")
+        return "".join(out)
 
-def _safe_exec(code: object, ns: dict) -> None:
-    """Wrapper for exec used in tests — validates compiled literate output.
-
-    Compiled prose interpolation calls the display helper, which the literate
-    kernel injects at runtime (like the @continue sentinel); standalone exec
-    must provide it too."""
-    ns.setdefault(DISPLAY_HELPER_NAME, make_display())
-    exec(code, ns)  # noqa: S102
-
-
-class TestCompilationRuns(TestCompilationExecutable):
     def test_prose_only_executes(self):
-        doc = "Hello world"
-        code = compile_document(doc)
-        output = self._run(code)
-        assert output == ["Hello world"]
+        assert self._render("Hello world") == "Hello world\n"
 
     def test_code_with_interpolation_executes(self):
-        doc = "```lackpy @hidden\nx = 42\n```\n\nThe answer is {x}."
-        code = compile_document(doc)
-        output = self._run(code)
-        assert any("42" in line for line in output)
+        out = self._render("```lackpy @hidden\nx = 42\n```\n\nThe answer is {x}.")
+        assert "The answer is 42." in out
 
     def test_scratch_executes(self):
-        doc = "```lackpy @scratch\na = 10\nb = 'hi'\n```"
-        code = compile_document(doc)
-        output = self._run(code)
-        assert any("[scratch:" in line for line in output)
-        assert any("a=int" in line for line in output)
-        assert any("b=str" in line for line in output)
+        out = self._render("```lackpy @scratch\na = 10\nb = 'hi'\n```")
+        assert "[scratch: a=int, b=str]" in out
+
+    def test_multiline_prose_with_interpolation(self):
+        out = self._render("```lackpy\ncount = 5\n```\n\n# Title\n\nFound {count} items.\n\nDone.")
+        assert "Found 5 items." in out
+
+    def test_backslash_in_nested_fstring(self):
+        out = self._render("```lackpy\ndata = {'a': 1}\n```\n\n"
+                           r"Rows: {chr(10).join([f'{k}\t{v}' for k, v in data.items()])}")
+        assert "Rows: a\t1" in out
+
+    def test_prose_with_literal_backslash(self):
+        out = self._render("```lackpy\nname = 'me'\n```\n\n" r"Path: C:\Users\{name}")
+        assert r"Path: C:\Users\me" in out

@@ -49,6 +49,9 @@ class CellOutcome:
             (an ``Exception``), ``"refused"`` (a ``LackpyRefusal``, now or earlier), or None.
         delta: The names this cell bound or rebound whose values are data.
         cell_id: The cell's identity, for :meth:`CellSession.rerun_cell`.
+        line: For a ``"runtime"`` failure, the cell's top-level line that was
+            running when it raised (the literate kernel uses it to tell which
+            top-level statements completed); else None.
     """
 
     ok: bool
@@ -57,6 +60,7 @@ class CellOutcome:
     phase: Phase | None = None
     delta: dict[str, Any] = field(default_factory=dict)
     cell_id: int | None = None
+    line: int | None = None
 
 
 @dataclass
@@ -108,6 +112,16 @@ class CellSession:
     def bound_names(self) -> set[str]:
         """The names the cells have bound so far (the runtime's own names left out)."""
         return {k for k in self._namespace if k not in self._runtime_names}
+
+    def snapshot(self) -> dict[str, Any]:
+        """The bound names whose values are data (``runner._is_data``), with their values.
+
+        The values are the namespace's own objects, not copies, so an in-place
+        change made by a later cell shows in them. A value that is not data
+        (a function, a module, a ``Path``) is left out: the host never holds a
+        live object (ruling N1). ``bound_names()`` still lists its name.
+        """
+        return data_variables(self._namespace, lambda k: k not in self._runtime_names)
 
     def run_cell(self, source: str) -> CellOutcome:
         """Validate ``source`` as an extension of the program, then exec it in the namespace."""
@@ -162,7 +176,7 @@ class CellSession:
             self._refusal = error_text(e)
             return ExprOutcome(ok=False, phase="refused", error=self._refusal)
         except Exception as e:
-            return ExprOutcome(ok=False, phase="runtime", error=error_text(e))
+            return ExprOutcome(ok=False, phase="runtime", error=_runtime_text(e))
         finally:
             self._captured.clear()
 
@@ -219,14 +233,17 @@ class CellSession:
         return ExprOutcome(ok=True, value=value)
 
     def _failure(self, cell_id: int, e: BaseException) -> CellOutcome:
-        text = error_text(e)
+        line = None
         if isinstance(e, LackpyRefusal):
+            text = error_text(e)
             self._refusal = text
             phase: Phase = "refused"
         else:
+            text = _runtime_text(e)
             phase = "runtime"
+            line = _cell_line(e)
         return CellOutcome(ok=False, stdout="".join(self._captured), error=text,
-                           phase=phase, cell_id=cell_id)
+                           phase=phase, cell_id=cell_id, line=line)
 
     def _closed_text(self) -> str:
         return f"the session ended at an earlier refusal: {self._refusal}"
@@ -279,3 +296,18 @@ class CellSession:
                 text += f" [{where}an earlier cell's line, made invalid by this cell]"
             parts.append(f"{text} ({v.hint})" if v.hint else text)
         return f"Validation failed: {'; '.join(parts)}"
+
+
+def _runtime_text(e: BaseException) -> str:
+    """``Type: message``, as python3 shows an exception: ``str(KeyError('k'))`` alone is ``'k'``."""
+    return f"{type(e).__name__}: {error_text(e)}"
+
+
+def _cell_line(e: BaseException) -> int | None:
+    """The line of the shallowest ``<lackpy>`` frame: the cell's top-level statement that raised."""
+    tb = e.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == "<lackpy>":
+            return tb.tb_lineno
+        tb = tb.tb_next
+    return None

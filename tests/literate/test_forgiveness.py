@@ -189,12 +189,12 @@ class TestErrorAsValue:
         # real value — the failure itself is what gets ledgered.
         session = LiterateSession(context)
         result = await session.step(
-            "```lackpy\nx = 2\nraise ValueError('boom')\n```"
+            "```lackpy\nx = 2\nfail = {}['boom']\n```"
         )
         assert not result.ok
         assert session._kernel.get_namespace()["x"] == 2
         errs = session.ledger.query(entry_type="error_reified")
-        assert errs and "ValueError" in errs[0].detail["error"]
+        assert errs and "KeyError" in errs[0].detail["error"]
 
     @pytest.mark.asyncio
     async def test_error_value_chains_to_dependent_cell(self, context):

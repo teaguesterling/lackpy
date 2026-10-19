@@ -74,8 +74,9 @@ def test_literate_kernel_conforms_to_IncrementalInterpreter():
     contract (execute_cell + get_namespace), proving the abstraction is consolidation,
     not invention."""
     from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
+    from lackpy.run.cells import CellSession
 
-    assert isinstance(LightweightKernel(), IncrementalInterpreter)
+    assert isinstance(LightweightKernel(CellSession(path_policy=None)), IncrementalInterpreter)
 
 
 def test_KernelInterface_declares_the_runtime_base():

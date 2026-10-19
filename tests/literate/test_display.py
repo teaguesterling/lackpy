@@ -151,12 +151,13 @@ class TestBatchPathRendering:
 class TestStreamingPathRendering:
     @pytest.mark.asyncio
     async def test_driver_prose_interpolation_truncates(self):
-        # The kernel injects the helper itself, so a bare StreamingDriver
-        # (no _build_namespace) still renders bounded.
+        # The kernel formats interpolated values on the host side with a
+        # default threshold, so a bare StreamingDriver still renders bounded.
         from lackpy.interpreters.literate.kernel.driver import StreamingDriver
-        from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
 
-        driver = StreamingDriver(kernel=LightweightKernel())
+        from .conftest import make_kernel
+
+        driver = StreamingDriver(kernel=make_kernel())
         await driver.feed("```lackpy @hidden\nbig = list(range(300))\n```\n\nGot {big}\n")
         await driver.flush()
         assert "… n=300 …" in driver.rendered_output

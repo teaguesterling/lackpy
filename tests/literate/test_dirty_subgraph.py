@@ -31,6 +31,7 @@ from lackpy.interpreters.literate.kernel import (
     Hole,
 )
 from lackpy.interpreters.literate.kernel.forgiveness import round_is_left
+from lackpy.run.paths import load_policy
 
 
 @pytest.fixture
@@ -240,15 +241,17 @@ class TestDirtySubgraphReexecution:
 
     @pytest.mark.asyncio
     async def test_effectful_dependent_is_dirtied_but_not_reexecuted(
-        self, tmp_path
+        self, tmp_path, tmp_home
     ):
         # Effect-replay guard (strict mode): a dependent OBSERVED writing a
-        # file on its first run is marked dirty but NOT re-run.
-        context = ExecutionContext(base_dir=tmp_path)
+        # file on its first run is marked dirty but NOT re-run. (Literate
+        # stepy: the write goes through Path under a policy, not write_file.)
+        context = ExecutionContext(base_dir=tmp_path, config={
+            "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)})
         result = await _run(
             context,
-            "```lackpy\nname = 'a.txt'\n```\n\n"
-            "```lackpy\nwrote = write_file(name, 'hi')\n```\n\n"
+            "```lackpy\nfrom pathlib import Path\nname = 'a.txt'\n```\n\n"
+            "```lackpy\nwrote = Path(name).write_text('hi')\n```\n\n"
             "```lackpy\nname = 'b.txt'\n```",  # re-assert name → dependent write
         )
         ledger = result.metadata["ledger"]
@@ -366,3 +369,37 @@ class TestDirtySubgraphReexecution:
         )
         assert session._kernel.get_namespace()["b"] == 6
         assert session.ledger.query(entry_type=DIRTY)
+
+
+class TestReexecutionThroughTheSession:
+    """Literate stepy Task 2: a dirty dependent re-runs its validated code with
+    ``CellSession.rerun_cell``; the rebind that dirtied it is a new cell."""
+
+    @pytest.mark.asyncio
+    async def test_a_rerun_does_not_append_to_the_program(self, context):
+        session = LiterateSession(context)
+        result = await session.step(
+            "```lackpy\na = 1\n```\n\n```lackpy\nb = a + 1\n```\n\n```lackpy\na = 2\n```")
+        assert result.ok, result.errors
+        assert session._kernel.get_namespace()["b"] == 3
+        assert session._kernel.session._program == "a = 1\nb = a + 1\na = 2"
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_during_reexecution_stops_the_document(
+            self, tmp_path, tmp_home):
+        (tmp_path / "in.txt").write_text("ok")
+        context = ExecutionContext(base_dir=tmp_path, config={
+            "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)})
+        result = await _run(
+            context,
+            "```lackpy\nfrom pathlib import Path\np = 'in.txt'\n```\n\n"
+            "```lackpy\nt = Path(p).read_text()\n```\n\n"
+            "```lackpy\np = '/etc/hostname'\n```\n\n"
+            "```lackpy\nafter = 1\n```\n",
+            )
+        # The linear pass ran every cell; the re-run of cell 1 refused.
+        assert result.success is False
+        refused = result.metadata["ledger"].query(entry_type="refused")
+        assert [e.detail["cell_index"] for e in refused] == [1]
+        assert "/etc/hostname" in result.error
+        assert result.metadata["variables"]["t"] == "ok"  # never reified

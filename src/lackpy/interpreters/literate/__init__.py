@@ -3,9 +3,12 @@
 Pipeline: document → parser.parse() → [Cell] → kernel.execute_cell() → stdout
 
 The kernel compiles each cell type to Python via compiler._COMPILERS,
-runs static analysis (compile check + AST name resolution), then
-evaluates the code in a shared namespace dict. Captured stdout IS
-the rendered document.
+runs static analysis (compile check + AST name resolution), then runs
+the cell through the document's CellSession (lackpy.run.cells): each
+cell is validated as an extension of the program so far and runs in the
+restricted namespace. Prose is rendered from text and expression
+segments, each expression evaluated in the session. Captured stdout IS
+the rendered document. A refusal ends the document (design D4).
 
 This module owns the batch execution path (LiterateInterpreter.execute).
 The streaming path uses kernel.StreamingDriver instead — it adds
@@ -25,8 +28,9 @@ from ..base import (
     InterpreterValidationResult,
 )
 from .annotations import kernel_note
+from ...run.cells import CellSession
 from .compiler import compile_cell
-from .display import DEFAULT_DISPLAY_THRESHOLD, DISPLAY_HELPER_NAME, make_display
+from .display import DEFAULT_DISPLAY_THRESHOLD
 from .effects import (
     LITERATE_TOOL_EFFECTS,
     ToolEffect,
@@ -37,6 +41,7 @@ from .effects import (
     tool_effect_from_spec,
 )
 from .kernel import CellResult, LightweightKernel
+from .kernel.driver import REFUSED
 from .kernel.forgiveness import (
     ERROR_REIFIED,
     HOLE_OPENED,
@@ -55,7 +60,6 @@ from .kernel.static_analysis import BUILTIN_NAMES, collect_bindings, collect_nam
 from .kernel.versions import SUPERSEDED, BindingVersions, value_kind
 from .parser import Cell, parse
 from .prompt import LITERATE_HINT
-from .tools import make_tool_namespace
 
 
 class LiterateInterpreter:
@@ -104,11 +108,19 @@ class LiterateInterpreter:
         the legible structured refusal instead of running anything (fail
         closed: refusal, not garbage).
         """
-        namespace = _build_namespace(context)
-        kernel = LightweightKernel(namespace=namespace)
+        start = time.perf_counter()
+        try:
+            kernel = _build_kernel(context)
+        except ValueError as exc:
+            return InterpreterExecutionResult(
+                success=False,
+                error=f"Configuration error: {exc}",
+                output_format="none",
+                duration_ms=(time.perf_counter() - start) * 1000,
+                metadata={"completed": False},
+            )
         from .selftest import run_selftest
 
-        start = time.perf_counter()
         report = run_selftest(kernel, self)
         if not report.ok:
             return InterpreterExecutionResult(
@@ -256,6 +268,11 @@ class LiterateInterpreter:
         # executed this round (reified/skipped), so re-running it is a FIRST
         # execution, not a replay.
         observed_effects: dict[int, tuple[str, ...]] = {}
+        # The CellSession id of each cell's run, so the re-exec pass re-runs a
+        # cell's validated code (``rerun_cell``) instead of appending it again.
+        cell_ids: dict[int, int | None] = {}
+        # D4: the text of the refusal that ended this run, if one did.
+        refusal: str | None = None
 
         for index, cell in enumerate(parsed.cells):
             refs, binds = _static_ref_bind_sets(cell)
@@ -281,9 +298,15 @@ class LiterateInterpreter:
             )
             if outcome.executed:
                 observed_effects[index] = outcome.observed_effects
+                cell_ids[index] = outcome.cell_id
             output_parts.append(outcome.rendered)
             if outcome.continue_requested:
                 continue_requested = True
+            if outcome.refusal is not None:
+                # D4: a refusal ends the document. Later cells do not run and
+                # there is no re-exec pass (the session is closed).
+                refusal = outcome.refusal
+                break
 
         # L1.4 re-execution pass (batch/session path only — streaming untouched).
         # A name re-asserted during the linear walk (an L1.3 `superseded`
@@ -292,11 +315,12 @@ class LiterateInterpreter:
         # free: a re-exec that now hits an unknown name / error / over-ceiling
         # source re-reifies a Hole / ErrorValue / Unavailable and re-versions
         # through the very same per-cell pipeline the linear walk used.
-        self._reexecute_dirty_subgraph(
-            parsed.cells, graph, kernel, ledger, versions, assigned_names,
-            reactive_mode, observed_effects, gate_violations, run_mark,
-            output_parts,
-        )
+        if refusal is None:
+            refusal = self._reexecute_dirty_subgraph(
+                parsed.cells, graph, kernel, ledger, versions, assigned_names,
+                reactive_mode, observed_effects, gate_violations, run_mark,
+                output_parts, cell_ids,
+            )
 
         elapsed = (time.perf_counter() - start) * 1000
 
@@ -331,13 +355,17 @@ class LiterateInterpreter:
             parsed.cells, parsed.frontmatter, _annotations_from_ledger(round_entries)
         )
 
+        errors = [describe_failure(e) for e in failures]
+        if refusal is not None:
+            errors.insert(0, f"refused: {refusal}")
         return InterpreterExecutionResult(
-            success=not failures,
+            success=not failures and refusal is None,
             output=rendered,
-            error="; ".join(describe_failure(e) for e in failures) or None,
+            error="; ".join(errors) or None,
             output_format="markdown",
             duration_ms=elapsed,
             metadata={
+                "refused": refusal,
                 "variables": variables,
                 "continue_requested": continue_requested,
                 "cell_count": len(parsed.cells),
@@ -361,6 +389,8 @@ class LiterateInterpreter:
         ledger: Ledger,
         versions: BindingVersions,
         assigned_names: set[str],
+        rerun_id: int | None = None,
+        rerun: bool = False,
     ) -> _CellOutcome:
         """Run one NON-GATED cell through the full forgiveness pipeline (L1.1–1.3).
 
@@ -397,8 +427,28 @@ class LiterateInterpreter:
         # framing in effects.py) so the re-exec pass can gate on what the
         # cell DID rather than on what its source looks like.
         with observe_effects() as observation:
-            result = kernel.execute_cell(cell, index)
+            if rerun:
+                result = kernel.rerun_cell(cell, index, rerun_id)
+            else:
+                result = kernel.execute_cell(cell, index)
         observed = tuple(sorted(observation.events))
+
+        if result.error_phase == REFUSED:
+            # D4: a refusal is not forgiven. It is never reified as a Hole or
+            # an ErrorValue: it is ledgered, noted through the [kernel]
+            # channel, and the caller stops the document.
+            error = result.error or "refused"
+            ledger.record(REFUSED, detail={
+                "cell_index": index, "cell_type": cell.cell_type,
+                "error": error, "error_phase": REFUSED,
+            })
+            parts = [result.output] if result.output else []
+            parts.append(kernel_note(f"refused: {error}") + "\n")
+            return _CellOutcome(
+                rendered="".join(parts), continue_requested=False,
+                executed=True, observed_effects=observed,
+                cell_id=result.cell_id, refusal=error,
+            )
 
         if not result.success:
             # L1.2: the failure is reified — an error value bound to the names
@@ -416,6 +466,7 @@ class LiterateInterpreter:
             return _CellOutcome(
                 rendered="".join(parts), continue_requested=False,
                 executed=True, observed_effects=observed,
+                cell_id=result.cell_id,
             )
 
         parts = []
@@ -449,6 +500,7 @@ class LiterateInterpreter:
         return _CellOutcome(
             rendered="".join(parts), continue_requested=cont,
             executed=True, observed_effects=observed,
+            cell_id=result.cell_id,
         )
 
     def _reexecute_dirty_subgraph(
@@ -464,7 +516,8 @@ class LiterateInterpreter:
         gate_violations: dict[int, str],
         run_mark: int,
         output_parts: list[str],
-    ) -> None:
+        cell_ids: dict[int, int | None] | None = None,
+    ) -> str | None:
         """Re-execute the stale dependents of this run's re-assertions (L1.4).
 
         A name re-asserted during the linear walk shows up as an L1.3
@@ -532,6 +585,15 @@ class LiterateInterpreter:
         ``observed_effects`` when the re-run performed any.  It never claims
         a clean ``reexecuted=True`` for a re-run that failed.
 
+        THROUGH THE SESSION (literate stepy).  A dependent that ran before
+        re-runs its already-validated code with ``CellSession.rerun_cell``
+        (``cell_ids`` maps the cell index to its session cell id): the
+        program text does not change, so nothing is appended or validated
+        again.  A dependent that never joined the program (hole-skipped, or
+        rejected by the validator) runs as a new cell.  The rebind that made
+        it dirty was itself a new cell.  A refusal during the pass stops it
+        and is returned (D4); otherwise ``None``.
+
         RENDERING.  Re-execution ANNOTATES, never rewrites (the L2 refusal law):
         the original render stands, and each re-run appends one kernel-channel
         note rather than re-emitting the cell's recomputed stdout (so a
@@ -544,7 +606,8 @@ class LiterateInterpreter:
             e.name for e in run_slice if e.entry_type == SUPERSEDED and e.name
         }
         if not reasserted:
-            return
+            return None
+        cell_ids = cell_ids if cell_ids is not None else {}
 
         for index, trigger_names in graph.dirty_closure(reasserted):
             triggered_by = sorted(trigger_names)
@@ -590,9 +653,15 @@ class LiterateInterpreter:
             # the re-execution actually DID, not a precomputed prediction.
             cell_mark = len(ledger.entries())
             outcome = self._run_resolved_cell(
-                cells[index], index, kernel, ledger, versions, assigned_names
+                cells[index], index, kernel, ledger, versions, assigned_names,
+                rerun_id=cell_ids.get(index), rerun=True,
             )
+            if outcome.refusal is not None:
+                output_parts.append(outcome.rendered)
+                return outcome.refusal
             if outcome.executed:
+                if cell_ids.get(index) is None:
+                    cell_ids[index] = outcome.cell_id
                 # Keep the observation current (and ledger the re-run's own
                 # effects — a permissive replay, or a strict-mode effect the
                 # first run's branch never reached).
@@ -611,6 +680,7 @@ class LiterateInterpreter:
             if reified:
                 note += " — failure reified"
             output_parts.append(kernel_note(note) + "\n")
+        return None
 
 
 @dataclass(frozen=True)
@@ -627,6 +697,10 @@ class _CellOutcome:
     continue_requested: bool
     executed: bool = False
     observed_effects: tuple[str, ...] = ()
+    #: The CellSession id of the run (``None`` when nothing ran in the session).
+    cell_id: int | None = None
+    #: The refusal text when the cell's run refused (D4): the document stops.
+    refusal: str | None = None
 
 
 def _static_ref_bind_sets(cell: Cell) -> tuple[set[str], set[str]]:
@@ -776,6 +850,8 @@ def _annotation_text(entry: LedgerEntry) -> str | None:
     et = entry.entry_type
     if et in (HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE):
         return describe_failure(entry)
+    if et == REFUSED:
+        return f"refused: {entry.detail.get('error', 'refused')}"
     if et == SUPERSEDED:
         name = entry.name or "binding"
         frm = entry.detail.get("from_version")
@@ -1135,7 +1211,7 @@ def _reify_unavailable_for_cell(
 _INTERNAL_NAMES = frozenset({
     "read_file", "write_file", "apply_diff",
     "search_content", "run_command", "run_tests",
-    "__literate_continue__", "__literate_display__", "__builtins__",
+    "__literate_continue__", "__builtins__",
     "__continue_requested__",
 })
 
@@ -1147,8 +1223,8 @@ def _gate_effects_map(context: ExecutionContext) -> dict[str, ToolEffect]:
     profile/toolbox-injected tools (``context.tools``) graded by their own
     ``ToolSpec``. Without this the gate would only know the builtins, so an
     injected write-capable tool would classify as pure and slip under a
-    read-only ceiling -- the gate's validation surface must match the execution
-    surface (``_build_namespace`` injects the same ``context.tools`` callables).
+    read-only ceiling. (Since literate stepy Task 2 the callables no longer join
+    the namespace; the grading stays until Task 3 replaces the grade map.)
 
     Each injected tool is graded by ``tool_effect_from_spec``: a spec that declares
     ``effect_kind`` + ``path_arg`` is graded precisely (and an injected write tool
@@ -1167,35 +1243,53 @@ def _gate_effects_map(context: ExecutionContext) -> dict[str, ToolEffect]:
     return effects_map
 
 
-def _build_namespace(context: ExecutionContext) -> dict[str, Any]:
-    """Build the execution namespace for a literate document."""
-    ns: dict[str, Any] = {}
+def _build_kernel(context: ExecutionContext) -> LightweightKernel:
+    """Build the kernel for a literate document: one ``CellSession`` (D1).
 
-    ns.update(make_tool_namespace(context.base_dir))
+    The session's ``PathPolicy`` is ``context.config["path_policy"]``; with
+    none, ``pathlib`` refuses (fail closed). (Literate stepy Task 4 makes the
+    service pass the policy it loads for the workspace.) The display threshold is
+    ``context.config["display_threshold"]``.
 
-    # Display helper for prose interpolation (see display.py), with the
-    # threshold configurable per run. The kernel injects a default-threshold
-    # helper when absent; this context-aware one takes precedence.
-    threshold = (context.config or {}).get(
-        "display_threshold", DEFAULT_DISPLAY_THRESHOLD
+    ``context.params`` become the session's first cell, ``name = <literal>``
+    for each, so they are validated and bound like any cell (no host object
+    enters the namespace). A param whose value is not a Python literal raises
+    ``ValueError``. A granted toolset's callables do not join the namespace:
+    a literate cell can do nothing a lackpy program cannot.
+    """
+    config = context.config or {}
+    session = CellSession(path_policy=config.get("path_policy"))
+    kernel = LightweightKernel(
+        session,
+        display_threshold=config.get("display_threshold", DEFAULT_DISPLAY_THRESHOLD),
     )
-    ns[DISPLAY_HELPER_NAME] = make_display(threshold)
-
-    import builtins as _builtins_mod
-    ns["__builtins__"] = _builtins_mod
-
-    if context.tools:
-        for name, fn in context.tools.callables.items():
-            ns[name] = fn
-
     if context.params:
-        ns.update(context.params)
+        result = kernel.execute_cell(
+            Cell(cell_type="hidden", content=_params_source(context.params)), -1)
+        if not result.success:
+            raise ValueError(f"the params could not be bound: {result.error}")
+    return kernel
 
-    return ns
+
+def _params_source(params: dict[str, Any]) -> str:
+    """``name = <literal>`` lines for ``params``; ``ValueError`` for a value that is not a literal."""
+    lines = []
+    for name, value in params.items():
+        if not name.isidentifier():
+            raise ValueError(f"param name {name!r} is not an identifier")
+        text = repr(value)
+        try:
+            same = ast.literal_eval(text) == value
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            same = False
+        if not same:
+            raise ValueError(f"param {name!r} is not a Python literal ({type(value).__name__})")
+        lines.append(f"{name} = {text}")
+    return "\n".join(lines)
 
 
 # Re-export the multi-round fold API. Imported at the end (after LiterateInterpreter
-# and _build_namespace are defined) so session.py's lazy imports resolve cleanly.
+# and _build_kernel are defined) so session.py's lazy imports resolve cleanly.
 from .session import (  # noqa: E402,F401
     COMPUTE_CONTINUE_MARKER,
     CONTINUE_MARKER,

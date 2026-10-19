@@ -1,90 +1,72 @@
-"""Lightweight kernel: exec-into-dict with static analysis.
+"""Lightweight kernel: literate cells run through one ``CellSession`` (literate stepy D1-D5).
 
-For each cell, the kernel: (1) looks up the compiler for the cell type
-in compiler._COMPILERS, (2) runs static_analysis.check_cell() to catch
-syntax errors and undefined names before evaluation, (3) evaluates the
-compiled Python in a persistent namespace dict with stdout captured.
+For each cell, the kernel: (1) looks up the compiler for the cell type in
+compiler._COMPILERS, (2) runs static_analysis.check_cell() to catch syntax
+errors and undefined names before evaluation, (3) runs the cell through the
+document's :class:`~lackpy.run.cells.CellSession`, which validates it as an
+extension of the program so far and execs it in the restricted namespace.
 
-The namespace persists across all cells — variables defined in any cell
-(including @gather and @hidden) are available to all later cells. This
-is what makes prose interpolation work: {variable} in prose compiles to
-an f-string expression evaluated against the same namespace.
+There is no other way in. The kernel holds no namespace of its own, execs
+nothing and evals nothing: a cell can do nothing a lackpy program cannot.
+
+* Code, ``@hidden``, ``@gather`` and the annotation cells run with
+  ``session.run_cell``; a re-run (reactive re-execution) uses
+  ``session.rerun_cell`` with the cell's id (:meth:`rerun_cell`).
+* Prose (D3) is text and ``{expr}`` segments. A text segment renders as it
+  is; each expression is evaluated with ``session.eval_expr`` and formatted
+  here, on the host side. Prose never joins the program.
+* ``@scratch`` runs its body as a cell; the ``[scratch: ...]`` summary is
+  made here from the names the body bound.
+* ``@continue`` runs nothing: it only asks for a pause.
+
+A refusal (D4) comes back as ``error_phase="refused"``. The session is then
+closed, so every later cell refuses too; the caller stops the document.
+
+Forgiveness values (``Hole``, ``ErrorValue``, ``Unavailable``) are bound by
+the runner, not by cell code (:meth:`bind`). They live in a host-side layer
+over the session's names and never enter the session's namespace: a cell
+that refers to one is skipped by the forgiveness pre-pass (D5), and a cell
+that binds the name again replaces it.
 
 Called by: StreamingDriver, LiterateInterpreter.execute()
 """
 
 from __future__ import annotations
 
-import io
-import os
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+import ast
 from typing import Any
 
-from ..compiler import _COMPILERS
-from ..display import DISPLAY_HELPER_NAME, make_display
+from lackpy.run.cells import CellOutcome, CellSession
+
+from ..compiler import _COMPILERS, prose_segments
+from ..display import DEFAULT_DISPLAY_THRESHOLD, make_display
 from ..parser import Cell
+from .forgiveness import is_forgiving
 from .interface import CellResult
-from .static_analysis import StaticAnalysisError, check_cell
-
-_CONTINUE_FLAG = "__literate_continue_called__"
-
-
-def _continue_sentinel() -> None:
-    """Placeholder called by @continue cells; kernel detects and sets flag."""
-    pass
-
-
-@contextmanager
-def _cwd(path):
-    """Run the body with ``path`` as the process cwd, always restoring it.
-
-    Scoped to the *synchronous* exec below and nothing else. That matters: the
-    cwd is process-global, so a window spanning an await would let another task
-    in the same loop observe the wrong directory. execute_cell is sync, so this
-    window cannot interleave. Concurrent execution across threads or processes
-    is still the caller's problem -- LackpyService already serialises exec under
-    ``_exec_lock`` for exactly this reason.
-    """
-    if path is None:
-        yield
-        return
-    prev = os.getcwd()
-    os.chdir(path)
-    try:
-        yield
-    finally:
-        os.chdir(prev)
-
+from .static_analysis import StaticAnalysisError, check_cell, collect_bindings
 
 class LightweightKernel:
-    def __init__(
-        self,
-        namespace: dict[str, Any] | None = None,
-        base_dir: Any | None = None,
-    ) -> None:
-        self._namespace: dict[str, Any] = namespace or {}
-        # Cells run with base_dir as cwd. The tool shims rebase their own
-        # arguments, but a document is ordinary Python: models guard with
-        # os.path.exists, list with os.listdir, glob, and construct Paths --
-        # none of which any shim can reach.
-        self._base_dir = base_dir
-        # Compiled prose interpolations call the display helper (see
-        # display.py). Inject a default-threshold helper unless the caller
-        # provided a configured one (_build_namespace does, from
-        # context.config). Injected before _initial_keys is captured so
-        # restart() preserves it like the tools.
-        if DISPLAY_HELPER_NAME not in self._namespace:
-            self._namespace[DISPLAY_HELPER_NAME] = make_display()
-        self._initial_keys: set[str] = set(self._namespace.keys())
-        if "__builtins__" not in self._namespace:
-            import builtins
-            self._namespace["__builtins__"] = builtins
+    def __init__(self, session: CellSession, *,
+                 display_threshold: int = DEFAULT_DISPLAY_THRESHOLD) -> None:
+        self._session = session
+        self._display = make_display(display_threshold)
+        # Reified forgiveness values, by name (see the module text). Never
+        # passed to the session.
+        self._reified: dict[str, Any] = {}
+        # The session cell ids that are in the program (validated), so a
+        # re-run can use ``rerun_cell``.
+        self._in_program: set[int] = set()
         # L7 fail-closed backstop: a failed startup self-test disables the
         # kernel (see ..selftest.run_selftest).  While disabled, every
         # execute_cell/inspect call returns a structured refusal instead of
         # running — on EVERY path that holds this kernel, even one that
         # ignores the self-test report.
         self._disabled: str | None = None
+
+    @property
+    def session(self) -> CellSession:
+        """The document's cell runtime."""
+        return self._session
 
     def disable(self, reason: str) -> None:
         """Disable execution permanently (fail-closed).  ``reason`` is the
@@ -96,194 +78,184 @@ class LightweightKernel:
         """The disable reason, or ``None`` while the kernel accepts work."""
         return self._disabled
 
+    # -- running cells ---------------------------------------------------------
+
     def execute_cell(self, cell: Cell, cell_index: int) -> CellResult:
+        """Run ``cell`` for the first time: a program cell joins the session's program."""
+        return self._execute(cell, cell_index, rerun_id=None)
+
+    def rerun_cell(self, cell: Cell, cell_index: int, cell_id: int | None) -> CellResult:
+        """Run ``cell`` again after a dependency changed (reactive re-execution).
+
+        A program cell that is in the session's program (``cell_id`` from its
+        first run) runs its validated code again with ``session.rerun_cell``:
+        the program text does not change. A cell that never joined the program
+        (it was skipped for a hole, or failed validation) runs as a new cell.
+        Prose is evaluated again; it was never in the program.
+        """
+        rerun = cell_id if cell_id in self._in_program else None
+        return self._execute(cell, cell_index, rerun_id=rerun)
+
+    def _execute(self, cell: Cell, cell_index: int, rerun_id: int | None) -> CellResult:
         if self._disabled is not None:
-            return CellResult(
-                success=False,
-                output=None,
-                error=f"kernel disabled: {self._disabled}",
-                error_phase="disabled",
-                namespace_delta={},
-                cell_index=cell_index,
-            )
+            return _failed(cell_index, f"kernel disabled: {self._disabled}", "disabled")
         compiler = _COMPILERS.get(cell.cell_type)
         if compiler is None:
-            return CellResult(
-                success=False,
-                output=None,
-                error=f"Unknown cell type: {cell.cell_type}",
-                error_phase="static",
-                namespace_delta={},
-                cell_index=cell_index,
-            )
+            return _failed(cell_index, f"Unknown cell type: {cell.cell_type}", "static")
+        if cell.cell_type == "continue":
+            return CellResult(success=True, output="", error=None, error_phase=None,
+                              namespace_delta={"__continue_requested__": True},
+                              cell_index=cell_index)
 
-        compiled_source = compiler(cell)
-        if not compiled_source.strip():
-            return CellResult(
-                success=True,
-                output="",
-                error=None,
-                error_phase=None,
-                namespace_delta={},
-                cell_index=cell_index,
-            )
+        source = compiler(cell)
+        if cell.cell_type == "prose":
+            try:
+                check_cell(source, self.known_names())
+            except StaticAnalysisError as e:
+                return _failed(cell_index, str(e), "static")
+            return self._render_prose(cell, cell_index)
 
-        # For @continue cells, inject the sentinel function so static analysis passes
-        is_continue = cell.cell_type == "continue"
-        if is_continue:
-            self._namespace["__literate_continue__"] = _continue_sentinel
-
-        known_names = set(self._namespace.keys()) - {"__builtins__"}
+        if not source.strip() and cell.cell_type != "scratch":
+            return CellResult(success=True, output="", error=None, error_phase=None,
+                              namespace_delta={}, cell_index=cell_index)
         try:
-            check_cell(compiled_source, known_names)
+            check_cell(source, self.known_names())
         except StaticAnalysisError as e:
-            if is_continue:
-                del self._namespace["__literate_continue__"]
-            return CellResult(
-                success=False,
-                output=None,
-                error=str(e),
-                error_phase="static",
-                namespace_delta={},
-                cell_index=cell_index,
-            )
+            return _failed(cell_index, str(e), "static")
+        return self._run_program_cell(cell, cell_index, source, rerun_id)
 
-        before_snapshot = {
-            k: v for k, v in self._namespace.items()
-            if k != "__builtins__"
-        }
+    def _run_program_cell(self, cell: Cell, cell_index: int, source: str,
+                          rerun_id: int | None) -> CellResult:
+        names_before = self._session.bound_names()
+        before = self._session.snapshot()
+        if not source.strip():
+            outcome = CellOutcome(ok=True)  # an empty @scratch body: nothing to run
+        elif rerun_id is not None:
+            outcome = self._session.rerun_cell(rerun_id)
+        else:
+            outcome = self._session.run_cell(source)
+        if outcome.cell_id is not None and outcome.phase in (None, "runtime"):
+            self._in_program.add(outcome.cell_id)
 
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-        try:
-            code_obj = compile(compiled_source, "<cell>", "exec")
-            with _cwd(self._base_dir), redirect_stdout(stdout_capture), redirect_stderr(
-                stderr_capture
-            ):
-                _do_exec(code_obj, self._namespace)
-        except BaseException as e:
-            if isinstance(e, KeyboardInterrupt):
-                raise
-            captured = stdout_capture.getvalue()
-            err_out = stderr_capture.getvalue()
-            if err_out:
-                captured = (captured + "\n" + err_out).strip()
-            # The SHALLOWEST "<cell>" frame in the traceback is the cell's
-            # top level — its line tells which top-level statement was
-            # executing when the failure raised (error reification uses this
-            # to keep completed rebinds the identity delta cannot see).
-            error_lineno: int | None = None
-            tb = e.__traceback__
-            while tb is not None:
-                if tb.tb_frame.f_code.co_filename == "<cell>":
-                    error_lineno = tb.tb_lineno
-                    break
-                tb = tb.tb_next
-            return CellResult(
-                success=False,
-                output=captured or None,
-                error=f"{type(e).__name__}: {e}",
-                error_phase="runtime",
-                namespace_delta={},
-                cell_index=cell_index,
-                error_lineno=error_lineno,
-            )
-        finally:
-            if is_continue and "__literate_continue__" in self._namespace:
-                del self._namespace["__literate_continue__"]
+        after = self._session.snapshot()
+        # Names this run (re)bound, as far as the host can see: data values by
+        # identity (a rebind to a non-data value, or to the identical object,
+        # does not show), and new names of any kind.
+        delta = {k: v for k, v in after.items() if k not in before or before[k] is not v}
+        new_names = self._session.bound_names() - names_before
+        if outcome.ok:
+            # A cell that ran binds its module-level names again: an earlier
+            # reified value for any of them is replaced.
+            for name in _static_bindings(source) | set(delta) | new_names:
+                self._reified.pop(name, None)
+        else:
+            for name in set(delta) | new_names:
+                self._reified.pop(name, None)
 
-        # Identity-based: in-place mutations (e.g. list.append) won't appear
-        delta: dict[str, Any] = {}
-        for k, v in self._namespace.items():
-            if k == "__builtins__" or k.startswith("_"):
+        if not outcome.ok:
+            return CellResult(success=False, output=outcome.stdout or None,
+                              error=outcome.error, error_phase=outcome.phase,
+                              namespace_delta={}, cell_index=cell_index,
+                              error_lineno=outcome.line, cell_id=outcome.cell_id)
+
+        output = outcome.stdout
+        if cell.cell_type == "scratch":
+            parts = [f"{n}={_type_name(after.get(n, _NOT_DATA))}" for n in sorted(new_names)]
+            output += f"[scratch: {', '.join(parts)}]\n"
+        return CellResult(success=True, output=output, error=None, error_phase=None,
+                          namespace_delta=delta, cell_index=cell_index,
+                          cell_id=outcome.cell_id)
+
+    def _render_prose(self, cell: Cell, cell_index: int) -> CellResult:
+        parts: list[str] = []
+        for seg in prose_segments(cell):
+            if seg.expr is None:
+                parts.append(seg.text or "")
                 continue
-            if k not in before_snapshot or before_snapshot[k] is not v:
-                delta[k] = v
+            out = self._session.eval_expr(seg.expr)
+            if not out.ok:
+                return _failed(cell_index, out.error or "evaluation failed",
+                               out.phase or "runtime", output="".join(parts) or None)
+            parts.append(self._display(out.value) if seg.display else str(out.value))
+        return CellResult(success=True, output="".join(parts) + "\n", error=None,
+                          error_phase=None, namespace_delta={}, cell_index=cell_index)
 
-        if is_continue:
-            delta["__continue_requested__"] = True
-
-        output = stdout_capture.getvalue()
-        stderr_output = stderr_capture.getvalue()
-        if stderr_output:
-            output = (output + "\n" + stderr_output).strip() if output else stderr_output
-
-        return CellResult(
-            success=True,
-            output=output,
-            error=None,
-            error_phase=None,
-            namespace_delta=delta,
-            cell_index=cell_index,
-        )
+    # -- the host's view of the names --------------------------------------------
 
     def known_names(self) -> set[str]:
         """The name set a cell's static analysis resolves against — exactly
-        the ``known_names`` :meth:`execute_cell` passes to ``check_cell``.
-        Used by the batch path's forgiveness pre-pass (L1.1) so its undefined-
-        name detection can never disagree with the kernel's own check."""
-        return set(self._namespace.keys()) - {"__builtins__"}
+        the ``known_names`` :meth:`execute_cell` passes to ``check_cell``:
+        the session's bound names and the reified ones. Used by the batch
+        path's forgiveness pre-pass (L1.1) so its undefined-name detection can
+        never disagree with the kernel's own check."""
+        return self._session.bound_names() | set(self._reified)
 
     def lookup(self, name: str, default: Any = None) -> Any:
-        """The live value bound to ``name`` (unfiltered, unlike get_scope)."""
-        return self._namespace.get(name, default)
+        """The value bound to ``name``: a reified value, or a data value.
+
+        A name bound to a value that is not data (a function, a module) gives
+        ``default``: the host never holds a live object."""
+        if name in self._reified:
+            return self._reified[name]
+        return self._session.snapshot().get(name, default)
 
     def bind(self, name: str, value: Any) -> None:
-        """Bind ``name`` directly in the namespace.
+        """Bind a reified forgiveness value (``Hole``, ``ErrorValue``, ``Unavailable``).
 
-        The forgiveness reification path (L1.1/L1.2): holes and error values
-        are bound *by the runner*, not by executing cell code."""
-        self._namespace[name] = value
+        The forgiveness reification path (L1.1/L1.2/L1.5): holes and error
+        values are bound *by the runner*, not by executing cell code. They stay
+        on the host side; the session never sees them. Any other value is
+        refused: nothing but a cell binds a name in the session."""
+        if not is_forgiving(value):
+            raise TypeError(f"the kernel binds only reified values, not {type(value).__name__}")
+        self._reified[name] = value
 
     def inspect(self, expr: str) -> str:
+        """Evaluate ``expr`` in the session (``eval_expr``) and return its repr, or the error."""
         if self._disabled is not None:
             return f"kernel disabled: {self._disabled}"
-        try:
-            result = eval(expr, self._namespace)  # noqa: S307
-            return repr(result)
-        except Exception as e:
-            return f"{type(e).__name__}: {e}"
+        out = self._session.eval_expr(expr)
+        if not out.ok:
+            return out.error or "evaluation failed"
+        return repr(out.value)
 
     def get_scope(self) -> dict[str, str]:
         scope: dict[str, str] = {}
-        for k, v in self._namespace.items():
-            if k.startswith("_") or k == "__builtins__":
+        data = self._session.snapshot()
+        for k in sorted(self._session.bound_names() | set(self._reified)):
+            if k.startswith("_"):
                 continue
-            if callable(v) and k in self._initial_keys:
+            if k in self._reified:
+                v = self._reified[k]
+            elif k in data:
+                v = data[k]
+            else:
+                scope[k] = "object: (not data)"
                 continue
             scope[k] = f"{type(v).__name__}: {repr(v)[:80]}"
         return scope
 
-    def restart(self) -> None:
-        # Deliberately does NOT clear a self-test disable: broken evaluation
-        # is not a namespace problem, so a restart cannot fix it (sticky
-        # fail-closed).
-        tools = {k: v for k, v in self._namespace.items() if k in self._initial_keys}
-        self._namespace.clear()
-        self._namespace.update(tools)
-        import builtins
-        self._namespace["__builtins__"] = builtins
-
-    def snapshot(self) -> dict[str, Any]:
-        """Shallow copy of the current namespace, for restore() after a failed
-        step. Captures name REBINDINGS only -- in-place mutations of held objects
-        are not recorded (consistent with this kernel's own delta tracking, which
-        also can't see in-place changes). A deep copy is deliberately avoided
-        (arbitrary/unpicklable live objects, cost)."""
-        return dict(self._namespace)
-
-    def restore(self, snapshot: dict[str, Any]) -> None:
-        """Restore the namespace to a prior snapshot() -- undoes name rebindings
-        made since the snapshot. In-place mutations are not reverted."""
-        self._namespace.clear()
-        self._namespace.update(snapshot)
-
     def get_namespace(self) -> dict[str, Any]:
-        return {
-            k: v for k, v in self._namespace.items()
-            if k != "__builtins__" and not k.startswith("_")
-        }
+        """The data values and reified values by name (no live objects)."""
+        ns = {k: v for k, v in self._session.snapshot().items() if not k.startswith("_")}
+        ns.update(self._reified)
+        return ns
 
 
-def _do_exec(code: object, ns: dict) -> None:
-    exec(code, ns)  # noqa: S102
+_NOT_DATA = object()
+
+
+def _type_name(value: Any) -> str:
+    return "object" if value is _NOT_DATA else type(value).__name__
+
+
+def _static_bindings(source: str) -> set[str]:
+    try:
+        return collect_bindings(ast.parse(source))
+    except SyntaxError:
+        return set()
+
+
+def _failed(cell_index: int, error: str, phase: str, output: str | None = None) -> CellResult:
+    return CellResult(success=False, output=output, error=error, error_phase=phase,
+                      namespace_delta={}, cell_index=cell_index)

@@ -1,21 +1,20 @@
 """End-to-end tests: full documents through StreamingDriver."""
 
-import os
-
 import pytest
 
 from lackpy.interpreters.literate.kernel import (
-    LightweightKernel,
     NoRecoveryHandler,
     StreamingDriver,
 )
 from lackpy.interpreters.literate.kernel.formats import from_notebook, render_markdown, to_notebook
 from lackpy.interpreters.literate.parser import Frontmatter
 
+from ..conftest import make_kernel
+
 
 @pytest.fixture
 def driver():
-    kernel = LightweightKernel()
+    kernel = make_kernel()
     return StreamingDriver(kernel=kernel, recovery=NoRecoveryHandler())
 
 
@@ -40,21 +39,21 @@ class TestFullDocumentExecution:
         assert "Average value: 3.0" in output
 
     @pytest.mark.asyncio
-    async def test_document_with_write(self, tmp_path, driver):
-        os.chdir(tmp_path)
-        from lackpy.interpreters.literate.tools import write_file
-        driver._kernel._namespace["write_file"] = write_file
-
+    async def test_document_with_write(self, tmp_policy):
+        # The old test injected the host write_file tool and used host os.path;
+        # a document now writes through the session's Path under the policy.
+        driver = StreamingDriver(kernel=make_kernel(tmp_policy), recovery=NoRecoveryHandler())
         doc = (
-            "```lackpy @write(hello.py)\nprint(\"hello world\")\n```\n\n"
-            "```lackpy @hidden\nimport os\nexists = os.path.exists(\"hello.py\")\n```\n\n"
+            "```lackpy @hidden\nfrom pathlib import Path\n"
+            "Path('hello.py').write_text('print(1)')\n```\n\n"
+            "```lackpy @hidden\nexists = Path('hello.py').exists()\n```\n\n"
             "File created: {exists}\n"
         )
         await driver.feed(doc)
         await driver.flush()
 
-        assert "True" in driver.rendered_output
-        assert (tmp_path / "hello.py").exists()
+        assert "File created: True" in driver.rendered_output
+        assert (tmp_policy.workspace / "hello.py").read_text() == "print(1)"
 
 
 class TestNotebookRoundTrip:
@@ -72,7 +71,7 @@ class TestNotebookRoundTrip:
         assert recovered_cells[0].cell_type == "hidden"
         assert recovered_cells[1].cell_type == "prose"
 
-        kernel2 = LightweightKernel()
+        kernel2 = make_kernel()
         driver2 = StreamingDriver(kernel=kernel2, recovery=NoRecoveryHandler())
         for cell in recovered_cells:
             await driver2._execute_cells([cell])

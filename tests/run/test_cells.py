@@ -421,3 +421,34 @@ def test_a_refusal_raised_by_rerun_cell_latches_the_session(session, workspace):
     assert not again.ok and again.phase == "refused" and "/etc/hostname" in again.error
     after = session.run_cell("y = 1")
     assert after.phase == "refused" and "/etc/hostname" in after.error
+
+
+# -- Task 2 additions: what the literate kernel reads back ----------------------
+
+def test_snapshot_gives_the_bound_data_values_only(session):
+    _ok(session.run_cell("import json\nrows = [1, 2]\nname = 'a'\ndef f():\n    return 1"))
+    snap = session.snapshot()
+    assert snap == {"rows": [1, 2], "name": "a"}
+    # The values are the namespace's own objects: an in-place change shows (M5).
+    _ok(session.run_cell("rows.append(3)"))
+    assert session.snapshot()["rows"] == [1, 2, 3]
+
+
+def test_a_runtime_error_names_its_exception_type(session):
+    out = session.run_cell("d = {}\nx = d['k']")
+    assert out.phase == "runtime" and out.error.startswith("KeyError: ")
+    expr = session.eval_expr("1 // 0")
+    assert expr.phase == "runtime" and expr.error.startswith("ZeroDivisionError: ")
+
+
+def test_a_runtime_error_gives_the_cell_line_that_raised(session):
+    out = session.run_cell("x = 1\ny = 2\nz = 1 // 0\nw = 3")
+    assert out.phase == "runtime" and out.line == 3
+    assert _ok(session.run_cell("v = 1")).line is None
+
+
+def test_a_refusal_text_has_no_exception_type_prefix(session):
+    _ok(session.run_cell("from pathlib import Path"))
+    out = session.run_cell("t = Path('/etc/hostname').read_text()")
+    assert out.phase == "refused" and "/etc/hostname" in out.error
+    assert not out.error.startswith("LackpyRefusal")

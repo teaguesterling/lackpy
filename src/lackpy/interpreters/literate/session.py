@@ -339,11 +339,10 @@ class LiterateSession:
         guarantee)."""
         # Lazy imports avoid a circular import with the package __init__ (which
         # re-exports this module).
-        from . import LiterateInterpreter, _build_namespace
+        from . import LiterateInterpreter, _build_kernel
         from .kernel import (
             BindingVersions,
             Ledger,
-            LightweightKernel,
             PersistentBindingVersions,
             PersistentLedger,
         )
@@ -360,9 +359,9 @@ class LiterateSession:
         # pause rounds too — so those consume here as well).
         self._segments = 0
         self._interpreter = interpreter or LiterateInterpreter()
-        self._kernel = LightweightKernel(
-            namespace=_build_namespace(context), base_dir=context.base_dir
-        )
+        # One CellSession for the whole fold: every round's cells extend the
+        # same validated program (rounds only append; nothing is edited).
+        self._kernel = _build_kernel(context)
         # ONE ledger threaded across every round (L1.0/L1.1): the queryable
         # record of the session's execution + reified failures. Each step's
         # aggregate Either is derived from this ledger, per-round slice.
@@ -530,11 +529,18 @@ class LiterateSession:
         variables = dict(result.metadata.get("variables", {}))
 
         failures = reified_failures(self._ledger.entries()[round_mark:])
-        if failures:
+        refused = result.metadata.get("refused")
+        if failures or refused is not None:
+            # D4: a refusal ended the round, and the session with it (the
+            # CellSession is closed: every later cell refuses). The output up
+            # to the refusal stands; the round is a Left.
+            errors = [describe_failure(e) for e in failures]
+            if refused is not None:
+                errors.insert(0, f"refused: {refused}")
             return StepResult(
                 ok=False,
                 raw=raw,
-                errors=[describe_failure(e) for e in failures],
+                errors=errors,
                 clean_doc=result.output or "",
                 continue_requested=continue_requested,
                 variables=variables,

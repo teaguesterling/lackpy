@@ -8,9 +8,10 @@ The battery runs one probe per semantic class the kernel supports, each
 through the REAL surface (nothing reimplemented):
 
 * ``value`` — a known evaluation (``2 + 2``) actually computes ``4``, through
-  the shared per-cell pipeline (:meth:`LiterateInterpreter._run_resolved_cell`)
-  AND the raw ``inspect`` eval surface.  Catches the "eval silently zeroed"
-  failure directly.
+  the shared per-cell pipeline (:meth:`LiterateInterpreter._run_resolved_cell`,
+  which runs the cell in a ``CellSession``) AND the ``inspect`` surface
+  (``CellSession.eval_expr``).  Catches the "eval silently zeroed" failure
+  directly.
 * ``hole`` — an unknown name reifies a typed :class:`~.kernel.forgiveness.Hole`
   (L1.1) and is ledgered, rather than crashing or silently succeeding.
 * ``error`` — a runtime error reifies an
@@ -24,11 +25,13 @@ through the REAL surface (nothing reimplemented):
   ``[kernel]``-channel note) reparses cleanly (the L2 round-trip law): source
   preserved, channel note inert.
 
-Probe hygiene: probes run against the REAL kernel (the one about to accept
-work) but with a THROWAWAY ledger/version-history, and the kernel namespace is
-``snapshot()``-ed before and ``restore()``-d after — a probe's ``hole_opened``
+Probe hygiene: probes run through the SAME runtime as real work (a
+``LightweightKernel`` over a ``CellSession``, the session's single exec path)
+but on a THROWAWAY kernel and session, with a THROWAWAY ledger/version-history.
+A session's program is cumulative and cannot be rolled back, so the probes
+cannot run in the kernel about to accept work: a probe's ``hole_opened``
 entry must never make the session's first real round Left, and probe names
-must never leak into scope.
+must never leak into scope.  The kernel under test is disabled on failure.
 
 FAIL-CLOSED: any failed probe disables the kernel
 (:meth:`~.kernel.lightweight.LightweightKernel.disable`) — every subsequent
@@ -64,6 +67,7 @@ from .kernel.ledger import Ledger
 from .kernel.lightweight import LightweightKernel
 from .kernel.versions import BindingVersions
 from .parser import Cell, Frontmatter, parse
+from ...run.cells import CellSession
 
 #: Ledger entry types for the observable self-test outcome (recorded once, at
 #: session construction).  Like every entry type, queryable:
@@ -78,8 +82,8 @@ REFUSAL_HEADLINE = (
     "refusing work instead of risking garbage"
 )
 
-#: Reserved name prefix for probe bindings.  Probes bind under these names and
-#: the namespace is restored afterward; user documents should not rely on them.
+#: Reserved name prefix for probe bindings.  Probes bind under these names in
+#: their own throwaway session; user documents never see them.
 PROBE_NAME_PREFIX = "lackpy_selftest_"
 
 
@@ -297,34 +301,32 @@ _PROBES: tuple[tuple[str, str, _ProbeFn], ...] = (
 
 
 def run_selftest(kernel: LightweightKernel, interpreter: Any) -> SelfTestReport:
-    """Run the probe battery against ``kernel`` BEFORE it accepts work.
+    """Run the probe battery BEFORE ``kernel`` accepts work.
 
-    Returns the report; on any failure the kernel is DISABLED
-    (fail-closed) so even a caller that ignores the report cannot execute
-    through it.  Never raises: a probe that raises is a failed probe.
+    The probes run on a throwaway kernel over a fresh ``CellSession`` (see
+    the module text). Returns the report; on any failure ``kernel`` is
+    DISABLED (fail-closed) so even a caller that ignores the report cannot
+    execute through it.  Never raises: a probe that raises is a failed probe.
     """
-    snapshot = kernel.snapshot()
+    probe_kernel = LightweightKernel(CellSession(path_policy=None))
     results: list[ProbeResult] = []
-    try:
-        for name, semantic_class, fn in _PROBES:
-            ledger = Ledger(session_id="selftest")
-            versions = BindingVersions()
-            try:
-                ok, expected, got = fn(kernel, interpreter, ledger, versions)
-            except Exception as e:  # a raising probe is a FAILED probe
-                ok, expected, got = (
-                    False,
-                    "probe completes without raising",
-                    f"probe raised {type(e).__name__}: {e}",
-                )
-            results.append(
-                ProbeResult(
-                    probe=name, semantic_class=semantic_class,
-                    ok=ok, expected=expected, got=got,
-                )
+    for name, semantic_class, fn in _PROBES:
+        ledger = Ledger(session_id="selftest")
+        versions = BindingVersions()
+        try:
+            ok, expected, got = fn(probe_kernel, interpreter, ledger, versions)
+        except Exception as e:  # a raising probe is a FAILED probe
+            ok, expected, got = (
+                False,
+                "probe completes without raising",
+                f"probe raised {type(e).__name__}: {e}",
             )
-    finally:
-        kernel.restore(snapshot)
+        results.append(
+            ProbeResult(
+                probe=name, semantic_class=semantic_class,
+                ok=ok, expected=expected, got=got,
+            )
+        )
 
     report = SelfTestReport(ok=all(p.ok for p in results), probes=tuple(results))
     if not report.ok:

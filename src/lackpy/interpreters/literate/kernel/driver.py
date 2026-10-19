@@ -4,7 +4,8 @@ The driver is the streaming execution path's top-level orchestrator:
   1. StreamingCellParser yields Cell objects from partial model output
   2. For each cell, the driver calls kernel.execute_cell()
   3. On success, output is appended and plugins are notified
-  4. On failure, the RecoveryHandler is consulted (fix/inspect/skip/abort)
+  4. On failure, the RecoveryHandler is consulted (fix/inspect/skip/abort);
+     a refusal (error_phase "refused") stops the stream with no recovery
   5. @continue cells pause execution and set continue_requested
 
 The batch path (LiterateInterpreter.execute) bypasses the driver and
@@ -23,6 +24,9 @@ from .ledger import Ledger
 from .plugins import PluginAdvice, merge_advice
 from .recovery import NoRecoveryHandler, RecoveryAction, RecoveryContext, RecoveryHandler
 from .streaming_parser import StreamingCellParser
+
+#: Ledger entry type (and event status) for a cell whose run refused (D4).
+REFUSED = "refused"
 
 
 @dataclass
@@ -182,6 +186,16 @@ class StreamingDriver:
                 )
                 self._record(event)
                 events.append(event)
+            elif result.error_phase == "refused":
+                # D4: a refusal ends the document. Recovery is not consulted
+                # (the session is closed: every later cell would refuse too).
+                event = CellExecutionEvent(
+                    cell=cell, cell_index=index, result=result,
+                    status=REFUSED, generation=self._generation,
+                )
+                self._record(event)
+                events.append(event)
+                self._interrupted = True
             else:
                 event = await self._handle_failure(cell, index, result)
                 self._record(event)
@@ -228,6 +242,9 @@ class StreamingDriver:
                 )
 
             if action.kind == "inspect":
+                # inspect evaluates through the session (eval_expr): an
+                # expression the validator rejects or that refuses comes back
+                # as its error text, never as a host eval.
                 while action.kind == "inspect":
                     inspect_result = self._kernel.inspect(action.expr or "None")
                     action = self._recovery.on_inspect_result(ctx, inspect_result)
@@ -241,6 +258,13 @@ class StreamingDriver:
                 for fix_cell in action.cells:
                     fix_result = self._kernel.execute_cell(fix_cell, index)
                     fix_results.append(fix_result)
+                    if fix_result.error_phase == "refused":
+                        # A refused fix ends the document like any refusal (D4).
+                        return CellExecutionEvent(
+                            cell=fix_cell, cell_index=index, result=fix_result,
+                            status=REFUSED, recovery_attempts=attempt + 1,
+                            generation=self._generation,
+                        )
                     if not fix_result.success:
                         fix_succeeded = False
                         result = fix_result

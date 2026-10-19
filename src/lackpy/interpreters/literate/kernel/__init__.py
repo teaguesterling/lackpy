@@ -14,8 +14,9 @@ Two execution paths exist:
 
 Both paths share the same kernel: LightweightKernel compiles each
 cell via compiler._COMPILERS, runs static_analysis.check_cell()
-(compile check + AST name resolution), then evaluates the result
-in a persistent namespace dict.
+(parse check + AST name resolution), then runs it through the
+document's CellSession (lackpy.run.cells): validated as an extension
+of the program so far, executed in the restricted namespace.
 """
 
 from .driver import CellExecutionEvent, StreamingDriver

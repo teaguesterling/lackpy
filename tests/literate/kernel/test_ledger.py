@@ -23,14 +23,15 @@ from lackpy.interpreters.literate.kernel.ledger import (
     Ledger,
     LedgerEntry,
 )
-from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
 from lackpy.interpreters.literate.kernel.recovery import NoRecoveryHandler
 from lackpy.interpreters.literate.parser import Frontmatter
+
+from ..conftest import make_kernel
 
 
 @pytest.fixture
 def kernel():
-    return LightweightKernel()
+    return make_kernel()
 
 
 @pytest.fixture

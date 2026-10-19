@@ -3,12 +3,13 @@
 Each cell type maps to a compiler function in _COMPILERS. The kernel
 calls these via _COMPILERS[cell.cell_type](cell) to get Python source,
 which it then passes through static_analysis.check_cell() and runs
-in the kernel namespace.
+through the document's CellSession (validated, restricted namespace).
 
 Compilation rules:
-  prose    → print() with brace-matching interpolation: each {expr}
-             compiles to its own triple-quoted f-string,
-             literal text uses repr(). Concatenated with +.
+  prose    → segments (prose_segments), not code: text, and one-line
+             {expr} sources the kernel evaluates with CellSession.eval_expr.
+             compile_cell gives the expressions, one per line, as analysis
+             source only.
   code     → pass through
   @hidden  → pass through (same as code; visibility is the driver's concern)
   @gather  → pass through
@@ -16,7 +17,7 @@ Compilation rules:
   @read    → print(read_file(path))
   @write   → write_file(path, content)
   @diff    → apply_diff(path, diff_text)
-  @scratch → capture locals() diff, print variable summary
+  @scratch → the body; the kernel prints the new-name summary
 
 The _split_interpolation() function handles prose interpolation by
 tracking brace depth and string context to correctly parse nested
@@ -26,10 +27,10 @@ expressions like {chr(10).join([f"...{x}..." for x in items])}.
 from __future__ import annotations
 
 import re
+import ast
 from collections.abc import Callable
-from textwrap import indent
+from dataclasses import dataclass
 
-from .display import DISPLAY_HELPER_NAME
 from .parser import Cell, ParseResult
 
 CONTINUE_SENTINEL = "__literate_continue__()"
@@ -37,9 +38,7 @@ CONTINUE_SENTINEL = "__literate_continue__()"
 #: Call names the compiler emits that are runtime-internal plumbing, not tool
 #: calls the writer planned. Callers that enumerate a compiled document's
 #: called names for policy (e.g. kibitzer mode validation) must filter these.
-LITERATE_RUNTIME_INTERNALS: frozenset[str] = frozenset(
-    {"__literate_continue__", DISPLAY_HELPER_NAME}
-)
+LITERATE_RUNTIME_INTERNALS: frozenset[str] = frozenset({"__literate_continue__"})
 
 _INTERPOLATION_START = re.compile(r"\{[A-Za-z_]")
 
@@ -115,45 +114,69 @@ def _split_interpolation(content: str) -> list[tuple[str, bool]]:
     return merged
 
 
-def _compile_prose(cell: Cell) -> str:
+@dataclass(frozen=True)
+class ProseSegment:
+    """One piece of a prose cell (design D3): text, or an expression.
+
+    ``text`` is rendered as it is. ``expr`` is one line of lackpy source that
+    the kernel evaluates with ``CellSession.eval_expr``. When ``display`` is
+    True the value goes through the bounded display (``display.py``); when
+    False, ``expr`` is an f-string (the interpolation had a conversion or a
+    format spec, as in ``{total:.2f}``) whose value is already the text.
+    """
+
+    text: str | None = None
+    expr: str | None = None
+    display: bool = True
+
+
+def _expr_segment(text: str) -> ProseSegment:
+    """The segment for one ``{text}`` interpolation.
+
+    ``text`` is parsed the way Python parses the inside of ``f"{...}"``. A
+    plain expression becomes its own one-line source; one with a conversion
+    (``!r``), a format spec (``:.2f``) or a ``=`` becomes the one-line
+    f-string, so Python formats it inside the session. Text that does not
+    parse is kept as it is: the kernel's static check reports the syntax error.
+    """
+    for quote in ('"""', "'''"):
+        try:
+            node = ast.parse(f"f{quote}{{{text}}}{quote}", mode="eval").body
+        except SyntaxError:
+            continue
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        values = node.values
+        if (len(values) == 1 and isinstance(values[0], ast.FormattedValue)
+                and values[0].conversion == -1 and values[0].format_spec is None):
+            return ProseSegment(expr=ast.unparse(values[0].value), display=True)
+        return ProseSegment(expr=ast.unparse(node), display=False)
+    return ProseSegment(expr=text, display=True)
+
+
+def prose_segments(cell: Cell) -> list[ProseSegment]:
+    """Split a prose cell into text and expression segments (design D3).
+
+    Whitespace-only prose has no segments (it renders as a blank line). Prose
+    with no ``{name...`` interpolation start is one text segment, as it is.
+    """
     content = cell.content
     if not content.strip():
-        return "print()"
-
+        return []
     if not _INTERPOLATION_START.search(content):
-        return f"print({repr(content)})"
-
-    parts = _split_interpolation(content)
-    if not any(is_expr for _, is_expr in parts):
-        resolved = "".join(text for text, _ in parts)
-        return f"print({repr(resolved)})"
-
-    segments: list[str] = []
-    for text, is_expr in parts:
-        if is_expr:
-            segments.append(_expr_segment(text))
-        else:
-            segments.append(repr(text))
-
-    return f"print({' + '.join(segments)})"
+        return [ProseSegment(text=content)]
+    return [_expr_segment(text) if is_expr else ProseSegment(text=text)
+            for text, is_expr in _split_interpolation(content)]
 
 
-def _expr_segment(text: str) -> str:
-    """Compile one interpolated expression to an f-string segment.
+def _compile_prose(cell: Cell) -> str:
+    """The prose cell's expressions, one per line: ANALYSIS source only.
 
-    Routes the expression through the namespace-injected display helper
-    (:data:`~.display.DISPLAY_HELPER_NAME`) so large values render truncated
-    (see display.py). An expression that can't be wrapped -- an f-string
-    conversion/format spec like ``{total:.2f}`` or ``{x!r}`` is not a valid
-    call argument -- falls back to the plain f-string: a formatted value is
-    already user-bounded. Like the @continue sentinel, the emitted call
-    requires the literate runtime namespace (the kernel injects it)."""
-    wrapped = f'f"""{{{DISPLAY_HELPER_NAME}({text})}}"""'
-    try:
-        compile(wrapped, "<prose>", "eval")
-    except SyntaxError:
-        return f'f"""{{{text}}}"""'
-    return wrapped
+    Static analysis (references for holes and the dependency graph, the
+    effect gate) reads it. Nothing executes it: the kernel renders prose from
+    :func:`prose_segments`, evaluating each expression in the session.
+    """
+    return "\n".join(seg.expr for seg in prose_segments(cell) if seg.expr is not None)
 
 
 def _compile_code(cell: Cell) -> str:
@@ -188,19 +211,9 @@ def _compile_diff(cell: Cell) -> str:
 
 
 def _compile_scratch(cell: Cell) -> str:
-    body = cell.content
-    escaped_body = indent(body, "    ") if body else "    pass"
-    return (
-        "_scratch_names_before = set(locals().keys())\n"
-        f"if True:\n{escaped_body}\n"
-        '_scratch_names_after = set(locals().keys()) - _scratch_names_before - {"_scratch_names_before"}\n'
-        "_scratch_parts = []\n"
-        "for _sn in sorted(_scratch_names_after):\n"
-        "    _sv = locals()[_sn]\n"
-        '    _scratch_parts.append(f"{_sn}={type(_sv).__name__}")\n'
-        'print(f"[scratch: {\', \'.join(_scratch_parts)}]")\n'
-        "del _scratch_names_before, _scratch_names_after, _scratch_parts"
-    )
+    # The body only: the kernel runs it in the session and writes the
+    # ``[scratch: name=type, ...]`` summary on the host side.
+    return cell.content
 
 
 _COMPILERS: dict[str, Callable[[Cell], str]] = {
