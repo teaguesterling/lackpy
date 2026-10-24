@@ -231,3 +231,30 @@ LITERATE_SYSTEM_PROMPT = (
     "- Verify your work when possible (re-read modified files).\n"
     "- Be concise. Every line of output should earn its place."
 )
+
+
+_PARAMS_SECTION = """\
+
+# Parameters
+
+The document takes parameters. Put this literal in the first code cell, at the
+top level, exactly as shown. Read a value as params["{first}"], in code and in
+prose. Do not assign to params again. lackpy replaces the values with the
+passed ones before the document runs.
+
+<compute>
+{params_desc}
+</compute>
+"""
+
+
+def params_section(params_desc: str) -> str:
+    """The prompt text that teaches the ``params`` literal, for a literate document.
+
+    ``params_desc`` is :func:`lackpy.infer.prompt.format_params_description`'s
+    output: the literal line, then one ``# name: type`` line per key. The same
+    literal that the one-shot prompt teaches, in a code cell.
+    """
+    lines = params_desc.splitlines()
+    first = lines[1].removeprefix("# ").rsplit(": ", 1)[0] if len(lines) > 1 else "name"
+    return _PARAMS_SECTION.format(first=first, params_desc=params_desc)

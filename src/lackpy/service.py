@@ -834,11 +834,20 @@ class LackpyService:
         # literate format and one document, so no namespace description reaches it.
         namespace_desc = ""
         start = time.perf_counter()
+        # With params, the prompt also teaches the document's params literal (as
+        # the one-shot prompt does), so the run can replace its values (D15).
+        system = None
+        if params_desc:
+            from .infer.prompt import build_system_prompt
+            from .interpreters.literate.prompt import params_section
+            system = (build_system_prompt(namespace_desc, interpreter=interp)
+                      + params_section(params_desc))
         errors: dict[str, list[str]] = {}
         for provider in providers:
             if not provider.available():
                 continue
-            raw = await provider.generate(intent, namespace_desc, interpreter=interp)
+            raw = await provider.generate(intent, namespace_desc, interpreter=interp,
+                                          system_prompt_override=system)
             if not raw:
                 continue
             program = _strip_literate_wrapper(raw)

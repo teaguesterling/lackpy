@@ -1206,3 +1206,43 @@ class TestLiterateFinalFixWave:
         result = await service.run_program(doc, profile=_LIT)
         assert result.success, result.error
         assert result.output == 5
+
+
+class TestLiterateGenerationTeachesParams:
+    """Ruling: literate generation teaches the params literal when params are
+    passed (as one-shot does), so delegate + params on a literate profile works."""
+
+    @staticmethod
+    def _model(seen, doc):
+        class _Model:
+            name = "fake"
+
+            def available(self):
+                return True
+
+            async def generate(self, intent, namespace_desc, system_prompt_override=None, **kw):
+                seen["system"] = system_prompt_override
+                return doc
+
+        return _Model()
+
+    @pytest.mark.asyncio
+    async def test_delegate_with_params_on_a_literate_profile_runs(self, service):
+        seen = {}
+        doc = ("```lackpy\nparams = {'prefix': 'hello'}\n```\n\n"
+               "Prefix: {params['prefix']}\n\n```lackpy\nparams['prefix']\n```\n")
+        service._inference_providers[:] = [self._model(seen, doc)]
+        result = await service.delegate("show the prefix", profile=_LIT, params={"prefix": "bye"})
+        assert result["success"], result["error"]
+        assert "Prefix: bye" in result["stdout"]
+        assert result["output"] == "bye"
+        system = seen["system"] or ""
+        assert "params = {'prefix': 'bye'}" in system
+        assert "params[\"prefix\"]" in system
+
+    @pytest.mark.asyncio
+    async def test_without_params_the_prompt_has_no_params_section(self, service):
+        seen = {}
+        service._inference_providers[:] = [self._model(seen, "```lackpy\nx = 1\n```\n")]
+        await service.generate("x", profile=_LIT)
+        assert "params =" not in (seen["system"] or "")
