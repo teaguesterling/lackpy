@@ -155,8 +155,9 @@ async def run_literate_agent(
         return LiterateSession(context, interpreter=interpreter, max_rounds=max_iterations)
 
     session = new_session()
-    # The raw responses of the rounds the session accepted (Right), in order: a
-    # full resubmission after a Left replays them into a fresh session.
+    # The raw responses of the rounds the current session accepted (Right), in
+    # order: the retry prompt after a Left shows them, so the model can
+    # resubmit the whole document.
     accepted: list[str] = []
 
     if verbose:
@@ -205,23 +206,26 @@ async def run_literate_agent(
             return f"{session.display}\n\n{result.errors[0]}"
 
         if not result.ok:
-            # Left: hand the errors + the raw un-interpreted document back so the
+            # Left: hand the errors + the whole document so far back so the
             # model corrects its own work. The session KEPT this round's partial
             # state (its imports, its bindings), and a session's program only
-            # grows, so the full resubmission could never join it ("Rebinding of
-            # imported name"). Final review I1, per the edit ruling: an edited
-            # round means a new session and a replay of the rounds accepted
-            # before it. (A replayed round runs its cells again, so its file
-            # writes happen again.) The refusal check above stays first: a
-            # refusal is never retried in a fresh session (D4).
+            # grows, so a full resubmission could never join it ("Rebinding of
+            # imported name"). Final review I1 and the ruling after C1: the
+            # full resubmission runs ONCE in a fresh session; earlier rounds
+            # are not replayed (they are part of the resubmitted document).
+            # The refusal check above stays first: a refusal is never retried
+            # in a fresh session (D4).
+            so_far = [raw.replace(COMPUTE_CONTINUE_MARKER, "").rstrip() for raw in accepted]
+            so_far.append(result.raw.rstrip())
             session = new_session()
-            for raw in accepted:
-                await session.step(raw)
+            accepted = []
             errors = "\n".join(result.errors)
             full_prompt = (
                 f"Your previous document failed:\n{errors}\n\n"
-                f"Here is what you wrote:\n{result.raw}\n\n"
-                f"Fix the problem and resubmit the FULL corrected document."
+                "Here is the whole document so far (earlier rounds, then the round "
+                "that failed):\n" + "\n\n".join(so_far) + "\n\n"
+                "Fix the problem and resubmit the FULL corrected document, from the "
+                "start: it runs again from an empty state."
             )
             continue
 

@@ -567,6 +567,30 @@ class TestBlankContextLine:
                 "@@ -6,3 +6,3 @@\n e\n\n-f\n+F\n")
         assert apply_patch(text, diff) == "a\n\nB\nc\nd\ne\n\nF\n"
 
+    def test_a_diff_whose_result_is_already_in_the_file_says_already_applied(self):
+        # Ruling (after C1): a distinct message, so a resubmitted diff is not
+        # reported as a plain mismatch.
+        with pytest.raises(ValueError, match="diff already applied"):
+            apply_patch("a\nB\n", "@@ -1,2 +1,2 @@\n a\n-b\n+B\n")
+
+    def test_a_diff_that_matches_neither_side_keeps_the_mismatch_message(self):
+        with pytest.raises(ValueError, match="does not apply: line 2 is 'x'") as e:
+            apply_patch("a\nx\n", "@@ -1,2 +1,2 @@\n a\n-b\n+B\n")
+        assert "already applied" not in str(e.value)
+
+    @pytest.mark.asyncio
+    async def test_an_already_applied_diff_fails_the_cell_and_writes_nothing(self, ws, policy):
+        (ws / "c.py").write_text("A = 10\n\nB = 20\n")
+        doc = "```lackpy @diff(c.py)\n@@ -1,3 +1,3 @@\n-A = 1\n+A = 10\n\n-B = 2\n+B = 20\n```\n"
+        result = await _run(_ctx(ws, policy), doc)
+        assert not result.success
+        assert "diff already applied" in result.error
+        assert (ws / "c.py").read_text() == "A = 10\n\nB = 20\n"
+        from lackpy.interpreters.literate import _build_kernel
+        kernel = _build_kernel(_ctx(ws, policy))
+        await LiterateInterpreter()._run_document(doc, _ctx(ws, policy), kernel)
+        assert [e.tool for e in kernel.session.trace.entries] == ["Path.read_text"]
+
     @pytest.mark.asyncio
     async def test_a_partial_hunk_fails_the_cell_and_writes_nothing(self, ws, policy):
         (ws / "c.py").write_text("A = 1\n\nB = 2\n")

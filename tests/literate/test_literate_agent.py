@@ -126,18 +126,43 @@ async def test_a_corrected_resubmission_runs_in_a_fresh_session(agent, loader, t
 
 
 @pytest.mark.asyncio
-async def test_a_resubmission_after_a_continue_round_replays_that_round(agent, loader, tmp_path):
-    """The fresh session replays the rounds accepted before the failed one, so a
-    corrected round still reads the names an earlier round bound."""
+async def test_a_resubmission_runs_once_in_a_fresh_session_without_replay(agent, loader, tmp_path):
+    """Ruling (after C1): a full-document resubmission runs the resubmitted
+    document once, in a fresh session; earlier rounds are not replayed. The
+    retry prompt shows the whole document so far, so the model can resubmit it
+    whole. (Replaced test_a_resubmission_after_a_continue_round_replays_that_round,
+    which pinned the replay.)"""
     ws = tmp_path / "ws"
     ws.mkdir()
     gen = _stub(
         "<compute>\nimport json\na = 2\n</compute>\n\n<compute continue>",
         "<compute>\nimport math\nb = a + 1\nc = 1 // 0\n</compute>\n",
+        # The full corrected document: round 1's cells and the fixed round 2.
+        "<compute>\nimport json\na = 2\n</compute>\n\n"
         "<compute>\nimport math\nb = a + 1\n</compute>\n\nB={b}.\n",
         "never asked",
     )
     out = await agent.run_literate_agent("x", base_dir=str(ws), generate=gen, policy_loader=loader,
                                          max_iterations=4)
     assert len(gen.calls) == 3
+    retry = gen.calls[2][0]
+    assert "a = 2" in retry and "c = 1 // 0" in retry  # the whole document so far
+    assert "Rebinding" not in out
     assert "B=3." in out
+
+
+@pytest.mark.asyncio
+async def test_a_resubmitted_diff_that_is_already_applied_says_so(agent, loader, tmp_path):
+    """A resubmission whose @diff already ran in the failed round: the file holds
+    the post-image, so the cell fails with "diff already applied", nothing written."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "c.txt").write_text("a\nb\n")
+    diff = "```lackpy @diff(c.txt)\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n```\n\n"
+    gen = _stub(diff + "<compute>\nz = 1 // 0\n</compute>\n",
+                diff + "<compute>\nz = 1\n</compute>\n", "Done.\n")
+    await agent.run_literate_agent("x", base_dir=str(ws), generate=gen, policy_loader=loader,
+                                   max_iterations=3)
+    assert (ws / "c.txt").read_text() == "a\nB\n"
+    assert len(gen.calls) == 3
+    assert "diff already applied" in gen.calls[2][0]  # the error the model is shown

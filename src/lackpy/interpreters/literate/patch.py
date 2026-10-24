@@ -8,6 +8,8 @@ namespace. (Moved from the deleted kit module ``tools.py``.)
 
 from __future__ import annotations
 
+import re
+
 
 def apply_patch(text: str, diff_text: str) -> str:
     """``text`` with the unified diff ``diff_text`` applied.
@@ -16,8 +18,41 @@ def apply_patch(text: str, diff_text: str) -> str:
     ``text`` it stands for. On a mismatch, ``ValueError`` names the line, what
     the file has and what the diff expects; nothing is returned, so the caller
     writes nothing (ruling: a diff applied to the wrong text corrupts a file).
+
+    When the diff does not apply but its reverse does, the file already holds
+    the diff's result (a resubmitted document ran it before): the
+    ``ValueError`` then says "diff already applied" (ruling after C1).
     """
-    return "".join(_apply_unified_diff(text.splitlines(keepends=True), diff_text))
+    lines = text.splitlines(keepends=True)
+    try:
+        return "".join(_apply_unified_diff(lines, diff_text))
+    except ValueError as forward:
+        try:
+            _apply_unified_diff(lines, _reversed(diff_text))
+        except ValueError:
+            raise forward from None
+        raise ValueError(
+            "diff already applied: the file already holds the result of this diff; "
+            "nothing was written") from None
+
+
+_HEADER_SIDES = re.compile(r"^@@ -(\S+) \+(\S+) @@")
+
+
+def _reversed(diff_text: str) -> str:
+    """``diff_text`` with its two sides swapped: ``+`` lines become ``-`` lines,
+    and the header's old and new ranges change places."""
+    out = []
+    for line in diff_text.splitlines():
+        m = _HEADER_SIDES.match(line)
+        if m:
+            line = f"@@ -{m.group(2)} +{m.group(1)} @@{line[m.end():]}"
+        elif line.startswith("+") and not line.startswith("+++ "):
+            line = "-" + line[1:]
+        elif line.startswith("-") and not line.startswith("--- "):
+            line = "+" + line[1:]
+        out.append(line)
+    return "\n".join(out)
 
 
 def _apply_unified_diff(original: list[str], diff_text: str) -> list[str]:
