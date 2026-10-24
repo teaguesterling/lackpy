@@ -573,6 +573,30 @@ class TestBlankContextLine:
         with pytest.raises(ValueError, match="diff already applied"):
             apply_patch("a\nB\n", "@@ -1,2 +1,2 @@\n a\n-b\n+B\n")
 
+    @pytest.mark.parametrize("text, diff", [
+        # Re-review N1, the reviewer's measured cases: a reversed hunk that only
+        # inserts verifies nothing, so it must not count as "already applied".
+        ("a\nQ\n", "@@ -2,1 +1,0 @@\n-z\n"),
+        ("", "@@ -2,1 +1,0 @@\n-z\n"),
+        ("A\nb\nc\nd\nX\n", "@@ -1,1 +1,1 @@\n-a\n+A\n@@ -5,1 +4,0 @@\n-e\n"),
+    ])
+    def test_a_reverse_that_verifies_nothing_is_a_plain_mismatch(self, text, diff):
+        with pytest.raises(ValueError, match="does not apply") as e:
+            apply_patch(text, diff)
+        assert "already applied" not in str(e.value)
+
+    @pytest.mark.asyncio
+    async def test_a_context_free_deletion_that_is_not_in_the_file_writes_nothing(self, ws, policy):
+        (ws / "c.txt").write_text("a\nQ\n")
+        result = await _run(_ctx(ws, policy), "```lackpy @diff(c.txt)\n@@ -2,1 +1,0 @@\n-z\n```\n")
+        assert not result.success
+        assert "already applied" not in result.error
+        assert (ws / "c.txt").read_text() == "a\nQ\n"
+
+    def test_an_applied_deletion_with_context_is_still_detected(self):
+        with pytest.raises(ValueError, match="diff already applied"):
+            apply_patch("a\nc\n", "@@ -1,3 +1,2 @@\n a\n-b\n c\n")
+
     def test_a_diff_that_matches_neither_side_keeps_the_mismatch_message(self):
         with pytest.raises(ValueError, match="does not apply: line 2 is 'x'") as e:
             apply_patch("a\nx\n", "@@ -1,2 +1,2 @@\n a\n-b\n+B\n")

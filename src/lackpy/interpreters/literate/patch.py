@@ -21,14 +21,24 @@ def apply_patch(text: str, diff_text: str) -> str:
 
     When the diff does not apply but its reverse does, the file already holds
     the diff's result (a resubmitted document ran it before): the
-    ``ValueError`` then says "diff already applied" (ruling after C1).
+    ``ValueError`` then says "diff already applied" (ruling after C1). Only a
+    reverse whose every hunk checks at least one line of the file counts
+    (re-review N1); otherwise the mismatch error stands.
     """
     lines = text.splitlines(keepends=True)
     try:
         return "".join(_apply_unified_diff(lines, diff_text))
     except ValueError as forward:
+        reverse = _reversed(diff_text)
         try:
-            _apply_unified_diff(lines, _reversed(diff_text))
+            # Re-review N1: a reversed hunk with no context or ``-`` line (the
+            # reverse of a context-free deletion) is a pure insert, which always
+            # applies and so proves nothing. The reverse counts as a match only
+            # when every reversed hunk checked at least one line of the file.
+            if not all(any(op in (" ", "-") for op, _ in hunk)
+                       for _, hunk in _parse_hunks(reverse)):
+                raise forward
+            _apply_unified_diff(lines, reverse)
         except ValueError:
             raise forward from None
         raise ValueError(
