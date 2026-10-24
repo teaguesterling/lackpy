@@ -92,12 +92,12 @@ class TestDirtySubgraphReexecution:
     """L1.4 acceptance — the execution path re-runs only the dependents."""
 
     @pytest.mark.asyncio
-    async def test_reassertion_reexecutes_only_dependents(self, context):
-        # Doc binds A, then B uses A, then independent C; finally re-assert A.
-        # B must RE-RUN with the new value; C must NOT re-run.
+    async def test_heal_reexecutes_only_dependents(self, context):
+        # Teague's C1 decision: only a heal re-runs. B uses A while A is an
+        # unbound hole, then independent C; finally A heals. B must RE-RUN
+        # with the value; C must NOT re-run.
         result = await _run(
             context,
-            "```lackpy\na = 1\n```\n\n"
             "```lackpy\nb = a + 1\n```\n\n"
             "```lackpy\nc = 99\n```\n\n"
             "```lackpy\na = 2\n```",
@@ -105,15 +105,15 @@ class TestDirtySubgraphReexecution:
         ledger = result.metadata["ledger"]
         versions = result.metadata["versions"]
 
-        # B re-ran with a = 2 → b = 3 (was 2 before the re-assertion).
+        # B re-ran with a = 2 → b = 3 (a chained hole before the heal).
         assert result.metadata["variables"]["b"] == 3
         b_hist = versions.history("b")
-        assert [v.value for v in b_hist] == [2, 3]  # versioned on re-exec
+        assert isinstance(b_hist[0].value, Hole) and b_hist[-1].value == 3
 
-        # Exactly one dirty cell — B (cell index 1) — triggered by a; C absent.
+        # Exactly one dirty cell — B (cell index 0) — triggered by a; C absent.
         dirty = _dirty(ledger)
         assert len(dirty) == 1
-        assert dirty[0].detail["cell_index"] == 1
+        assert dirty[0].detail["cell_index"] == 0
         assert dirty[0].detail["triggered_by"] == ["a"]
         assert dirty[0].detail["reexecuted"] is True
 
@@ -123,11 +123,10 @@ class TestDirtySubgraphReexecution:
 
     @pytest.mark.asyncio
     async def test_dirty_subgraph_transitive(self, context):
-        # A -> B -> C chain; a sibling D off A's path.  Re-assert A → B and C
+        # A -> B -> C chain; a sibling D off A's path.  A heals (C1) → B and C
         # both re-run, in order; D does not.
         result = await _run(
             context,
-            "```lackpy\na = 1\n```\n\n"
             "```lackpy\nb = a + 1\n```\n\n"
             "```lackpy\nc = b + 1\n```\n\n"
             "```lackpy\nd = 100\n```\n\n"
@@ -136,17 +135,17 @@ class TestDirtySubgraphReexecution:
         ledger = result.metadata["ledger"]
         vs = result.metadata["variables"]
 
-        # b = a + 1 = 11 ; c = b + 1 = 12 after A re-asserted to 10.
+        # b = a + 1 = 11 ; c = b + 1 = 12 after A healed to 10.
         assert vs["b"] == 11 and vs["c"] == 12
         # D untouched.
         assert vs["d"] == 100
 
         dirty = _dirty(ledger)
         # Dependents dirtied in dependency (ascending index) order: B then C.
-        assert [e.detail["cell_index"] for e in dirty] == [1, 2]
+        assert [e.detail["cell_index"] for e in dirty] == [0, 1]
         assert all(e.detail["reexecuted"] for e in dirty)
-        # D (cell index 3) is never among the dirtied cells.
-        assert 3 not in {e.detail["cell_index"] for e in dirty}
+        # D (cell index 2) is never among the dirtied cells.
+        assert 2 not in {e.detail["cell_index"] for e in dirty}
 
     @pytest.mark.asyncio
     async def test_no_dependency_no_rerun(self, context):
@@ -166,15 +165,15 @@ class TestDirtySubgraphReexecution:
 
     @pytest.mark.asyncio
     async def test_dirty_reexec_composes_with_forgiveness(self, context):
-        # A dependent that re-execs into a now-forgiving upstream reifies and
-        # versions — no crash, ledgered.  base -> derived; then base is
-        # re-asserted as a hole (an unknown reference), so the dependent
-        # `derived` re-execs into a chained hole.
+        # A dependent re-run by a heal that hits ANOTHER unresolved name
+        # reifies and versions — no crash, ledgered.  (C1: it was "base
+        # re-asserted as a hole", a value-to-hole change, which no longer
+        # re-runs anything.)  derived reads base (unbound, then healed) and
+        # missing (never bound), so its re-exec re-reifies a chained hole.
         result = await _run(
             context,
-            "```lackpy\nbase = 10\n```\n\n"
-            "```lackpy\nderived = base + 1\n```\n\n"
-            "```lackpy\nbase = broken_ref\n```",  # broken_ref undefined
+            "```lackpy\nderived = base + missing\n```\n\n"
+            "```lackpy\nbase = 10\n```",
         )
         ledger = result.metadata["ledger"]
         versions = result.metadata["versions"]
@@ -186,15 +185,16 @@ class TestDirtySubgraphReexecution:
 
         # derived was dirtied by base and re-executed.
         dirty = _dirty(ledger)
-        assert [e.detail["cell_index"] for e in dirty] == [1]
+        assert [e.detail["cell_index"] for e in dirty] == [0]
         assert dirty[0].detail["triggered_by"] == ["base"]
         assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "reified"
 
-        # On re-exec base is now a Hole, so derived re-reifies as a chained
-        # hole AND versions (v1 real value → v2 hole).
+        # On re-exec missing is still a Hole, so derived re-reifies as a
+        # chained hole AND versions (v1 hole → v2 hole).
         d_hist = versions.history("derived")
-        assert d_hist[0].value == 11
-        assert isinstance(d_hist[-1].value, Hole)
+        assert len(d_hist) == 2
+        assert all(isinstance(v.value, Hole) for v in d_hist)
         assert d_hist[0].superseded_by == d_hist[-1].version
         # The re-exec reification is ledgered (a hole_opened for derived).
         assert ledger.query(entry_type="hole_opened", name="derived")
@@ -209,18 +209,18 @@ class TestDirtySubgraphReexecution:
         # a NAMED error_reified entry and a truthful dirty entry.  (This test
         # previously pinned the pre-fix stale-keep behavior as an "honest
         # limit"; that was the Finding-1 defect — updated to the contract.)
+        # C1: q is blocked on the unbound a; a heals to 0 → q re-execs into 1/0.
         result = await _run(
             context,
-            "```lackpy\na = 1\n```\n\n"
             "```lackpy\nq = 1 / a\n```\n\n"
-            "```lackpy\na = 0\n```",  # re-assert a → q re-execs into 1/0
+            "```lackpy\na = 0\n```",
         )
         ledger = result.metadata["ledger"]
         versions = result.metadata["versions"]
         # Completed, no crash; q's cell was dirtied and re-run.
         assert result.metadata["completed"] is True
         dirty = _dirty(ledger)
-        assert [e.detail["cell_index"] for e in dirty] == [1]
+        assert [e.detail["cell_index"] for e in dirty] == [0]
         # The dirty entry tells the truth: re-executed, but the re-run failed
         # and was reified — it does not claim a clean refresh.
         assert dirty[0].detail["reexecuted"] is True
@@ -231,11 +231,11 @@ class TestDirtySubgraphReexecution:
         err = ledger.query(entry_type="error_reified")
         assert err and err[-1].name == "q" and err[-1].detail["kept"] == []
         assert round_is_left(ledger.entries())
-        # q is an ErrorValue, not the stale first-pass value, and the
-        # transition is versioned: v1 (1.0, superseded) → v2 (error).
+        # q is an ErrorValue, and the transition is versioned:
+        # v1 (chained hole, superseded) → v2 (error).
         assert isinstance(result.metadata["variables"]["q"], ErrorValue)
         q_hist = versions.history("q")
-        assert [type(v.value).__name__ for v in q_hist] == ["float", "ErrorValue"]
+        assert [type(v.value).__name__ for v in q_hist] == ["Hole", "ErrorValue"]
         assert q_hist[0].superseded_by == q_hist[1].version
         assert ledger.query(entry_type="superseded", name="q")
 
@@ -251,8 +251,11 @@ class TestDirtySubgraphReexecution:
         result = await _run(
             context,
             "```lackpy\nfrom pathlib import Path\nname = 'a.txt'\n```\n\n"
-            "```lackpy\nwrote = Path(name).write_text('hi')\n```\n\n"
-            "```lackpy\nname = 'b.txt'\n```",  # re-assert name → dependent write
+            # C1: the dependent writes, then fails; name becomes an ErrorValue
+            # and then heals, which dirties the failed dependent.
+            "```lackpy\nwrote = Path(name).write_text('hi')\nboom = 1 // 0\n```\n\n"
+            "```lackpy\nname = 1 // 0\n```\n\n"
+            "```lackpy\nname = 'b.txt'\n```",
         )
         ledger = result.metadata["ledger"]
         dirty = _dirty(ledger)
@@ -287,7 +290,8 @@ class TestDirtySubgraphReexecution:
             context,
             "```lackpy\nfrom pathlib import Path\nname = 'out1.txt'\n```\n\n"
             "```lackpy\nw = Path(name).write_text('DANGER')\n```\n\n"
-            "```lackpy\nname = 'out2.txt'\n```",  # re-assert → dirties cell 1
+            "```lackpy\nname = 1 // 0\n```\n\n"  # C1: an ErrorValue, then a heal
+            "```lackpy\nname = 'out2.txt'\n```",  # heal → dirties cell 1
         )
         # The refused effect never fires — on either pass.
         assert not (tmp_path / "out1.txt").exists()
@@ -325,6 +329,7 @@ class TestDirtySubgraphReexecution:
             context,
             "```lackpy\nfrom pathlib import Path\nname = 'out1.txt'\n```\n\n"
             "```lackpy\nw = Path(name).write_text('DANGER')\n```\n\n"
+            "```lackpy\nname = 1 // 0\n```\n\n"  # C1: an ErrorValue, then a heal
             "```lackpy\nname = 'out2.txt'\n```",
         )
         assert not (tmp_path / "out1.txt").exists()
@@ -362,8 +367,7 @@ class TestDirtySubgraphReexecution:
         # too — within a single round's cells.
         session = LiterateSession(context)
         await session.step(
-            "```lackpy\na = 1\n```\n\n"
-            "```lackpy\nb = a + 1\n```\n\n"
+            "```lackpy\nb = a + 1\n```\n\n"  # C1: a heals from a hole
             "```lackpy\na = 5\n```"
         )
         assert session._kernel.get_namespace()["b"] == 6
@@ -376,12 +380,14 @@ class TestReexecutionThroughTheSession:
 
     @pytest.mark.asyncio
     async def test_a_rerun_does_not_append_to_the_program(self, context):
+        # C1: b's cell joined the program and failed at runtime; a becomes an
+        # ErrorValue, then heals, so b's cell re-runs with rerun_cell.
         session = LiterateSession(context)
-        result = await session.step(
-            "```lackpy\na = 1\n```\n\n```lackpy\nb = a + 1\n```\n\n```lackpy\na = 2\n```")
-        assert result.ok, result.errors
-        assert session._kernel.get_namespace()["b"] == 3
-        assert session._kernel.session._program == "a = 1\nb = a + 1\na = 2"
+        await session.step(
+            "```lackpy\na = 0\n```\n\n```lackpy\nb = 1 / a\n```\n\n"
+            "```lackpy\na = 1 // 0\n```\n\n```lackpy\na = 2\n```")
+        assert session._kernel.get_namespace()["b"] == 0.5
+        assert session._kernel.session._program == "a = 0\nb = 1 / a\na = 1 // 0\na = 2"
 
     @pytest.mark.asyncio
     async def test_a_refusal_during_reexecution_stops_the_document(
@@ -392,7 +398,8 @@ class TestReexecutionThroughTheSession:
         result = await _run(
             context,
             "```lackpy\nfrom pathlib import Path\np = 'in.txt'\n```\n\n"
-            "```lackpy\nt = Path(p).read_text()\n```\n\n"
+            "```lackpy\nt = Path(p).read_text()\nboom = 1 // 0\n```\n\n"
+            "```lackpy\np = 1 // 0\n```\n\n"  # C1: an ErrorValue, then a heal
             "```lackpy\np = '/etc/hostname'\n```\n\n"
             "```lackpy\nafter = 1\n```\n",
             )
@@ -435,7 +442,9 @@ class TestNonDataBindingsAreTrackedByName:
         assert [e.detail["cell_index"] for e in _dirty(result.metadata["ledger"])] == [0]
 
     @pytest.mark.asyncio
-    async def test_data_then_a_def_supersedes_and_dirties(self, context):
+    async def test_data_then_a_def_supersedes_and_does_not_rerun(self, context):
+        # Teague's C1 decision: a value-to-value rebind (data to a def) is
+        # versioned (superseded) but re-runs nothing; y keeps python3's 4.
         result = await _run(
             context,
             "```lackpy\nf = 3\n```\n\n```lackpy\ny = f + 1\n```\n\n"
@@ -443,8 +452,56 @@ class TestNonDataBindingsAreTrackedByName:
         ledger = result.metadata["ledger"]
         sup = ledger.query(entry_type="superseded", name="f")
         assert sup and sup[-1].detail["cell_index"] == 2
-        dirty = _dirty(ledger)
-        assert [e.detail["cell_index"] for e in dirty] == [1]
-        assert dirty[0].detail["reexecuted"] is True
-        # The re-run sees the function: f + 1 raises, so y is no longer the stale 4.
-        assert result.metadata["variables"]["y"] != 4
+        assert _dirty(ledger) == []
+        assert result.metadata["variables"]["y"] == 4
+
+
+class TestPlainRebindDoesNotReexecute:
+    """Teague's C1 decision: a dependent cell re-runs only when a name it reads
+    heals from Hole, ErrorValue or Unavailable to a value. A plain rebind never
+    re-runs earlier cells, so a document gives python3's answer (goal 4)."""
+
+    CSV = ("```lackpy\nrows = 'name,n\\nann,3\\nbob,5\\ncat,7\\n'.splitlines()\n```\n\n"
+           "```lackpy\nrows = rows[1:]\n```\n\n"
+           "```lackpy\nrows = [r for r in rows if r]\n```\n\n"
+           "There are {len(rows)} people.\n\n"
+           "```lackpy\nlen(rows)\n```\n")
+
+    @pytest.mark.asyncio
+    async def test_the_reviewers_csv_document_gives_python3s_answer(self, context):
+        # The final review measured output=2 and rows=['bob,5','cat,7'] (ann lost)
+        # while the prose said 3; python3 on the joined cells gives 3.
+        result = await _run(context, self.CSV)
+        assert result.success, result.error
+        assert result.metadata["value"] == 3
+        assert result.metadata["variables"]["rows"] == ["ann,3", "bob,5", "cat,7"]
+        assert "There are 3 people." in result.output
+        assert _dirty(result.metadata["ledger"]) == []
+
+    @pytest.mark.asyncio
+    async def test_two_slices_of_one_name(self, context):
+        doc = ("```lackpy\nitems = ['a', 'b', 'c', 'd']\n```\n\n"
+               "```lackpy\nitems = items[1:]\n```\n\n"
+               "```lackpy\nitems = items[1:]\nitems\n```\n")
+        result = await _run(context, doc)
+        assert result.success, result.error
+        assert result.metadata["value"] == ["c", "d"]
+
+    @pytest.mark.asyncio
+    async def test_an_earlier_reader_keeps_the_value_it_saw(self, context):
+        doc = ("```lackpy\na = 1\n```\n\n```lackpy\nb = a + 1\n```\n\n"
+               "```lackpy\na = 2\n```\n")
+        result = await _run(context, doc)
+        assert result.metadata["variables"]["b"] == 2  # python3: b = 2
+        assert _dirty(result.metadata["ledger"]) == []
+
+    @pytest.mark.asyncio
+    async def test_a_heal_still_reruns_the_blocked_reader_but_not_a_reader_that_ran(self, context):
+        # x heals (hole -> 5); cell 0 was blocked on it and re-runs. z read the
+        # healed x and ran; the later plain rebind of x must not re-run it.
+        doc = ("```lackpy\ny = x + 1\n```\n\n```lackpy\nx = 5\n```\n\n"
+               "```lackpy\nz = x * 2\n```\n\n```lackpy\nx = x + 1\n```\n")
+        result = await _run(context, doc)
+        vs = result.metadata["variables"]
+        assert vs["z"] == 10
+        assert [e.detail["cell_index"] for e in _dirty(result.metadata["ledger"])] == [0]

@@ -58,8 +58,9 @@ def _joined(parsed: ParseResult) -> str:
     return compile_cells(ParseResult(frontmatter=parsed.frontmatter, cells=code)) + "\n"
 
 
-def test_there_are_five_fixtures_and_none_uses_diff():
-    assert len(DOCS) == 5
+def test_there_are_six_fixtures_and_none_uses_diff():
+    # Six since Teague's C1 decision: rebind.md rebinds a name across cells.
+    assert len(DOCS) == 6
     for name in DOCS:
         parsed = parse((FIXTURES / name).read_text())
         assert not parsed.errors, (name, parsed.errors)
@@ -105,6 +106,6 @@ def test_code_cells_match_python3(name, tmp_path):
     assert proc.stdout == "".join(code_out)
     assert proc.stdout, f"{name}: the code cells print nothing to compare"
     assert _files(py_ws) == _files(cell_ws) == _files(svc_ws)
-    assert _files(py_ws) != _files(SEED) or name in {"json_try.md", "regex.md", "scan_def.md"}
+    assert _files(py_ws) != _files(SEED) or name in {"json_try.md", "rebind.md", "regex.md", "scan_def.md"}
     # The service's rendered document is every cell's output, exactly.
     assert run.stdout == "".join(all_out)

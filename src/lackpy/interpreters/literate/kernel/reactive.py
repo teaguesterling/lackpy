@@ -106,7 +106,7 @@ class DependencyGraph:
         return binders
 
     def dirty_closure(
-        self, reasserted_names: set[str]
+        self, reasserted_names: set[str], *, eligible: set[int] | None = None,
     ) -> list[tuple[int, set[str]]]:
         """Cells made stale by re-asserting ``reasserted_names``, in re-exec order.
 
@@ -117,6 +117,11 @@ class DependencyGraph:
         forward-only (readers at a HIGHER index than a just-dirtied binder) — so
         an independent cell, and a dependent that already saw the new value, are
         both correctly excluded, and the cascade always terminates.
+
+        ``eligible`` (optional) limits the result to those cell indices, for
+        the seed and for propagation: the batch path passes the cells whose
+        linear run did not succeed (Teague's C1 decision), so a cell that ran
+        is never re-run.
         """
         binders = self._current_binders()
         triggers: dict[int, set[str]] = defaultdict(set)
@@ -128,7 +133,7 @@ class DependencyGraph:
             if binder is None:
                 continue
             for i in self._order:
-                if i < binder and name in self._refs[i]:
+                if i < binder and name in self._refs[i] and (eligible is None or i in eligible):
                     dirty.add(i)
                     triggers[i].add(name)
 
@@ -139,7 +144,8 @@ class DependencyGraph:
             d = worklist.pop(0)
             for name in self._binds[d]:
                 for i in self._order:
-                    if i > d and name in self._refs[i] and i not in dirty:
+                    if (i > d and name in self._refs[i] and i not in dirty
+                            and (eligible is None or i in eligible)):
                         dirty.add(i)
                         triggers[i].add(name)
                         worklist.append(i)

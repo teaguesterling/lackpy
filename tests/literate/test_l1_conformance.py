@@ -274,12 +274,17 @@ class TestSemantic5DirtySubgraph:
     ):
         result = await run_batch(
             context,
+            # Teague's C1 decision: only a heal re-runs, and only cells whose
+            # linear run did not succeed. The effectful dependent writes, then
+            # fails; a becomes an ErrorValue (cell 2), blocking the pure
+            # dependent; cell 5 heals a.
             lackpy_doc(
                 "from pathlib import Path\na = 1",        # 0: upstream
-                "b = a + 1",                              # 1: pure dependent
-                "w = Path('log.txt').write_text(str(a))", # 2: effectful dependent
-                "c = 99",                                 # 3: independent
-                "a = 2",                                  # 4: re-assertion
+                "w = Path('log.txt').write_text(str(a))\nboom = 1 // 0",  # 1: effectful, failed
+                "a = 1 // 0",                             # 2: a -> ErrorValue
+                "b = a + 1",                              # 3: pure dependent, blocked
+                "c = 99",                                 # 4: independent
+                "a = 2",                                  # 5: heal
             ),
         )
         ledger = result.metadata["ledger"]
@@ -291,27 +296,30 @@ class TestSemantic5DirtySubgraph:
         # Ledger: both dependents dirtied, in dependency order — and ONLY them.
         dirty = ledger.query(entry_type=DIRTY)
         by_cell = {e.detail["cell_index"]: e for e in dirty}
-        assert sorted(by_cell) == [1, 2]
+        assert sorted(by_cell) == [1, 3]
 
-        # Pure dependent re-executed: b refreshed 2 → 3, a new version.
-        assert by_cell[1].detail["reexecuted"] is True
-        assert by_cell[1].detail["triggered_by"] == ["a"]
+        # Pure dependent re-executed: b healed from its chained hole to 3.
+        assert by_cell[3].detail["reexecuted"] is True
+        assert by_cell[3].detail["triggered_by"] == ["a"]
         assert result.metadata["variables"]["b"] == 3
-        assert [v.value for v in versions.history("b")] == [2, 3]
+        assert versions.history("b")[-1].value == 3
 
         # Effectful dependent withheld: ledgered but NOT re-run, with reason —
         # the file was written exactly once, with the ORIGINAL upstream value.
-        assert by_cell[2].detail["reexecuted"] is False
-        assert "effect" in by_cell[2].detail["reason"]
+        assert by_cell[1].detail["reexecuted"] is False
+        assert "effect" in by_cell[1].detail["reason"]
         assert (tmp_path / "log.txt").read_text() == "1"
 
         # Independent cell untouched: never dirtied, single version stands.
         assert result.metadata["variables"]["c"] == 99
         assert len(versions.history("c")) == 1
 
-        # dirty/superseded are bookkeeping, not failures: the run is Right.
-        assert result.success is True
-        assert not round_is_left(ledger.entries())
+        # dirty/superseded are bookkeeping, not failures. (Since C1 this
+        # document must fail on purpose to reach a heal, so the run is Left;
+        # the dirty and superseded entries are still not among its failures.)
+        from lackpy.interpreters.literate.kernel.forgiveness import reified_failures
+        kinds = {e.entry_type for e in reified_failures(ledger.entries())}
+        assert DIRTY not in kinds and SUPERSEDED not in kinds
 
 
 class TestChainedHoleAcceptance:
@@ -530,9 +538,10 @@ class TestReassertionFailureConformance:
     async def test_failing_dirty_reexec_reifies_and_ledger_tells_truth(
         self, context
     ):
-        # Reactive path: re-assert a → re-exec of b = 10 // a raises.
+        # Reactive path (C1: heal-only): b and c are blocked on the unbound a;
+        # a heals to 0 → the re-exec of b = 10 // a raises.
         result = await run_batch(
-            context, lackpy_doc("a = 1", "b = 10 // a", "c = b + 1", "a = 0")
+            context, lackpy_doc("b = 10 // a", "c = b + 1", "a = 0")
         )
         ledger = result.metadata["ledger"]
         versions = result.metadata["versions"]
@@ -541,29 +550,29 @@ class TestReassertionFailureConformance:
             e.detail["cell_index"]: e for e in ledger.query(entry_type=DIRTY)
         }
 
-        # b reifies (no stale 10) and the transition is versioned.
+        # b reifies and the transition is versioned (hole → error).
         assert isinstance(variables["b"], ErrorValue)
         b_hist = versions.history("b")
-        assert [type(v.value).__name__ for v in b_hist] == ["int", "ErrorValue"]
+        assert [type(v.value).__name__ for v in b_hist] == ["Hole", "ErrorValue"]
 
         # The dirty entry reports the ACTUAL outcome — no clean-refresh claim.
-        assert dirty[1].detail["reexecuted"] is True
-        assert dirty[1].detail["outcome"] == "reified"
-        assert dirty[1].detail["reified"] == ["b"]
+        assert dirty[0].detail["reexecuted"] is True
+        assert dirty[0].detail["outcome"] == "reified"
+        assert dirty[0].detail["reified"] == ["b"]
 
         # Downstream c re-execs into a chained hole off the reified b —
         # truthfully recorded too.
         assert isinstance(variables["c"], Hole)
         assert "b" in variables["c"].blocked_by
-        assert dirty[2].detail["reexecuted"] is True
-        assert dirty[2].detail["outcome"] == "reified"
-        assert dirty[2].detail["reified"] == ["c"]
+        assert dirty[1].detail["reexecuted"] is True
+        assert dirty[1].detail["outcome"] == "reified"
+        assert dirty[1].detail["reified"] == ["c"]
         assert round_is_left(ledger.entries())
 
     @pytest.mark.asyncio
     async def test_clean_dirty_reexec_outcome_recorded(self, context):
         result = await run_batch(
-            context, lackpy_doc("a = 1", "b = a + 1", "a = 2")
+            context, lackpy_doc("b = a + 1", "a = 2")  # C1: a heals from a hole
         )
         dirty = result.metadata["ledger"].query(entry_type=DIRTY)
         assert dirty[0].detail["reexecuted"] is True
@@ -584,7 +593,8 @@ class TestReassertionFailureConformance:
             lackpy_doc(
                 "from pathlib import Path\ntarget = Path('tick.txt')",
                 "a = 1",
-                "n = target.write_text(f'tick{a}')",
+                "n = target.write_text(f'tick{a}')\nboom = 1 // 0",
+                "a = 1 // 0",  # C1: a becomes an ErrorValue, then heals
                 "a = 0",
             ),
         )
@@ -624,8 +634,9 @@ class TestRuntimeEffectObservation:
         "from pathlib import Path\n"
         "def save(v):\n    return Path('helper_out.txt').write_text(v)",  # 0
         "seed = 'one'",                                              # 1
-        "res = save(seed)",   # 2: helper-wrapped write — statically "pure"
-        "seed = 'two'",       # 3: re-assert → cell 2 dirty
+        "res = save(seed)\nboom = 1 // 0",  # 2: helper-wrapped write, then fails
+        "seed = 1 // 0",      # 3: C1: seed becomes an ErrorValue
+        "seed = 'two'",       # 4: heal → cell 2 dirty
     )
 
     @pytest.mark.asyncio
@@ -666,7 +677,7 @@ class TestRuntimeEffectObservation:
         }
         assert dirty[2].detail["reexecuted"] is True
         assert dirty[2].detail["mode"] == "permissive"
-        assert dirty[2].detail["outcome"] == "clean"
+        assert dirty[2].detail["outcome"] == "reified"  # boom fails again
         # The re-run's own observed effects are ledgered — the replay is
         # visible, never silent.
         assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
@@ -682,7 +693,8 @@ class TestRuntimeEffectObservation:
             context,
             lackpy_doc(
                 "name = 'alice'",
-                "label = name.upper()",
+                "label = name.upper()\nboom = 1 // 0",
+                "name = 1 // 0",  # C1: name becomes an ErrorValue, then heals
                 "name = 'bob'",
             ),
         )
@@ -691,7 +703,7 @@ class TestRuntimeEffectObservation:
             for e in result.metadata["ledger"].query(entry_type=DIRTY)
         }
         assert dirty[1].detail["reexecuted"] is True
-        assert dirty[1].detail["outcome"] == "clean"
+        assert dirty[1].detail["outcome"] == "reified"  # boom fails again
         assert result.metadata["variables"]["label"] == "BOB"
 
     @pytest.mark.asyncio

@@ -540,12 +540,17 @@ class LiterateInterpreter:
         cell_ids: dict[int, int | None] | None = None,
         values: dict[int, Any] | None = None,
     ) -> str | None:
-        """Re-execute the stale dependents of this run's re-assertions (L1.4).
+        """Re-execute the dependents of this run's heals (L1.4, Teague's C1 decision).
 
         A name re-asserted during the linear walk shows up as an L1.3
-        ``superseded`` ledger entry in this run's slice.  Those re-asserted
-        names seed :meth:`DependencyGraph.dirty_closure`, which returns the
-        transitive dependent cells in dependency order.  Each dirtied cell is
+        ``superseded`` ledger entry in this run's slice.  Only a HEAL counts:
+        a reified version (Hole, ErrorValue, Unavailable) superseded by a
+        value.  A plain value-to-value rebind re-runs nothing, so a document
+        gives python3's answer (goal 4).  The healed names seed
+        :meth:`DependencyGraph.dirty_closure`, limited to the cells whose
+        linear run did not succeed (a cell that ran read real values and
+        keeps them), which returns the transitive dependent cells in
+        dependency order.  Each dirtied cell is
         LEDGERED (a ``dirty`` entry — nothing silent) and, mode permitting,
         executed again through the shared per-cell pipeline so its bindings
         refresh against the updated namespace (and re-version / re-forgive as
@@ -621,14 +626,27 @@ class LiterateInterpreter:
         re-reified hole/error — is the ledger + version history.
         """
         run_slice = ledger.entries()[run_mark:]
-        reasserted = {
-            e.name for e in run_slice if e.entry_type == SUPERSEDED and e.name
+        # Teague's C1 decision: only a HEAL re-runs anything. A name heals when
+        # a reified version (Hole, ErrorValue, Unavailable) is superseded by a
+        # value. A plain value-to-value rebind (`rows = rows[1:]`) re-runs
+        # nothing: every cell that read the old value already ran with it, as
+        # under python3 (goal 4).
+        healed = {
+            e.name for e in run_slice
+            if e.entry_type == SUPERSEDED and e.name
+            and e.detail.get("prior") in _REIFIED_KINDS
+            and _version_kind(versions, e.name, e.detail.get("to_version")) == "value"
         }
-        if not reasserted:
+        if not healed:
             return None
         cell_ids = cell_ids if cell_ids is not None else {}
+        # Only a cell whose linear run did not succeed can have read a reified
+        # value, so only such a cell re-runs (a cell that ran saw real values
+        # and keeps them, also when a name it read is rebound later).
+        succeeded = set(values) if values is not None else set()
+        eligible = {i for i in range(len(cells)) if i not in succeeded}
 
-        for index, trigger_names in graph.dirty_closure(reasserted):
+        for index, trigger_names in graph.dirty_closure(healed, eligible=eligible):
             triggered_by = sorted(trigger_names)
             detail = {
                 "cell_index": index,
@@ -726,6 +744,16 @@ class _CellOutcome:
     #: expression's value (``CellResult.value``), else None.
     ok: bool = False
     value: Any = None
+
+
+#: The kinds of a reified (forgiven) binding; superseding one by a value heals it.
+_REIFIED_KINDS = frozenset({"hole", "error", "unavailable"})
+
+
+def _version_kind(versions: BindingVersions, name: str, version: Any) -> str | None:
+    """The :func:`value_kind` of version ``version`` of ``name``, or None."""
+    found = versions.version_of(name, version) if isinstance(version, int) else None
+    return value_kind(found.value) if found is not None else None
 
 
 def _keep_value(values: dict[int, Any], index: int, outcome: _CellOutcome) -> None:

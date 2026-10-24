@@ -325,13 +325,18 @@ WRITES = {
 }
 
 
+# Teague's C1 decision: only a heal re-runs a cell, and only a cell whose linear run
+# did not succeed. So each dependent below writes and then fails (``boom``), and the
+# trigger is a heal: ``name`` becomes an ErrorValue, then a value again.
+HEAL = "```lackpy\nname = 1 // 0\n```\n\n```lackpy\nname = 'b.out'\n```\n"
+
+
 class TestStrictModeReadsTheTrace:
     @pytest.mark.parametrize("member", sorted(WRITES))
     @pytest.mark.asyncio
     async def test_a_dependent_that_wrote_is_withheld(self, ws, policy, member):
         doc = ("```lackpy\nfrom pathlib import Path\nname = 'a.out'\n```\n\n"
-               f"```lackpy\n{WRITES[member]}\n```\n\n"
-               "```lackpy\nname = 'b.out'\n```\n")
+               f"```lackpy\n{WRITES[member]}\nboom = 1 // 0\n```\n\n" + HEAL)
         result = await _run(_ctx(ws, policy), doc)
         dirty = result.metadata["ledger"].query(entry_type=DIRTY)
         assert [e.detail["cell_index"] for e in dirty] == [1]
@@ -344,8 +349,7 @@ class TestStrictModeReadsTheTrace:
     @pytest.mark.asyncio
     async def test_permissive_mode_replays_the_write(self, ws, policy):
         doc = ("```lackpy\nfrom pathlib import Path\nname = 'a.out'\n```\n\n"
-               f"```lackpy\n{WRITES['write_text']}\n```\n\n"
-               "```lackpy\nname = 'b.out'\n```\n")
+               f"```lackpy\n{WRITES['write_text']}\nboom = 1 // 0\n```\n\n" + HEAL)
         result = await _run(_ctx(ws, policy, reactive_mode="permissive"), doc)
         dirty = result.metadata["ledger"].query(entry_type=DIRTY)
         assert dirty[0].detail["reexecuted"] is True
@@ -356,8 +360,8 @@ class TestStrictModeReadsTheTrace:
     async def test_a_dependent_that_only_read_is_rerun(self, ws, policy):
         (ws / "b.txt").write_text("B")
         doc = ("```lackpy\nfrom pathlib import Path\nname = 'hello.txt'\n```\n\n"
-               "```lackpy\nt = Path(name).read_text()\n```\n\n"
-               "```lackpy\nname = 'b.txt'\n```\n")
+               "```lackpy\nt = Path(name).read_text()\nboom = 1 // 0\n```\n\n"
+               "```lackpy\nname = 1 // 0\n```\n\n```lackpy\nname = 'b.txt'\n```\n")
         result = await _run(_ctx(ws, policy), doc)
         dirty = result.metadata["ledger"].query(entry_type=DIRTY)
         assert dirty[0].detail["reexecuted"] is True
@@ -369,8 +373,8 @@ class TestStrictModeReadsTheTrace:
         doc = ("```lackpy\nfrom pathlib import Path\n"
                "def save(v):\n    return Path('h.out').write_text(v)\n```\n\n"
                "```lackpy\nseed = 'one'\n```\n\n"
-               "```lackpy\nres = save(seed)\n```\n\n"
-               "```lackpy\nseed = 'two'\n```\n")
+               "```lackpy\nres = save(seed)\nboom = 1 // 0\n```\n\n"
+               "```lackpy\nseed = 1 // 0\n```\n\n```lackpy\nseed = 'two'\n```\n")
         result = await _run(_ctx(ws, policy), doc)
         dirty = {e.detail["cell_index"]: e
                  for e in result.metadata["ledger"].query(entry_type=DIRTY)}

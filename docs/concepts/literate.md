@@ -100,6 +100,18 @@ Validation failed: Forbidden name: 'os' at line 3 (use pathlib.Path); Forbidden 
 
 The cell does not run. The name `names` stays unbound, so the prose that uses it becomes a hole (see [Holes and errors](#holes-and-errors)).
 
+A later cell can bind a name again, as a script does (`rows = rows[1:]`).
+lackpy does not run the earlier cells again for this: each cell keeps the
+value it saw, as under `python3`. lackpy runs a cell again only when a name
+that the cell waited for heals: a hole, an error value or an unavailable value
+becomes a value (see [Forward references](#forward-references)).
+
+`LackpyService.validate` with a literate profile checks a document cell by
+cell in the same way, without running it. It does not resolve names. So a
+cell that a run skips for a hole still joins the program in `validate`, and
+a later import of the same name can be reported there although the run
+accepts it (inferred from the code, not measured).
+
 ## Document format
 
 ### Frontmatter
@@ -206,10 +218,11 @@ size = len(Path("notes.md").read_text())
 ```
 ````
 
-The error is (measured on 2026-10-18):
+The error is (measured on 2026-10-24). An earlier cell is named by its number
+in the document (prose cells count, from 1) and the document line of its fence:
 
 ```text
-Validation failed: Rebinding of imported name: 'Path' at line 1 (imported at line 1 of cell 1) (annotation cells (@read, @write) import Path for the document; use Path without importing it again)
+Validation failed: Rebinding of imported name: 'Path' at line 1 (imported at line 1 of document cell 1 (line 1)) (annotation cells (@read, @write) import Path for the document; use Path without importing it again)
 ```
 
 ### @diff
