@@ -299,6 +299,31 @@ def test_non_data_trace_field_is_sent_as_text(runner, ws):
     assert isinstance(entry.result, str)
 
 
+def test_worker_holds_only_its_own_socket(runner, ws):
+    """A worker holds no control socket and no other run's socket (measured from /proc)."""
+    loop = "for i in iter(int, 1): pass"
+    ga = _in_thread(lambda: _run(runner, loop, ws, timeout=3))
+    first = _wait_for(lambda: runner.last_pid)
+    gb = _in_thread(lambda: _run(runner, loop, ws, timeout=3))
+    second = _wait_for(lambda: runner.last_pid if runner.last_pid != first else None)
+    time.sleep(0.3)
+    sockets = [fd for fd in os.listdir(f"/proc/{second}/fd") if int(fd) > 2
+               and os.readlink(f"/proc/{second}/fd/{fd}").startswith("socket:")]
+    ga(), gb()
+    assert len(sockets) == 1, sockets
+
+
+def test_small_memory_cap_keeps_ordinary_errors(ws):
+    """A worker starts at about 47 MiB VmPeak; at a 64 MiB cap an ordinary error is not "memory"."""
+    r = ProcessRunner(memory_mb=64)
+    try:
+        result = _run(r, "1 / 0", ws)
+    finally:
+        r.close()
+    assert result.success is False
+    assert "division" in result.error
+
+
 def test_concurrent_runs_do_not_cross(runner, tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     for w, text in ((a, "A"), (b, "B")):

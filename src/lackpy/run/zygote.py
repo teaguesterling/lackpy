@@ -62,9 +62,11 @@ EXIT_REFUSED = 5
 STDOUT_CHUNK = 256 * 1024
 #: How long a worker waits for its op after ``start``.
 OP_WAIT = 60.0
-#: A failed run whose peak virtual size came this close to ``RLIMIT_AS`` is
-#: reported as the memory cap (a full deque raises SystemError, not MemoryError;
+#: A failed run whose peak virtual size came within this margin of ``RLIMIT_AS``
+#: is reported as the memory cap (a full deque raises SystemError, not MemoryError;
 #: measured at 256 MiB: VmPeak 262104 kB for the deque, 245228 kB for a list).
+#: The margin is at most an eighth of the cap: a worker starts near 47 MiB, so at
+#: a small cap a fixed 32 MiB would call every failure "memory".
 MEMORY_MARGIN = 32 * 1024 * 1024
 
 
@@ -161,7 +163,8 @@ def _near_memory_limit(memory_mb: int | None) -> bool:
             for line in f:
                 if line.startswith(b"VmPeak:"):
                     peak = int(line.split()[1]) * 1024
-                    return peak >= memory_mb * 1024 * 1024 - MEMORY_MARGIN
+                    limit = memory_mb * 1024 * 1024
+                    return peak >= limit - min(MEMORY_MARGIN, limit // 8)
     except (OSError, ValueError, IndexError):
         pass
     return False
@@ -185,7 +188,8 @@ def _run_one(channel: _Channel, msg: dict[str, Any], memory_mb: int | None) -> d
     runner = _WorkerRunner(channel)
     result = runner.run(program, params=msg.get("params"), path_policy=policy)
     memory = isinstance(runner.failure, MemoryError) or (
-        not result.success and _near_memory_limit(memory_mb))
+        not result.success and result.error_phase != "refused"
+        and _near_memory_limit(memory_mb))
     return {"success": result.success, "output": result.output, "error": result.error,
             "variables": result.variables, "error_phase": result.error_phase,
             "memory": memory}
