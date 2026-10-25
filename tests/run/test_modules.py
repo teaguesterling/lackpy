@@ -127,16 +127,13 @@ COLLECTIONS_EXPRESSIONS = [
     "repr(deque())",
     "repr(deque([1, 2, 3], maxlen=2))",
     "repr(deque([1]) + deque([2]))",
-    "repr(OrderedDict())",
-    "repr(OrderedDict(a=1))",
-    "isinstance(OrderedDict(a=1) | {'b': 2}, OrderedDict)",
     "repr(Counter)",
     "repr(defaultdict)",
 ]
 
 
 class TestCollectionsClasses:
-    @pytest.mark.parametrize("name", ["Counter", "defaultdict", "deque", "OrderedDict"])
+    @pytest.mark.parametrize("name", ["Counter", "defaultdict", "deque"])
     def test_serves_the_real_class(self, imp, name):
         # Ruling (Review Focus 5 re-ruled): a subclass made Counter + Counter the
         # base class, a different result from plain Python.
@@ -144,12 +141,12 @@ class TestCollectionsClasses:
 
     @pytest.mark.parametrize("expression", COLLECTIONS_EXPRESSIONS)
     def test_matches_plain_python(self, expression):
-        program = f"from collections import Counter, defaultdict, deque, OrderedDict\n{expression}"
+        program = f"from collections import Counter, defaultdict, deque\n{expression}"
         result = RestrictedRunner().run(program)
         assert result.success, result.error
         plain = eval(expression, {  # noqa: S307
             "Counter": collections.Counter, "defaultdict": collections.defaultdict,
-            "deque": collections.deque, "OrderedDict": collections.OrderedDict,
+            "deque": collections.deque,
             "repr": repr, "isinstance": isinstance,
         })
         assert result.output == plain

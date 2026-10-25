@@ -15,18 +15,43 @@ that hint.
 from __future__ import annotations
 
 MODULES: dict[str, frozenset[str]] = {
+    "pathlib": frozenset({"Path"}),
     "json": frozenset({"loads", "dumps", "JSONDecodeError"}),
     "re": frozenset({
         "sub", "subn", "findall", "finditer", "search", "match", "fullmatch", "split",
         "compile", "escape", "error",
         "S", "I", "M", "X", "DOTALL", "IGNORECASE", "MULTILINE", "VERBOSE",
     }),
-    "collections": frozenset({"Counter", "defaultdict", "deque", "OrderedDict"}),
-    "math": frozenset({"comb", "sqrt", "exp"}),
+    "collections": frozenset({"Counter", "defaultdict", "deque"}),
+    "math": frozenset({
+        "comb", "sqrt", "exp", "floor", "ceil", "log", "log10", "isclose", "isfinite",
+        "prod", "gcd", "fsum", "inf", "nan",
+    }),
     "statistics": frozenset({"median", "mean", "stdev", "pstdev", "quantiles"}),
     "hashlib": frozenset({"sha256", "sha1"}),
     "datetime": frozenset({"datetime", "date", "timedelta", "timezone", "UTC"}),
-    "pathlib": frozenset({"Path"}),
+    # Plan 3 core vocabulary. A dotted name is the import name; the program
+    # writes ``import xml.etree.ElementTree as ET`` (the ``as`` is required).
+    "tomllib": frozenset({"loads", "TOMLDecodeError"}),
+    "csv": frozenset({"reader", "DictReader", "Error"}),
+    "xml.etree.ElementTree": frozenset({"fromstring", "ParseError"}),
+    "textwrap": frozenset({"dedent", "indent", "fill"}),
+    "html": frozenset({"unescape", "escape"}),
+    "unicodedata": frozenset({"normalize"}),
+    "difflib": frozenset({"unified_diff", "get_close_matches"}),
+    "base64": frozenset({"b64encode", "b64decode"}),
+    "itertools": frozenset({
+        "groupby", "chain", "islice", "pairwise", "batched", "product", "combinations", "accumulate",
+    }),
+}
+
+# The oldest Python that has a module (member None) or a member. The validator
+# reports ``safety.module-attr`` "<module>.<member> needs Python <version>"
+# on an older Python, instead of a member the runtime lacks.
+MIN_PYTHON: dict[tuple[str, str | None], tuple[int, int]] = {
+    ("tomllib", None): (3, 11),
+    ("datetime", "UTC"): (3, 11),
+    ("itertools", "batched"): (3, 12),
 }
 
 PATH_MEMBERS: frozenset[str] = frozenset({
@@ -51,6 +76,11 @@ UNAPPROVED: dict[str, str] = {
     "map": "use a comprehension",
     "filter": "use a comprehension with if",
     "format": "use an f-string",
+    "collections.OrderedDict": "use dict; a dict keeps insertion order",
+    "timezone.utc": "use datetime.UTC",
+    "itertools.count": "not approved: an infinite iterator; use range(n) or a list",
+    "itertools.cycle": "not approved: an infinite iterator; use range(n) or a list",
+    "itertools.repeat": "not approved: an infinite iterator; use range(n) or a list",
 }
 
 
@@ -60,3 +90,8 @@ def hint_for(*subjects: str) -> str | None:
         if subject in UNAPPROVED:
             return UNAPPROVED[subject]
     return None
+
+
+def approved_imports_line() -> str:
+    """The approved modules as prompt text, in ``MODULES`` order: ``pathlib (Path), json, re, ...``."""
+    return ", ".join("pathlib (Path)" if name == "pathlib" else name for name in MODULES)

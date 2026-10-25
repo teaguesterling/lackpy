@@ -6,6 +6,8 @@ stepy100 Task 8: hints name the approved Path forms from
 that those hints named is gone (Plan 2, Task 7).
 """
 
+import re
+
 from lackpy.infer.hints import enrich_errors
 from lackpy.lang.dictionary import MODULES, UNAPPROVED
 from lackpy.lang.validator import validate
@@ -46,6 +48,11 @@ USES = {
     "map": "x = list(map(str, [1]))",
     "filter": "x = list(filter(None, [1]))",
     "format": 'x = "{}".format(1)',
+    "collections.OrderedDict": "import collections\nx = collections.OrderedDict()",
+    "timezone.utc": "import datetime\nx = datetime.timezone.utc",
+    "itertools.count": "import itertools\nx = itertools.count()",
+    "itertools.cycle": "import itertools\nx = itertools.cycle([1])",
+    "itertools.repeat": "import itertools\nx = itertools.repeat(1)",
 }
 
 
@@ -104,7 +111,8 @@ def test_no_hint_names_the_kit():
     ]
     for h in _hints(enrich_errors(errors, ""), errors):
         for word in KIT_WORDS:
-            assert word not in h, (word, h)
+            # Whole words: the module list now names "itertools", which contains "tools".
+            assert not re.search(rf"(?<!\w){re.escape(word)}(?!\w)", h), (word, h)
 
 
 def test_no_hints_for_unknown_errors():
