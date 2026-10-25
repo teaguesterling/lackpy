@@ -30,6 +30,7 @@ from ..base import (
 )
 from .annotations import kernel_note
 from ...run.cells import CellSession
+from ...run.trace import START_SUFFIX, Trace, TraceEntry
 from .compiler import compile_cell
 from .display import DEFAULT_DISPLAY_THRESHOLD
 from .effects import as_grade, classify_cell, exceeds_ceiling, path_writes
@@ -39,6 +40,7 @@ from .kernel.forgiveness import (
     ERROR_REIFIED,
     HOLE_OPENED,
     SOURCE_UNAVAILABLE,
+    TIMED_OUT,
     ErrorValue,
     Hole,
     Unavailable,
@@ -210,29 +212,7 @@ class LiterateInterpreter:
         # don't compile/parse are skipped here so the kernel reports the
         # precise syntax error rather than a misleading refusal. (This gates
         # only the batch/session path; the StreamingDriver path is untouched.)
-        raw_ceiling = (context.config or {}).get("grade_ceiling")
-        if raw_ceiling is None:
-            raw_ceiling = getattr(context.tools, "grade", None)
-        gate_violations: dict[int, str] = {}
-        # Why the ceiling is there, when the caller says (final review M5): a
-        # read-only profile's refusal says so, not only the grade numbers.
-        ceiling_reason = (context.config or {}).get("grade_ceiling_reason")
-        if raw_ceiling is not None:
-            ceiling = as_grade(raw_ceiling)
-            for index, cell in enumerate(parsed.cells):
-                try:
-                    src = compile_cell(cell)
-                    ast.parse(src)
-                except (ValueError, SyntaxError):
-                    continue
-                effects = classify_cell(cell.cell_type, src)
-                violation = exceeds_ceiling(effects, ceiling)
-                if violation:
-                    if ceiling_reason:
-                        violation = f"{violation}: {ceiling_reason}"
-                    gate_violations[index] = (
-                        f"effect ceiling exceeded: {violation}"
-                    )
+        gate_violations = _gate_violations(parsed, context)
 
         # NOTE (L1.2, contract change): the always-on write journal that
         # rolled a failed document's file writes back is RETIRED on this path
@@ -285,9 +265,40 @@ class LiterateInterpreter:
         # Each cell's latest value, for the cells whose latest run succeeded.
         values: dict[int, Any] = {}
 
-        for index, cell in enumerate(parsed.cells):
+        # Plan 3 Task 6 (D6): in the session worker, ``checkpoint(index)`` forks
+        # at the top of each cell. The cell runs in the child (the hook returns
+        # None there); the parent is the checkpoint, and returns a Resume only
+        # when the child is gone. In-process there is no hook.
+        checkpoint = (context.config or {}).get("checkpoint")
+        timed_out = False
+        index = 0
+        while index < len(parsed.cells):
+            cell = parsed.cells[index]
+            resume = checkpoint(index) if checkpoint is not None and kernel.refusal is None else None
+            if resume is not None and resume.kind == "resume":
+                # Task 7: continue at ``index`` over the new document's cells.
+                reparsed = parse(resume.document or "")
+                if reparsed.errors:
+                    return InterpreterExecutionResult(
+                        success=False,
+                        error="Parse errors: " + "; ".join(reparsed.errors),
+                        output_format="none",
+                        duration_ms=(time.perf_counter() - start) * 1000,
+                    )
+                parsed = reparsed
+                gate_violations = _gate_violations(parsed, context)
+                continue  # the hook forks again for the new cell at ``index``
             refs, binds = _static_ref_bind_sets(cell)
             graph.add_cell(index, refs, binds)
+            if resume is not None:  # "timeout": the child was stopped at the limit
+                timed_out = True
+                values.pop(index, None)
+                output_parts.append(_reify_timeout_for_cell(
+                    cell, index, resume, kernel, ledger, versions, assigned_names,
+                    observed_effects,
+                ))
+                index += 1
+                continue
 
             # Unavailable-source reification (L1.5, binding layer): a cell the
             # ceiling gate refuses binds Unavailable values for the names it
@@ -302,6 +313,7 @@ class LiterateInterpreter:
                         versions, assigned_names,
                     )
                 )
+                index += 1
                 continue
 
             outcome = self._run_resolved_cell(
@@ -319,6 +331,7 @@ class LiterateInterpreter:
                 # there is no re-exec pass (the session is closed).
                 refusal = outcome.refusal
                 break
+            index += 1
 
         # L1.4 re-execution pass (batch/session path only — streaming untouched).
         # A name re-asserted during the linear walk (an L1.3 `superseded`
@@ -328,11 +341,12 @@ class LiterateInterpreter:
         # source re-reifies a Hole / ErrorValue / Unavailable and re-versions
         # through the very same per-cell pipeline the linear walk used.
         if refusal is None:
-            refusal = self._reexecute_dirty_subgraph(
+            refusal, rerun_timed_out = self._reexecute_dirty_subgraph(
                 parsed.cells, graph, kernel, ledger, versions, assigned_names,
                 reactive_mode, observed_effects, gate_violations, run_mark,
-                output_parts, cell_ids, values,
+                output_parts, cell_ids, values, checkpoint=checkpoint,
             )
+            timed_out = timed_out or rerun_timed_out
 
         elapsed = (time.perf_counter() - start) * 1000
 
@@ -378,6 +392,10 @@ class LiterateInterpreter:
             duration_ms=elapsed,
             metadata={
                 "refused": refusal,
+                # Plan 3 D7: a refusal outranks a timeout (it latches the
+                # session; a timeout does not).
+                "error_phase": ("refused" if refusal is not None
+                                else "timeout" if timed_out else None),
                 "variables": variables,
                 "continue_requested": continue_requested,
                 "cell_count": len(parsed.cells),
@@ -539,7 +557,8 @@ class LiterateInterpreter:
         output_parts: list[str],
         cell_ids: dict[int, int | None] | None = None,
         values: dict[int, Any] | None = None,
-    ) -> str | None:
+        checkpoint: Any = None,
+    ) -> tuple[str | None, bool]:
         """Re-execute the dependents of this run's heals (L1.4, Teague's C1 decision).
 
         A name re-asserted during the linear walk shows up as an L1.3
@@ -616,7 +635,10 @@ class LiterateInterpreter:
         again.  A dependent that never joined the program (hole-skipped, or
         rejected by the validator) runs as a new cell.  The rebind that made
         it dirty was itself a new cell.  A refusal during the pass stops it
-        and is returned (D4); otherwise ``None``.
+        and is returned (D4); otherwise ``None``. The second value is whether a
+        re-run timed out: in the session worker each re-run forks at the
+        checkpoint hook too (Plan 3 Task 6), so a re-run that runs over the
+        limit is reified as timed out, and the pass goes on.
 
         RENDERING.  Re-execution ANNOTATES, never rewrites (the L2 refusal law):
         the original render stands, and each re-run appends one kernel-channel
@@ -638,7 +660,8 @@ class LiterateInterpreter:
             and _version_kind(versions, e.name, e.detail.get("to_version")) == "value"
         }
         if not healed:
-            return None
+            return None, False
+        timed_out = False
         cell_ids = cell_ids if cell_ids is not None else {}
         # Only a cell whose linear run did not succeed can have read a reified
         # value, so only such a cell re-runs (a cell that ran saw real values
@@ -689,6 +712,21 @@ class LiterateInterpreter:
             # Re-run first, record after: the dirty entry must report what
             # the re-execution actually DID, not a precomputed prediction.
             cell_mark = len(ledger.entries())
+            resume = checkpoint(index) if checkpoint is not None else None
+            if resume is not None:  # the re-run was stopped at the limit
+                timed_out = True
+                if values is not None:
+                    values.pop(index, None)
+                output_parts.append(_reify_timeout_for_cell(
+                    cells[index], index, resume, kernel, ledger, versions,
+                    assigned_names, observed_effects,
+                ))
+                detail["reexecuted"] = True
+                detail["outcome"] = "reified"
+                detail["reified"] = sorted(
+                    {e.name for e in reified_failures(ledger.entries()[cell_mark:]) if e.name})
+                ledger.record(DIRTY, name=None, detail=detail)
+                continue
             outcome = self._run_resolved_cell(
                 cells[index], index, kernel, ledger, versions, assigned_names,
                 rerun_id=cell_ids.get(index), rerun=True,
@@ -697,7 +735,7 @@ class LiterateInterpreter:
                 _keep_value(values, index, outcome)
             if outcome.refusal is not None:
                 output_parts.append(outcome.rendered)
-                return outcome.refusal
+                return outcome.refusal, timed_out
             if outcome.executed:
                 if cell_ids.get(index) is None:
                     cell_ids[index] = outcome.cell_id
@@ -719,7 +757,7 @@ class LiterateInterpreter:
             if reified:
                 note += " — failure reified"
             output_parts.append(kernel_note(note) + "\n")
-        return None
+        return None, timed_out
 
 
 @dataclass(frozen=True)
@@ -922,7 +960,7 @@ def _annotation_text(entry: LedgerEntry) -> str | None:
     survives into the canonical render — and supersede / dirty get one-liners.
     """
     et = entry.entry_type
-    if et in (HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE):
+    if et in (HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE, TIMED_OUT):
         return describe_failure(entry)
     if et == REFUSED:
         return f"refused: {entry.detail.get('error', 'refused')}"
@@ -1219,6 +1257,118 @@ def _reify_error_for_cell(
     return kernel_note(note) + "\n"
 
 
+def _gate_violations(parsed: ParseResult, context: ExecutionContext) -> dict[int, str]:
+    """The ceiling gate's verdict for each cell that exceeds the ceiling (L1.5).
+
+    Profile -> ceiling wiring: an explicit ``context.config["grade_ceiling"]``
+    wins; otherwise the ceiling defaults to the granted toolset's grade. No
+    ceiling and no toolset => no gate. Cells that don't compile/parse are
+    skipped, so the kernel reports the precise syntax error rather than a
+    misleading refusal.
+    """
+    raw_ceiling = (context.config or {}).get("grade_ceiling")
+    if raw_ceiling is None:
+        raw_ceiling = getattr(context.tools, "grade", None)
+    gate_violations: dict[int, str] = {}
+    # Why the ceiling is there, when the caller says (final review M5): a
+    # read-only profile's refusal says so, not only the grade numbers.
+    ceiling_reason = (context.config or {}).get("grade_ceiling_reason")
+    if raw_ceiling is not None:
+        ceiling = as_grade(raw_ceiling)
+        for index, cell in enumerate(parsed.cells):
+            try:
+                src = compile_cell(cell)
+                ast.parse(src)
+            except (ValueError, SyntaxError):
+                continue
+            effects = classify_cell(cell.cell_type, src)
+            violation = exceeds_ceiling(effects, ceiling)
+            if violation:
+                if ceiling_reason:
+                    violation = f"{violation}: {ceiling_reason}"
+                gate_violations[index] = f"effect ceiling exceeded: {violation}"
+    return gate_violations
+
+
+def _timeout_writes(entries: list[TraceEntry]) -> tuple[list[str], tuple[str, ...]]:
+    """The writes a stopped cell's trace shows: ``(paths for the note, write tools)``.
+
+    A write with a done entry that succeeded is named by its path. A write with
+    a start entry and no done entry (the cell was stopped inside it) is named
+    ``"{path} (write started, not confirmed)"`` (Review Focus 5). A write that
+    failed is not named: it did not write. The write tools are the cell's
+    observed effects, a started write included.
+    """
+    done_steps = {e.step for e in entries if not e.tool.endswith(START_SUFFIX)}
+    names: dict[str, None] = {}
+    tools: set[str] = set()
+    for e in entries:
+        tool = e.tool[:-len(START_SUFFIX)] if e.tool.endswith(START_SUFFIX) else e.tool
+        if tool not in ("Path.write_text", "Path.write_bytes"):
+            continue
+        path = str(e.args[0]) if isinstance(e.args, list) and e.args else "?"
+        if e.tool.endswith(START_SUFFIX):
+            if e.step not in done_steps:
+                tools.add(tool)
+                names.setdefault(f"{path} (write started, not confirmed)", None)
+        else:
+            tools.add(tool)
+            if e.success:
+                names.setdefault(path, None)
+    return list(names), tuple(sorted(tools))
+
+
+def _reify_timeout_for_cell(
+    cell: Cell,
+    index: int,
+    resume: Any,
+    kernel: LightweightKernel,
+    ledger: Ledger,
+    versions: BindingVersions,
+    assigned_names: set[str],
+    observed_effects: dict[int, tuple[str, ...]],
+) -> str:
+    """Binding-layer reification for a cell stopped at its time limit (Plan 3 D7).
+
+    Called in the checkpoint, which holds the state from before the cell. The
+    cell's own process is gone, so ``resume.entries`` (what it streamed to the
+    parent: its trace entries and start entries) is the record of what it did.
+
+    * the entries join the session's trace (start entries do not), so the
+      document's trace shows what the stopped cell read and wrote;
+    * each name the cell would bind binds a ``Hole`` (later cells that read it
+      see a hole, as after an error), and is versioned;
+    * one ``timed_out`` ledger entry whose ``note`` is the ``[kernel]`` note:
+      ``timeout: cell {n} took longer than {t:g} s and was stopped``, plus
+      ``; it wrote {paths} before it was stopped`` when the trace shows writes.
+
+    A timeout is not a refusal: the session stays open and the document goes on.
+    Returns the kernel-channel annotation to append to the rendered output.
+    """
+    entries = list(resume.entries or [])
+    trace = kernel.session.trace
+    trace.entries.extend(e for e in entries if not e.tool.endswith(START_SUFFIX))
+    paths, tools = _timeout_writes(entries)
+    if tools:
+        observed_effects[index] = tools
+    note = (f"timeout: cell {index + 1} took longer than {resume.seconds:g} s "
+            f"and was stopped")
+    if paths:
+        note += f"; it wrote {', '.join(paths)} before it was stopped"
+    _, binds = _static_ref_bind_sets(cell)
+    cell_detail = {"cell_index": index, "cell_type": cell.cell_type}
+    for name in sorted(binds):
+        hole = Hole(name)
+        kernel.bind(name, hole)
+        _record_assertion(name, hole, versions, ledger, cell_detail)
+    assigned_names.update(binds)
+    ledger.record(TIMED_OUT, name=None, detail={
+        **cell_detail, "note": note, "error_phase": "timeout",
+        "seconds": resume.seconds, "bound_as_holes": sorted(binds),
+    })
+    return kernel_note(note) + "\n"
+
+
 def _reify_unavailable_for_cell(
     cell: Cell,
     index: int,
@@ -1305,8 +1455,11 @@ def _build_kernel(context: ExecutionContext) -> LightweightKernel:
     # The caller's rules (``config["extra_rules"]``, rule callables) apply to
     # every cell's cumulative validation and every prose expression (final
     # review I3).
+    # In the session worker, ``config["trace_listener"]`` streams each Path
+    # call to the parent as it happens (Plan 3 D4, Task 6).
+    trace = Trace(listener=config.get("trace_listener"))
     session = CellSession(path_policy=config.get("path_policy"),
-                          extra_rules=config.get("extra_rules"))
+                          extra_rules=config.get("extra_rules"), trace=trace)
     return LightweightKernel(
         session,
         display_threshold=config.get("display_threshold", DEFAULT_DISPLAY_THRESHOLD),

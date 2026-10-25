@@ -31,9 +31,10 @@ from . import wire
 from .base import ExecutionResult
 from .limits import ENV_KEEP, STDOUT_CAP
 from .paths import PathPolicy
-from .trace import Trace, TraceEntry
+from .trace import START_SUFFIX, Trace, TraceEntry
 
-__all__ = ["ProcessRunner", "STDOUT_CAP", "close_shared_runners", "shared_runner"]
+__all__ = ["ProcessRunner", "STDOUT_CAP", "SessionChannel", "close_shared_runners",
+           "shared_runner"]
 
 STDOUT_MARK = "\n[lackpy: output cut at 10 MB]"
 #: How long the parent keeps reading after the kill, for what the worker already sent.
@@ -85,7 +86,9 @@ class _Run:
         try:
             event = msg["event"]
             if event == "trace":
-                self.entries.append(TraceEntry.from_data(msg["entry"]))
+                entry = TraceEntry.from_data(msg["entry"])
+                if not entry.tool.endswith(START_SUFFIX):  # a write's start: stream only
+                    self.entries.append(entry)
             elif event == "stdout":
                 self._stdout(msg["text"])
             elif event == "done":
@@ -180,10 +183,17 @@ class ProcessRunner:
                 self._proc.wait(2)
             self._proc = None
 
-    def _spawn(self, worker_end: socket.socket, cpu_seconds: int) -> int:
-        """Ask the zygote for a worker on ``worker_end``; start or restart it as needed."""
-        request = wire.encode({"op": "spawn", "memory_mb": self.memory_mb,
+    def _spawn(self, worker_end: socket.socket, cpu_seconds: int,
+               ctl_end: socket.socket | None = None) -> int:
+        """Ask the zygote for a worker on ``worker_end``; start or restart it as needed.
+
+        With ``ctl_end`` the worker is a literate session root (``spawn_session``),
+        which also gets the shared channel.
+        """
+        op = "spawn" if ctl_end is None else "spawn_session"
+        request = wire.encode({"op": op, "memory_mb": self.memory_mb,
                                "cpu_seconds": cpu_seconds}).encode("ascii")
+        fds = [worker_end.fileno()] + ([] if ctl_end is None else [ctl_end.fileno()])
         with self._lock:
             for _ in range(2):
                 if self._proc is None or self._proc.poll() is not None:
@@ -191,7 +201,7 @@ class ProcessRunner:
                     self._start_zygote()
                 assert self._control is not None
                 try:
-                    socket.send_fds(self._control, [request], [worker_end.fileno()])
+                    socket.send_fds(self._control, [request], fds)
                     self._control.settimeout(SPAWN_WAIT)
                     reply = self._control.recv(65536)
                 except TimeoutError:
@@ -319,6 +329,43 @@ class ProcessRunner:
                                stdout=run.stdout_text(), error=error, trace=run.trace(),
                                variables=variables, error_phase=phase)
 
+    # --- a literate session (Task 6) --------------------------------------
+
+    def open_session(self, *, path_policy: PathPolicy, workspace: Path, cell_timeout: float,
+                     rule_names: list[str] | None,
+                     context_config: dict[str, Any]) -> "SessionChannel":
+        """Start a literate session worker (``spawn_session``) and return its channel.
+
+        The whole literate interpreter runs in the worker, with a checkpoint fork
+        at the top of each cell (``session_worker``). Each cell runs under
+        ``cell_timeout`` seconds. ``rule_names`` are resolved in the worker, which
+        validates every cell with them (ledger Ruling D). ``context_config`` is the
+        interpreter's ``context.config`` as data (the policy, the hook and the
+        rules are added in the worker).
+
+        Raises ``ValueError`` when ``rule_names`` holds anything but names, and
+        ``RuntimeError`` when the session process cannot be started.
+        """
+        if rule_names and any(type(r) is not str for r in rule_names):
+            raise ValueError("the process runner takes rule names, not callables")
+        ours, theirs = socket.socketpair()
+        ctl_ours, ctl_theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        try:
+            try:
+                pid = self._spawn(theirs, math.ceil(cell_timeout) + CPU_MARGIN, ctl_theirs)
+            finally:
+                theirs.close()
+                ctl_theirs.close()
+            channel = SessionChannel(pid, ours, ctl_ours, path_policy=path_policy,
+                                     workspace=workspace, cell_timeout=cell_timeout,
+                                     rule_names=rule_names, context_config=context_config)
+        except (_SpawnError, OSError, wire.WireError) as e:
+            ours.close()
+            ctl_ours.close()
+            raise RuntimeError(f"the session process could not be started ({e})") from None
+        self.last_pid = pid
+        return channel
+
     def _worker_environ(self, timeout: float) -> dict[str, str] | None:
         """Test-only: a worker's ``os.environ``, or None when the zygote refuses the op."""
         ours, theirs = socket.socketpair()
@@ -337,6 +384,229 @@ class ProcessRunner:
             if msg is not None and msg.get("event") == "environ":
                 return msg["environ"]
             return None
+
+
+class _Proc:
+    """One live process of a session, as the parent follows it."""
+
+    def __init__(self, index: int | None, pid: int, sock: socket.socket) -> None:
+        self.index = index  # the cell it runs; None for the root
+        self.pid = pid
+        self.sock = sock
+        self.reader = wire.Reader(sock)
+        self.cell_ended = False  # it sent cell_end; its cell_start comes on the shared channel
+        try:
+            self.pidfd: int | None = os.pidfd_open(pid)
+        except ProcessLookupError:
+            self.pidfd = None
+
+    def close(self) -> None:
+        _kill(self.pidfd)
+        if self.pidfd is not None:
+            os.close(self.pidfd)
+            self.pidfd = None
+        self.sock.close()
+
+
+class SessionChannel:
+    """The parent's end of a literate session worker (Plan 3 Task 6; D6, D7).
+
+    The parent follows the chain of live processes: the root, then one process
+    for each cell that started. Each has its own socket (``session_worker``
+    explains the protocol). ``send`` writes to the deepest process; ``events``
+    reads its messages; ``kill`` stops one process. ``checkpoints`` lists the
+    live ``(index, pid)`` of the cell processes, from the ``cell_start`` events.
+    ``submit`` runs one document and returns its result; Task 7's ``LiterateRun``
+    is built on the same methods.
+
+    Not thread-safe: one caller at a time.
+    """
+
+    def __init__(self, pid: int, sock: socket.socket, ctl: socket.socket, *,
+                 path_policy: PathPolicy, workspace: Path, cell_timeout: float,
+                 rule_names: list[str] | None, context_config: dict[str, Any]) -> None:
+        self.pid = pid
+        self.cell_timeout = cell_timeout
+        self._ctl = ctl
+        self._stack = [_Proc(None, pid, sock)]
+        self._submit_base = {"policy": path_policy.to_data(), "workspace": str(workspace),
+                             "rules": rule_names, "config": context_config,
+                             "cell_timeout": cell_timeout}
+        first = self._stack[0].reader.recv(SPAWN_WAIT)
+        if not first or first.get("event") != "start" or first.get("pid") != pid:
+            raise _SpawnError(f"the session process did not start (it sent {first!r})")
+
+    @property
+    def checkpoints(self) -> list[tuple[int, int]]:
+        return [(p.index, p.pid) for p in self._stack[1:] if p.index is not None]
+
+    def send(self, msg: dict[str, Any]) -> None:
+        """Write ``msg`` to the deepest live process (``WireError`` for non-data)."""
+        wire.send(self._stack[-1].sock, msg)
+
+    def kill(self, pid: int) -> None:
+        """SIGKILL the process ``pid`` of this session (its descendants follow by PDEATHSIG)."""
+        for p in self._stack:
+            if p.pid == pid:
+                _kill(p.pidfd)
+
+    def events(self, deadline: float) -> Any:
+        """The deepest process's messages until it ends; ``TimeoutError`` at ``deadline``.
+
+        A ``cell_start`` makes the new cell's process the deepest one. A process
+        that ends yields ``{"event": "ended", "pid", "how"}`` and the iteration stops.
+        """
+        while True:
+            msg = self._next(deadline)
+            yield msg
+            if msg.get("event") == "ended":
+                return
+
+    def _next(self, deadline: float) -> dict[str, Any]:
+        while True:
+            cur = self._stack[-1]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            if cur.cell_ended:
+                self._ctl.settimeout(remaining)
+                data, fds, _, _ = socket.recv_fds(self._ctl, 65536, 4)
+                if not data:
+                    for f in fds:
+                        os.close(f)
+                    return {"event": "ended", "pid": cur.pid, "how": "the shared channel closed"}
+                msg = wire.decode(data.decode("ascii"))
+                if (not isinstance(msg, dict) or msg.get("event") != "cell_start"
+                        or msg.get("from") != cur.pid or len(fds) != 1
+                        or type(msg.get("pid")) is not int or type(msg.get("index")) is not int):
+                    for f in fds:  # a packet from a process this session no longer follows
+                        os.close(f)
+                    continue
+                cur.cell_ended = False
+                self._stack.append(_Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0])))
+                return msg
+            msg = cur.reader.recv(remaining)
+            if msg is None or msg.get("event") == "exit":
+                how = (msg or {}).get("how", "its socket closed")
+                return {"event": "ended", "pid": cur.pid, "how": how}
+            if msg.get("event") == "cell_end":
+                cur.cell_ended = True
+                continue
+            return msg
+
+    def submit(self, document: str, *, params: dict[str, Any] | None) -> ExecutionResult:
+        """Run ``document`` in the session; never raises for anything the document does.
+
+        Each cell runs under ``cell_timeout`` seconds (each ``cell_start`` re-arms
+        the deadline; so does the start of the document and each timeout). At a
+        deadline the parent SIGKILLs the deepest process, drains what it sent,
+        and sends ``{"op": "timeout"}`` with the stopped cell's entries to the
+        checkpoint above it; the document goes on (D7). With no checkpoint above
+        (the root itself ran over), the run ends with the timeout text.
+        """
+        try:
+            self.send({"op": "submit", "document": document, "params": params,
+                       **self._submit_base})
+        except wire.WireError as e:
+            return ExecutionResult(success=False, error=f"the document's params cannot be sent: {e}")
+        except OSError:
+            pass  # the root is gone; its ended event says how
+        entries: list[TraceEntry] = []  # the session's trace, start entries left out
+        cell: list[TraceEntry] = []  # the deepest cell's entries, start entries included
+        deadline = time.monotonic() + self.cell_timeout
+        while True:
+            try:
+                msg = self._next(deadline)
+                event = msg["event"]
+                if event == "trace":
+                    entry = TraceEntry.from_data(msg["entry"])
+                    cell.append(entry)
+                    if not entry.tool.endswith(START_SUFFIX):
+                        entries.append(entry)
+                elif event == "cell_start":
+                    deadline = time.monotonic() + self.cell_timeout
+                    cell = []
+                elif event == "done":
+                    return self._result(msg["result"], entries)
+                elif event == "ended":
+                    return self._failed(f"the session process ended without a result "
+                                        f"({msg['how']})", entries)
+                elif event not in ("start", "stdout"):
+                    raise _BadMessage(f"unknown event {event!r}")
+            except TimeoutError:
+                if not self._timeout(cell, entries):
+                    return self._failed(f"timeout: the document took longer than "
+                                        f"{self.cell_timeout:g} s and was stopped",
+                                        entries, error_phase="timeout")
+                deadline = time.monotonic() + self.cell_timeout
+                cell = []
+            except (wire.WireError, _BadMessage, OSError, KeyError, TypeError) as e:
+                self.close()
+                return self._failed(f"the session process sent a message that is not valid ({e})",
+                                    entries)
+
+    def _timeout(self, cell: list[TraceEntry], entries: list[TraceEntry]) -> bool:
+        """Stop the deepest process; tell its checkpoint. False when there is none."""
+        dead = self._stack.pop()
+        _kill(dead.pidfd)
+        # Its socket: what it sent before the kill, then EOF (a partial last line
+        # is dropped). The socket is closed after: nothing else ever uses it.
+        end = time.monotonic() + DRAIN_SECONDS
+        try:
+            while True:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    break
+                msg = dead.reader.recv(remaining)
+                if msg is None:
+                    break
+                if msg.get("event") == "trace":
+                    entry = TraceEntry.from_data(msg["entry"])
+                    cell.append(entry)
+                    if not entry.tool.endswith(START_SUFFIX):
+                        entries.append(entry)
+        except (TimeoutError, wire.WireError, OSError, KeyError, TypeError):
+            pass
+        dead.close()
+        if not self._stack:
+            return False
+        checkpoint = self._stack[-1]
+        checkpoint.cell_ended = False
+        try:
+            self.send({"op": "timeout", "seconds": self.cell_timeout,
+                       "entries": [e.to_data() for e in cell]})
+        except (wire.WireError, OSError):
+            return False
+        return True
+
+    def _failed(self, error: str, entries: list[TraceEntry],
+                error_phase: str | None = None) -> ExecutionResult:
+        return ExecutionResult(success=False, error=error, error_phase=error_phase,
+                               trace=_trace(entries))
+
+    def _result(self, r: Any, entries: list[TraceEntry]) -> ExecutionResult:
+        if not isinstance(r, dict):
+            return self._failed("the session process sent a result that is not valid", entries)
+        error, phase, variables = r.get("error"), r.get("error_phase"), r.get("variables")
+        if (type(r.get("success")) is not bool or not isinstance(variables, dict)
+                or not (error is None or type(error) is str)
+                or not (phase is None or type(phase) is str)
+                or type(r.get("stdout")) is not str):
+            return self._failed("the session process sent a result that is not valid", entries)
+        return ExecutionResult(success=r["success"], output=r.get("output"), stdout=r["stdout"],
+                               error=error, trace=_trace(entries), variables=variables,
+                               error_phase=phase)
+
+    def close(self) -> None:
+        """Stop every process of the session, the deepest first."""
+        while self._stack:
+            self._stack.pop().close()
+        self._ctl.close()
+
+
+def _trace(entries: list[TraceEntry]) -> Trace:
+    return Trace(entries=entries, files_read=_traced_paths(entries, _READ_TOOLS),
+                 files_modified=_traced_paths(entries, _WRITE_TOOLS))
 
 
 _shared: dict[int, ProcessRunner] = {}

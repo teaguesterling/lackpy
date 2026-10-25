@@ -13,6 +13,10 @@ Control protocol (parent to zygote):
   worker's end of a new socketpair. The limits ride on the spawn message because
   the CPU backstop depends on each run's timeout. The zygote forks and answers
   ``{"event": "spawned", "pid"}`` (or ``{"event": "error", "error"}``).
+- ``{"op": "spawn_session", "memory_mb", "cpu_seconds"}`` with two fds
+  attached: the session root's own stream socket, then the shared
+  ``SOCK_SEQPACKET`` channel. The worker serves a literate session
+  (``lackpy.run.session_worker``, Task 6); the answer is as for ``spawn``.
 - EOF: the parent is gone. The zygote SIGKILLs every live worker, reaps it and
   exits. This, not ``PR_SET_PDEATHSIG``, ties the zygote to the service:
   PDEATHSIG fires when the parent *thread* exits, and the service starts the
@@ -42,6 +46,10 @@ from typing import Any
 from lackpy.lang.validator import validate
 from lackpy.run import wire
 from lackpy.run.limits import ENV_KEEP, STDOUT_CAP, apply_child_limits
+from lackpy.run import session_worker
+# Warm: a session root and its checkpoint forks find the literate interpreter
+# already imported (measured: it starts no thread).
+import lackpy.interpreters.literate  # noqa: E402,F401
 from lackpy.run.paths import PathPolicy
 from lackpy.run.runner import RestrictedRunner
 from lackpy.run.trace import TraceEntry
@@ -238,7 +246,8 @@ def serve(sock: socket.socket, *, test_ops: bool, memory_mb: int | None) -> int:
 
 
 def _child(run_fd: int, control: socket.socket, children: dict[int, tuple[int, socket.socket]],
-           msg: dict[str, Any], test_ops: bool, zygote_pid: int) -> None:
+           msg: dict[str, Any], test_ops: bool, zygote_pid: int,
+           ctl_fd: int | None = None) -> None:
     """The forked worker. Never returns."""
     code = EXIT_ERROR
     try:
@@ -253,7 +262,11 @@ def _child(run_fd: int, control: socket.socket, children: dict[int, tuple[int, s
         apply_child_limits(memory_mb=memory_mb, cpu_seconds=msg.get("cpu_seconds"))
         if os.getppid() != zygote_pid:
             os._exit(EXIT_ERROR)  # the zygote died before PDEATHSIG was set
-        code = serve(sock, test_ops=test_ops, memory_mb=memory_mb)
+        if ctl_fd is None:
+            code = serve(sock, test_ops=test_ops, memory_mb=memory_mb)
+        else:
+            code = session_worker.serve_session(_Channel(sock), socket.socket(fileno=ctl_fd),
+                                                test_ops=test_ops)
     except BaseException:
         pass
     finally:
@@ -288,7 +301,7 @@ def main(argv: list[str]) -> int:
         for fd, _ in poller.poll():
             if fd == control.fileno():
                 try:
-                    data, fds, _, _ = socket.recv_fds(control, 65536, 1)
+                    data, fds, _, _ = socket.recv_fds(control, 65536, 2)
                 except OSError:
                     data, fds = b"", []
                 if not data:
@@ -318,20 +331,27 @@ def _spawn(control: socket.socket, data: bytes, fds: list[int],
         msg = wire.decode(data.decode("ascii"))
     except (wire.WireError, UnicodeDecodeError):
         msg = None
-    if not isinstance(msg, dict) or msg.get("op") != "spawn" or len(fds) != 1:
+    op = msg.get("op") if isinstance(msg, dict) else None
+    want = {"spawn": 1, "spawn_session": 2}.get(op)  # type: ignore[arg-type]
+    if want is None or len(fds) != want:
         for f in fds:
             os.close(f)
-        _reply(control, {"event": "error", "error": "expected one spawn op with one fd"})
+        _reply(control, {"event": "error",
+                         "error": "expected a spawn op with one fd, or spawn_session with two"})
         return
     run_fd = fds[0]
+    ctl_fd = fds[1] if want == 2 else None
     try:
         pid = os.fork()
     except OSError as e:
-        os.close(run_fd)
+        for f in fds:
+            os.close(f)
         _reply(control, {"event": "error", "error": f"fork failed: {e.strerror}"})
         return
     if pid == 0:
-        _child(run_fd, control, children, msg, test_ops, zygote_pid)
+        _child(run_fd, control, children, msg, test_ops, zygote_pid, ctl_fd)
+    if ctl_fd is not None:
+        os.close(ctl_fd)  # the zygote keeps only the root's socket, for the exit event
     pidfd = os.pidfd_open(pid)
     children[pidfd] = (pid, socket.socket(fileno=run_fd))
     poller.register(pidfd, select.POLLIN)

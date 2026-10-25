@@ -106,6 +106,29 @@ def record_call(trace: Trace, tool: str,
     return result
 
 
+#: The suffix of a start entry's tool name (``"Path.write_text:start"``).
+START_SUFFIX = ":start"
+
+
+def announce_start(trace: Trace, tool: str, args: list[Any]) -> None:
+    """Tell the listener that ``tool`` is about to start (Plan 3 Task 6, Review Focus 5).
+
+    The start entry goes to the listener only, never into ``trace.entries``:
+    an in-process run is never killed, so its trace and step numbers stay as
+    they were. In a worker the entry streams to the parent before the write
+    begins, so a cell killed in the middle of a write is known to have started
+    it. The entry's ``step`` is the step its done entry will have.
+    """
+    if trace.listener is None:
+        return
+    entry = TraceEntry(step=len(trace.entries), tool=tool + START_SUFFIX, args=args,
+                       result=None, duration_ms=0.0, success=True, error=None)
+    try:
+        trace.listener(entry)
+    except Exception:
+        pass
+
+
 def _notify(trace: Trace) -> None:
     """Call the listener with the newest entry. Its failure never changes the run:
     the entry stays, ``on_done`` still runs, and the program's own exception propagates."""

@@ -27,9 +27,9 @@ from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.paths import PathPolicy, load_policy, read_only_policy
 from .run.process import ProcessRunner, shared_runner
-from .run.runner import _binds_params, _is_data
+from .run.runner import _binds_params
 from .run.refusal import LackpyRefusal
-from .run.trace import Trace, error_text
+from .run.trace import error_text
 
 logger = logging.getLogger(__name__)
 
@@ -793,89 +793,89 @@ class LackpyService:
         with no allowed names (parked item 1: there is no skip), with the
         caller's ``rules`` (callables included), then run in a worker under
         ``timeout`` seconds (Plan 3 D9), which validates again with
-        ``rule_names``. The literate axis still runs in-process, with no time
-        limit, until Plan 3 Task 6. A profile whose ``policy.read_only`` is
+        ``rule_names``. The literate axis runs in a session worker, with the
+        limit on each cell, and validates there with ``rule_names`` only (a
+        callable rule is refused: it cannot cross; ledger Ruling D). A profile whose ``policy.read_only`` is
         true runs under ``read_only_policy`` on either axis.
         """
         read_only = _read_only(rp.policy)
+        if timeout is None:  # an internal caller: the same capped default (review Minor 3)
+            timeout, _ = self._check_timeout(None, rp, None)
         if rp.execution == "literate":
-            return await self._execute_literate(program, param_values, read_only=read_only,
-                                                rules=rules)
+            # ``rules`` is the resolved list (one callable per rule); a rule the
+            # caller passed as a callable has no name in ``rule_names``.
+            if len(rules or []) != len(rule_names or []):
+                return ExecutionResult(
+                    success=False,
+                    error="the process runner takes rule names, not callables")
+            return await self._execute_literate(program, param_values, timeout=timeout,
+                                                read_only=read_only, rule_names=rule_names)
 
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
             return ExecutionResult(success=False, error=validation_error(validation))
-        if timeout is None:  # an internal caller: the same capped default (review Minor 3)
-            timeout, _ = self._check_timeout(None, rp, None)
         return await self._execute(program, param_values, timeout=timeout,
                                    read_only=read_only, rules=rule_names)
 
     async def _execute_literate(
-        self, program: str, param_values: dict[str, Any], *, read_only: bool = False,
-        rules: list | None = None,
+        self, program: str, param_values: dict[str, Any], *, timeout: float,
+        read_only: bool = False, rule_names: list[str] | None = None,
     ) -> ExecutionResult:
-        """Run a literate document (design D9) and adapt the result.
+        """Run a literate document in a session worker (Plan 3 D6, Ruling D) and adapt the result.
 
         The ``PathPolicy`` comes through the same seam as ``run_program``'s
         (``_load_path_policy``); a load failure is a failed result, never a
-        raise. The document's ``Path`` resolves against the workspace, so no
-        ``os.chdir`` is made (D8).
+        raise. It crosses to the worker as data. The whole literate interpreter
+        runs in the worker, with a checkpoint fork at the top of each cell, and
+        each cell runs under ``timeout`` seconds: a cell over the limit is
+        killed, reified as timed out, and the document goes on (D7,
+        ``error_phase="timeout"``). The document is parsed and every cell is
+        validated in the worker, with the caller's rules as names
+        (``rule_names``).
         No toolset is passed: there is no kit grade, so no static ceiling; the
         policy is the boundary (a read-only profile adds the write deny).
 
         The result: ``stdout`` is the rendered document; ``output`` follows
         ``run_program``'s last-expression rule: when the run succeeded and the
         last code cell ends in an expression statement, that expression's
-        value (data, or its ``repr`` text), else ``None``; ``trace`` is the
-        session's trace; ``error`` is the refusal that ended the document,
-        then the reified failures. A read-only profile also passes a read-only
-        ``grade_ceiling``, so the static planner refuses a visible write cell
-        before it runs (the policy still refuses what the planner cannot see).
-        The caller's ``rules`` apply to every cell's cumulative validation and to
-        every prose expression (final review I3). ``param_values`` replace the
-        defaults of the document's ``params`` literal (final review I4, D15).
+        value (data, or its ``repr`` text), else ``None``; ``trace`` is what
+        the cells streamed, a stopped cell's entries included; ``error`` is the
+        refusal that ended the document, then the reified failures. A refusal
+        outranks a timeout in ``error_phase``. A read-only profile also passes a
+        read-only ``grade_ceiling``, so the static planner refuses a visible
+        write cell before it runs (the policy still refuses what the planner
+        cannot see). ``param_values`` replace the defaults of the document's
+        ``params`` literal (final review I4, D15).
         """
-        from .interpreters.base import ExecutionContext
-        from .interpreters.literate import LiterateInterpreter
-
         try:
             policy = self._load_path_policy(read_only=read_only)
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
-        config: dict[str, Any] = {"path_policy": policy}
-        if rules:
-            config["extra_rules"] = rules
+        config: dict[str, Any] = {}
         if read_only:
             # Task 4 review M5: the static planner over the policy (ruling) —
             # a write cell it can see is refused before it runs.
             config["grade_ceiling"] = _READ_ONLY_CEILING
             # Final review M5: the refusal says why the ceiling is there.
             config["grade_ceiling_reason"] = "the profile is read-only (policy.read_only = true)"
-        ctx = ExecutionContext(
-            base_dir=str(self._workspace.resolve()),
-            params=param_values,
-            config=config,
-        )
-        interp = LiterateInterpreter()
-        validation = interp.validate(program, ctx)
-        if not validation.valid:
-            return ExecutionResult(
-                success=False,
-                error=f"Validation failed: {'; '.join(validation.errors)}",
-            )
-        result = await interp.execute(program, ctx)
-        variables = result.metadata.get("variables", {})
-        trace = result.metadata.get("trace")
-        return ExecutionResult(
-            success=result.success,
-            # run_program's rule: the last expression's value, only for a run
-            # that succeeded (review I1); the interpreter made it data-safe.
-            output=result.metadata.get("value") if result.success else None,
-            stdout=str(result.output) if result.output else "",
-            error=result.error,
-            trace=trace if trace is not None else Trace(),
-            variables={k: v for k, v in variables.items() if _is_data(v)},
-        )
+        if self._process_runner is None:
+            self._process_runner = shared_runner(self._config.sandbox_memory_mb)
+        runner = self._process_runner
+        workspace = self._workspace.resolve()
+
+        def run() -> ExecutionResult:
+            channel = runner.open_session(path_policy=policy, workspace=workspace,
+                                          cell_timeout=timeout, rule_names=rule_names,
+                                          context_config=config)
+            try:
+                return channel.submit(program, params=param_values)
+            finally:
+                channel.close()
+
+        try:
+            return await asyncio.to_thread(run)
+        except (RuntimeError, ValueError) as e:  # no os.fork, no session, a callable rule
+            return ExecutionResult(success=False, error=str(e))
 
     async def _generate_literate(
         self, intent: str, providers: list, resolved: Any,
@@ -999,8 +999,7 @@ class LackpyService:
                 (default ``config.sandbox_timeout``), or not a number above 0,
                 the run is refused before validation (``error_phase="refused"``).
                 At the limit the worker is killed (``error_phase="timeout"``).
-                A literate document is only checked against the cap: it runs
-                in-process, with no limit, until Plan 3 Task 6.
+                In a literate document the limit applies to each cell (D8).
 
         Returns:
             An ExecutionResult with output, trace, and success status.

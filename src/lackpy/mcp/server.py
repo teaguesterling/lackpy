@@ -147,7 +147,8 @@ async def run_program(program: str, profile: str | None = None,
     max_calls(N); on the literate axis they apply to every cell. `timeout` is
     the run's limit in seconds (default: the sandbox timeout, 120 s); a value
     over the profile's max_timeout is refused before the run. On the literate
-    axis the limit is checked against the cap but not yet enforced.
+    axis the limit applies to each cell: a cell over it is stopped and noted,
+    and the document goes on.
     `error_phase` is "timeout" when the run was stopped at the limit, "refused"
     when it was refused, else null. Bytes, nan and infinity come back as their
     Python repr text."""

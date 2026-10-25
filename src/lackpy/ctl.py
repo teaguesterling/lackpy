@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     render_p.add_argument(
         "--timeout", type=float, default=None, metavar="SECONDS",
         help="With --execute: the run's time limit in seconds, up to the profile's "
-             "max_timeout (checked against the cap; a literate run is not yet stopped at it)",
+             "max_timeout; it applies to each cell, and a cell over it is stopped",
     )
     render_p.add_argument(
         "--base-dir",

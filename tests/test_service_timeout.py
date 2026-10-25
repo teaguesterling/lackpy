@@ -371,10 +371,12 @@ async def test_memory_cap_is_the_config_value(make):
     assert svc._process_runner.memory_mb == 300
 
 
-async def test_literate_stays_in_process(make, ws):
-    """Task 6 moves literate execution; here it runs as before, with no zygote."""
+async def test_literate_runs_in_a_session_worker(make, ws):
+    """Task 6 moved literate execution into a session worker of the shared runner (D6)."""
     svc = make()
     doc = "Some prose.\n\n```lackpy\nx = 1 + 1\nx\n```\n"
     result = await svc.run_program(doc, profile=Profile(execution="literate"))
     assert result.success, result.error
-    assert svc._process_runner is None
+    assert result.output == 2
+    assert svc._process_runner is not None
+    assert svc._process_runner.last_pid not in (None, os.getpid())
