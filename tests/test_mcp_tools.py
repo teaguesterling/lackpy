@@ -191,3 +191,52 @@ def test_mcp_timeout_param(workspace):
     import inspect
     assert "timeout" in inspect.signature(server.delegate).parameters
     assert "timeout" in inspect.signature(server.run_program).parameters
+
+
+# --- Plan 3 Task 7: a retry resumes over MCP session_id (D10) ---
+
+LOOP = 'import re\nre.search(r"(a+)+$", "a" * 40 + "b")'
+LOG = "from pathlib import Path\np = Path('log.txt')\np.write_text(p.read_text() + 'line\\n')\na = 20"
+
+
+@pytest.fixture
+def literate_ws(tmp_path):
+    """A workspace with a literate profile, and a service whose policy has a temporary home."""
+    from lackpy.run.paths import load_policy
+    from lackpy.service import LackpyService
+
+    ws = tmp_path / "ws"
+    (ws / ".lackpy").mkdir(parents=True)
+    (ws / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
+    (ws / "log.txt").write_text("")
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    server.set_workspace(ws)
+    server._service = LackpyService(
+        workspace=ws, path_policy_loader=lambda w: load_policy(w, home=home, managed=None))
+    yield ws
+    server._service.close()
+
+
+def _lit(*cells):
+    return "\n\n".join(f"```lackpy\n{c}\n```" for c in cells) + "\n\nB={b}\n"
+
+
+def test_resume_through_mcp_session_id(literate_ws):
+    first = _call("run_program", {"program": _lit(LOG, LOOP), "profile": "lit", "timeout": 1})
+    assert first["error_phase"] == "timeout", first
+    sid = first["session_id"]
+    assert isinstance(sid, str) and sid
+    second = _call("run_program", {"program": _lit(LOG, "b = a + 1"), "profile": "lit",
+                                   "timeout": 1, "session_id": sid})
+    assert second["success"], second
+    assert second["session_id"] == sid
+    assert "B=21" in second["stdout"]
+    assert (literate_ws / "log.txt").read_text().count("line") == 1
+    closed = _call("close_session", {"session_id": sid})
+    assert closed == {"session_id": sid, "closed": True}
+    gone = _call("run_program", {"program": _lit(LOG, "b = a + 1"), "profile": "lit",
+                                 "timeout": 1, "session_id": sid})
+    assert gone["success"] is False
+    assert gone["error"] == f"unknown or expired session_id {sid!r}"
+    assert (literate_ws / "log.txt").read_text().count("line") == 1  # never a silent fresh run

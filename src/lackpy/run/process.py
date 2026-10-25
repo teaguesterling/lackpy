@@ -338,7 +338,8 @@ class ProcessRunner:
 
     def open_session(self, *, path_policy: PathPolicy, workspace: Path, cell_timeout: float,
                      rule_names: list[str] | None,
-                     context_config: dict[str, Any]) -> "SessionChannel":
+                     context_config: dict[str, Any],
+                     max_checkpoints: int | None = None) -> "SessionChannel":
         """Start a literate session worker (``spawn_session``) and return its channel.
 
         The whole literate interpreter runs in the worker, with a checkpoint fork
@@ -346,7 +347,8 @@ class ProcessRunner:
         ``cell_timeout`` seconds. ``rule_names`` are resolved in the worker, which
         validates every cell with them (ledger Ruling D). ``context_config`` is the
         interpreter's ``context.config`` as data (the policy, the hook and the
-        rules are added in the worker).
+        rules are added in the worker). ``max_checkpoints`` bounds the live
+        checkpoints (Task 7); None is no bound.
 
         Raises ``ValueError`` when ``rule_names`` holds anything but names, and
         ``RuntimeError`` when the session process cannot be started.
@@ -363,7 +365,8 @@ class ProcessRunner:
                 ctl_theirs.close()
             channel = SessionChannel(pid, ours, ctl_ours, path_policy=path_policy,
                                      workspace=workspace, cell_timeout=cell_timeout,
-                                     rule_names=rule_names, context_config=context_config)
+                                     rule_names=rule_names, context_config=context_config,
+                                     max_checkpoints=max_checkpoints)
         except (_SpawnError, OSError, wire.WireError) as e:
             ours.close()
             ctl_ours.close()
@@ -401,6 +404,12 @@ class _Proc:
         self.reader = wire.Reader(sock)
         self.cell_ended = False  # it sent cell_end; its cell_start comes on the shared channel
         self.wait_until = 0.0  # while cell_ended: the handoff bound, not the cell's deadline
+        # Task 7: ``walk`` is True for a process forked in the kernel's linear
+        # walk over the cells, False for one forked in the dirty re-run pass
+        # (after the walk's ``cell_end`` with index None: ``after_walk``).
+        # Only a walk checkpoint holds the state from before its cell.
+        self.walk = True
+        self.after_walk = False
         try:
             self.pidfd: int | None = os.pidfd_open(pid)
         except ProcessLookupError:
@@ -449,9 +458,14 @@ class SessionChannel:
 
     def __init__(self, pid: int, sock: socket.socket, ctl: socket.socket, *,
                  path_policy: PathPolicy, workspace: Path, cell_timeout: float,
-                 rule_names: list[str] | None, context_config: dict[str, Any]) -> None:
+                 rule_names: list[str] | None, context_config: dict[str, Any],
+                 max_checkpoints: int | None = None) -> None:
         self.pid = pid
         self.cell_timeout = cell_timeout
+        self.max_checkpoints = max_checkpoints
+        #: True after a submit or resume that ended with the document's result:
+        #: then every process but the deepest is a checkpoint waiting in its hook.
+        self.finished = False
         self._ctl = ctl
         self._stack = [_Proc(None, pid, sock)]
         self._submit_base = {"policy": path_policy.to_data(), "workspace": str(workspace),
@@ -465,6 +479,7 @@ class SessionChannel:
                 root.pidfd = None
             raise _SpawnError(f"the session process did not start (it sent {first!r})")
 
+
     @property
     def checkpoints(self) -> list[tuple[int, int]]:
         return [(p.index, p.pid) for p in self._stack[1:] if p.index is not None]
@@ -474,7 +489,8 @@ class SessionChannel:
         wire.send(self._stack[-1].sock, msg)
 
     def kill(self, pid: int) -> None:
-        """SIGKILL the process ``pid`` of this session (its descendants follow by PDEATHSIG)."""
+        """SIGKILL the process ``pid`` of this session (a running child follows by PDEATHSIG;
+        a waiting checkpoint below it does not)."""
         for p in self._stack:
             if p.pid == pid:
                 _kill(p.pidfd)
@@ -511,6 +527,8 @@ class SessionChannel:
                     how = (msg or {}).get("how", "its socket closed")
                     return {"event": "ended", "pid": cur.pid, "how": how}
                 if msg.get("event") == "cell_end":
+                    if msg.get("index") is None:
+                        cur.after_walk = True
                     cur.cell_ended = True
                     cur.wait_until = time.monotonic() + self.HANDOFF_SECONDS
                     continue
@@ -537,6 +555,8 @@ class SessionChannel:
                     return {"event": "ended", "pid": cur.pid, "how": how}
                 event = msg.get("event")
                 if event == "cell_end":  # another host step (cell_done, then a re-run's hook)
+                    if msg.get("index") is None:
+                        cur.after_walk = True
                     cur.wait_until = time.monotonic() + self.HANDOFF_SECONDS
                     continue
                 if event in ("done", "trace"):
@@ -562,7 +582,14 @@ class SessionChannel:
                     os.close(f)
                 continue
             cur.cell_ended = False
-            self._stack.append(_Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0])))
+            new = _Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0]))
+            new.walk = not cur.after_walk
+            new.after_walk = cur.after_walk
+            self._stack.append(new)
+            # Task 7: beyond the cap, the oldest checkpoint exits. The ones
+            # after it live on (a waiting checkpoint has no PDEATHSIG).
+            while self.max_checkpoints is not None and len(self._stack) - 1 > self.max_checkpoints:
+                self._stack.pop(0).close()
             return msg
 
     def submit(self, document: str, *, params: dict[str, Any] | None) -> ExecutionResult:
@@ -575,6 +602,7 @@ class SessionChannel:
         checkpoint above it; the document goes on (D7). With no checkpoint above
         (the root itself ran over), the run ends with the timeout text.
         """
+        self.finished = False
         try:
             self.send({"op": "submit", "document": document, "params": params,
                        **self._submit_base})
@@ -582,6 +610,53 @@ class SessionChannel:
             return ExecutionResult(success=False, error=f"the document's params cannot be sent: {e}")
         except OSError:
             pass  # the root is gone; its ended event says how
+        return self._follow()
+
+    def _checkpoint_for(self, index: int) -> int | None:
+        """The stack position of the live walk checkpoint before cell ``index``, or None.
+
+        Only a process with a successor in the stack is a candidate: it forked
+        that successor in its hook and waits there, inside the kernel loop, so
+        it can still run. The deepest process (which finished the document and
+        left ``asyncio.run``) never is. Nor is a checkpoint of the re-run pass.
+        """
+        if not self.finished:
+            return None
+        for j in range(len(self._stack) - 1):
+            nxt = self._stack[j + 1]
+            if nxt.index == index and nxt.walk:
+                return j
+        return None
+
+    def can_resume(self, index: int) -> bool:
+        """True when a checkpoint before cell ``index`` can take ``resume``."""
+        return self._checkpoint_for(index) is not None
+
+    def resume(self, index: int, document: str) -> ExecutionResult:
+        """Stop the process for cell ``index`` and every newer one, and resume ``document``
+        from the checkpoint before cell ``index`` (Task 7, D10).
+
+        The checkpoint forks a child that parses ``document`` and runs on from
+        cell ``index``; the checkpoint itself stays for a later retry. Raises
+        ``ValueError`` when :meth:`can_resume` is False.
+        """
+        j = self._checkpoint_for(index)
+        if j is None:
+            raise ValueError(f"no checkpoint can resume cell {index}")
+        self.finished = False
+        while len(self._stack) > j + 1:
+            self._stack.pop().close()
+        checkpoint = self._stack[j]
+        checkpoint.cell_ended = True  # its child's cell_start comes on the shared channel
+        checkpoint.wait_until = time.monotonic() + self.HANDOFF_SECONDS
+        try:
+            self.send({"op": "resume", "document": document})
+        except (wire.WireError, OSError):
+            pass  # the checkpoint is gone; its ended event says how
+        return self._follow()
+
+    def _follow(self) -> ExecutionResult:
+        """Read the session's messages until the document's result."""
         entries: list[TraceEntry] = []  # the session's trace, start entries left out
         cell: list[TraceEntry] = []  # the deepest cell's entries, start entries included
         deadline = time.monotonic() + self.cell_timeout
@@ -598,6 +673,7 @@ class SessionChannel:
                     deadline = time.monotonic() + self.cell_timeout
                     cell = []
                 elif event == "done":
+                    self.finished = True
                     return self._result(msg["result"], entries)
                 elif event == "ended":
                     return self._failed(f"the session process ended without a result "
@@ -645,8 +721,11 @@ class SessionChannel:
         dead.close()
         if not self._stack:
             return False
+        # The checkpoint forks a child to carry out the instruction (Task 7):
+        # wait for its cell_start on the shared channel.
         checkpoint = self._stack[-1]
-        checkpoint.cell_ended = False
+        checkpoint.cell_ended = True
+        checkpoint.wait_until = time.monotonic() + self.HANDOFF_SECONDS
         try:
             self.send({"op": "timeout", "seconds": self.cell_timeout,
                        "entries": [e.to_data() for e in cell]})

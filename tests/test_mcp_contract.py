@@ -18,7 +18,8 @@ pytest.importorskip("mcp", reason="mcp required for MCP server tests")
 
 from lackpy.mcp import server
 
-ACTIONS = {"delegate", "generate", "run_program", "validate", "create"}
+# close_session: Plan 3 Task 7 (D10) ends a literate session that run_program returned.
+ACTIONS = {"delegate", "generate", "run_program", "validate", "create", "close_session"}
 
 
 def _tools():

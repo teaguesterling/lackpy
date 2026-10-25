@@ -280,35 +280,54 @@ class LiterateInterpreter:
         # ``cell_done()`` marks the end of a cell's run when no hook follows it
         # (after the last cell, after a re-run): the parent then stops the
         # cell's deadline, so host work is not charged to the cell.
+        #
+        # Task 7: a prose cell takes no checkpoint of its own. The hook runs at
+        # the start of each segment: the first cell, and each cell after a
+        # non-prose cell. A segment is a run of prose cells and the cell after
+        # them, so its checkpoint is also the one before each of its prose
+        # cells (a resume from it renders only prose again). A timeout returned
+        # there belongs to the segment's first non-prose cell: the prose before
+        # it renders as usual.
         checkpoint = (context.config or {}).get("checkpoint")
         cell_done = (context.config or {}).get("cell_done")
         timed_out = False
+        pending_timeout: Any = None
         index = 0
         while index < len(parsed.cells):
             cell = parsed.cells[index]
-            resume = checkpoint(index) if checkpoint is not None and kernel.refusal is None else None
+            segment_start = index == 0 or parsed.cells[index - 1].cell_type != "prose"
+            resume = (checkpoint(index) if checkpoint is not None and kernel.refusal is None
+                      and segment_start else None)
             if resume is not None and resume.kind == "resume":
-                # Task 7: continue at ``index`` over the new document's cells.
+                # Task 7: continue at ``index`` over the new document's cells,
+                # with the params the first run applied.
                 reparsed = parse(resume.document or "")
-                if reparsed.errors:
+                params_error = None
+                if context.params and not reparsed.errors:
+                    params_error = _apply_document_params(reparsed, context.params)
+                if reparsed.errors or params_error is not None:
                     return InterpreterExecutionResult(
                         success=False,
-                        error="Parse errors: " + "; ".join(reparsed.errors),
+                        error=(f"Configuration error: {params_error}" if params_error
+                               else "Parse errors: " + "; ".join(reparsed.errors)),
                         output_format="none",
                         duration_ms=(time.perf_counter() - start) * 1000,
                     )
                 parsed = reparsed
                 gate_violations = _gate_violations(parsed, context)
-                continue  # the hook forks again for the new cell at ``index``
+                continue  # the hook returns None for the new cell at ``index``
             refs, binds = _static_ref_bind_sets(cell)
             graph.add_cell(index, refs, binds)
             if resume is not None:  # "timeout": the child was stopped at the limit
                 timed_out = True
+                pending_timeout = resume
+            if pending_timeout is not None and cell.cell_type != "prose":
                 values.pop(index, None)
                 output_parts.append(_reify_timeout_for_cell(
-                    cell, index, resume, kernel, ledger, versions, assigned_names,
+                    cell, index, pending_timeout, kernel, ledger, versions, assigned_names,
                     observed_effects,
                 ))
+                pending_timeout = None
                 index += 1
                 continue
 

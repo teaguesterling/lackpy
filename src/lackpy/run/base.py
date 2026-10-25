@@ -30,6 +30,9 @@ class ExecutionResult:
     trace: Trace = field(default_factory=Trace)
     variables: dict[str, Any] = field(default_factory=dict)
     error_phase: str | None = None
+    #: A literate run's session (Plan 3 Task 7, D10): pass it back with a
+    #: resubmitted document to resume from the first changed cell.
+    session_id: str | None = None
 
     @property
     def effective_output(self) -> Any:

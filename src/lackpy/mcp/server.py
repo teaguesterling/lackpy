@@ -135,7 +135,8 @@ async def generate(intent: str, profile: str | None = None,
 async def run_program(program: str, profile: str | None = None,
                       params: dict[str, Any] | None = None,
                       rules: list[str] | None = None,
-                      timeout: float | None = None) -> dict:
+                      timeout: float | None = None,
+                      session_id: str | None = None) -> dict:
     """Validate and run a program you already have (skips generation). The program
     is plain Python that the lackpy validator checks; it reads and writes files
     only through pathlib.Path, under the workspace's permission rules. With a
@@ -148,17 +149,29 @@ async def run_program(program: str, profile: str | None = None,
     the run's limit in seconds (default: the sandbox timeout, 120 s); a value
     over the profile's max_timeout is refused before the run. On the literate
     axis the limit applies to each cell: a cell over it is stopped and noted,
-    and the document goes on.
+    and the document goes on. A literate run returns a `session_id`: to retry,
+    pass it back with the full corrected document, and the run resumes from
+    the first changed cell (the cells before it do not run again). Call
+    `close_session` when done; an idle session ends after 10 minutes.
     `error_phase` is "timeout" when the run was stopped at the limit, "refused"
     when it was refused, else null. Bytes, nan and infinity come back as their
     Python repr text."""
     result = await _get_service().run_program(program, profile=profile, params=params,
-                                              rules=rules, timeout=timeout)
-    return _json_safe({
+                                              rules=rules, timeout=timeout,
+                                              session_id=session_id)
+    extra = {"session_id": result.session_id} if result.session_id is not None else {}
+    return _json_safe({**extra,
         "success": result.success, "output": result.output, "error": result.error,
         "error_phase": result.error_phase, "stdout": result.stdout,
         "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
                    "success": e.success, "error": e.error} for e in result.trace.entries]})
+
+
+@mcp.tool(annotations=_EXECUTES)
+def close_session(session_id: str) -> dict:
+    """End a literate session that `run_program` returned, and stop its processes.
+    `closed` is false when the session was unknown or had already ended."""
+    return {"session_id": session_id, "closed": _get_service().close_session(session_id)}
 
 
 @mcp.tool(annotations=_WRITES_FILE)

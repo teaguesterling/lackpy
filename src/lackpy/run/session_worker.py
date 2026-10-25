@@ -9,13 +9,17 @@ At the top of each cell, the kernel calls the hook that ``context.config
 ["checkpoint"]`` holds. The hook forks:
 
 - The child returns None and runs the cell. It is now the deepest process.
-- The parent becomes the checkpoint for that cell. It blocks in
-  ``os.waitpid(child)``. When the child is gone, it reads one instruction and
-  returns the matching :class:`Resume`.
+- The parent becomes the checkpoint for that cell. It waits for the child.
+  When the child is gone, it reads one instruction, forks a new child for it,
+  and the new child returns the matching :class:`Resume` (Task 7). So the
+  checkpoint still holds the state from before its cell, for the next retry.
 
 A cell that does not time out goes on to the next cell's hook, so it is the
 checkpoint for that cell (D6: "C1 becomes S1"). Every process stays alive while
-the session is open: each one is blocked on its child, and the deepest one runs.
+the session is open, unless the parent drops the oldest checkpoints
+(``max_checkpoints``): each one waits on its child, and the deepest one runs.
+A prose cell takes no checkpoint of its own (Task 7): the hook runs at the
+start of each segment, a run of prose cells and the cell after them.
 
 Channels (the protocol decision for Task 6). Each process has its **own**
 stream socket to the parent. The checkpoint makes a new socketpair for each
@@ -41,7 +45,8 @@ On the shared channel: ``{"event": "cell_start", "index", "pid", "from"}``.
 
 Messages, parent to worker: ``submit`` to the root; to a woken checkpoint,
 ``{"op": "timeout", "seconds", "entries"}`` (the stopped cell's streamed entries)
-or ``{"op": "resume", "document"}`` (Task 7). At EOF a checkpoint exits.
+or ``{"op": "resume", "document"}`` (Task 7). At EOF a checkpoint exits, and
+so does a waiting one when the zygote is gone (``_Hook`` has the lifetime rule).
 
 No thread is ever started here: the hook refuses to fork when there is more
 than one.
@@ -51,6 +56,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import select
 import signal
 import socket
 import threading
@@ -93,7 +99,27 @@ def _failed(error: str) -> dict[str, Any]:
 
 
 class _Hook:
-    """``context.config["checkpoint"]``: fork, and return a Resume in the checkpoint."""
+    """``context.config["checkpoint"]``: fork, and return a Resume in the checkpoint.
+
+    A checkpoint never goes on itself (Task 7). For each instruction it forks
+    again, and the new child carries the instruction out, so the checkpoint
+    still holds the state from before its cell for the next retry. A child
+    forked for ``resume`` runs the cell itself: the kernel calls the hook again
+    at the same index, and that call returns None without a fork.
+
+    Lifetime (Task 7). A running process dies with its parent
+    (``PR_SET_PDEATHSIG``, set again at each fork). A checkpoint clears its own
+    PDEATHSIG while it waits: the parent may drop the oldest checkpoint
+    (``max_checkpoints``), and the checkpoints after it must live on. A waiting
+    checkpoint exits instead when its socket reaches EOF (the session is
+    closed, or the service is gone) or when the zygote is gone.
+
+    Each child gets a private epoll instance in place of the event loop's, which
+    it shares with every ancestor at the fork. The child never uses the loop
+    (the rule above ``checkpoint`` in the kernel), but its ``asyncio.run``
+    teardown does: measured, ``loop.close()`` removed the ancestors' self-pipe
+    registration from the shared instance.
+    """
 
     def __init__(self, channel: Any, ctl: socket.socket, exit_at: int | None = None,
                  handoff_delay: float = 0.0) -> None:
@@ -101,10 +127,23 @@ class _Hook:
         self.ctl = ctl
         self.exit_at = exit_at  # test-only: exit after cell_end at this index
         self.handoff_delay = handoff_delay  # test-only: sleep after cell_end, before the fork
+        self.resumed = False  # forked for a resume: the next call runs the cell itself
+        self.epfd: int | None = None  # the event loop's epoll fd (found in the root)
+        self.zygote: int | None = None  # a pidfd of the zygote
 
     def __call__(self, index: int) -> Resume | None:
+        if self.resumed:
+            self.resumed = False  # the parent already has this process's cell_start
+            return None
         if threading.active_count() != 1:
             os._exit(EXIT_ERROR)  # a fork with threads is unsafe; never run on
+        if self.epfd is None:  # the first call, in the root: its loop is running
+            selector = getattr(asyncio.get_running_loop(), "_selector", None)
+            self.epfd = selector.fileno() if selector is not None else -1
+            try:
+                self.zygote = os.pidfd_open(os.getppid())
+            except OSError:
+                os._exit(EXIT_ERROR)
         # Everything this process sent for its cell is on its socket before the
         # next cell_start reaches the shared channel.
         self.channel.send({"event": "cell_end", "index": index})
@@ -112,6 +151,19 @@ class _Hook:
             os._exit(EXIT_ERROR)  # test-only (--test-ops): a death before cell_start
         if self.handoff_delay:
             time.sleep(self.handoff_delay)  # test-only (--test-ops): a slow handoff
+        pid = self._fork(index)
+        if pid is None:
+            return None
+        while True:
+            self._wait(pid)
+            resume = self._instruction()
+            pid = self._fork(index)
+            if pid is None:
+                self.resumed = resume.kind == "resume"
+                return resume
+
+    def _fork(self, index: int) -> int | None:
+        """Fork a child for cell ``index`` and hand its socket to the parent; None in the child."""
         ours, theirs = socket.socketpair()
         me = os.getpid()
         pid = os.fork()
@@ -125,6 +177,10 @@ class _Hook:
                 ours.close()
                 self.channel.sock.close()  # the checkpoint's socket is its own
                 self.channel.sock = theirs
+                if self.epfd is not None and self.epfd >= 0:
+                    private = select.epoll()
+                    os.dup2(private.fileno(), self.epfd)
+                    private.close()
             except BaseException:
                 os._exit(EXIT_ERROR)
             return None
@@ -138,8 +194,41 @@ class _Hook:
             os._exit(EXIT_CHANNEL)
         finally:
             ours.close()
+        return pid
+
+    def _wait(self, pid: int) -> None:
+        """Wait until the child ``pid`` is gone; exit when the session is."""
+        try:
+            _prctl(PR_SET_PDEATHSIG, 0)
+            child = os.pidfd_open(pid)
+        except OSError:
+            os._exit(EXIT_ERROR)
+        sock = self.channel.sock
+        try:
+            poller = select.poll()
+            poller.register(child, select.POLLIN)
+            poller.register(sock.fileno(), select.POLLIN)
+            if self.zygote is not None:
+                poller.register(self.zygote, select.POLLIN)
+            while True:
+                ready = {fd for fd, _ in poller.poll()}
+                if child in ready:
+                    break
+                if self.zygote in ready:
+                    os._exit(0)  # the zygote is gone: so is the session
+                if sock.fileno() in ready:
+                    try:
+                        eof = sock.recv(1, socket.MSG_PEEK) == b""
+                    except OSError:
+                        eof = True
+                    if eof:
+                        os._exit(0)  # the session is closed
+                    # An instruction: the parent stopped the child first, so
+                    # read it once the child is gone.
+                    poller.unregister(sock.fileno())
+        finally:
+            os.close(child)
         os.waitpid(pid, 0)
-        return self._instruction()
 
     def _instruction(self) -> Resume:
         try:

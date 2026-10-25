@@ -27,6 +27,7 @@ from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.paths import PathPolicy, load_policy, read_only_policy
 from .run.process import ProcessRunner, shared_runner
+from .run.sessions import SessionError, SessionRegistry
 from .run.runner import _binds_params
 from .run.refusal import LackpyRefusal
 from .run.trace import error_text
@@ -269,6 +270,9 @@ class LackpyService:
         # changes into the workspace itself, so the service never calls
         # os.chdir and concurrent runs need no lock.
         self._process_runner: ProcessRunner | None = None
+        # The live literate sessions a later run_program names by session_id
+        # (Plan 3 Task 7, D10). Closed with the service.
+        self._sessions = SessionRegistry()
         self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
         # The toolbox is internal machinery since the kit was removed from the
@@ -393,7 +397,14 @@ class LackpyService:
         if self._mcp_client is not None:
             self._mcp_client.shutdown()
             self._mcp_client = None
+        self._sessions.close_all()
         self._process_runner = None
+
+    def close_session(self, session_id: str) -> bool:
+        """End the literate session ``session_id``; False when it is unknown or expired."""
+        held = session_id in self._sessions
+        self._sessions.close(session_id)
+        return held
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"
@@ -778,7 +789,7 @@ class LackpyService:
     async def _execute_program(
         self, program: str, rp: ResolvedProfile, param_values: dict[str, Any],
         *, timeout: float | None = None, rules: list | None = None,
-        rule_names: list[str] | None = None,
+        rule_names: list[str] | None = None, session: tuple[str | None, str] | None = None,
     ) -> ExecutionResult:
         """Route a program to the execution model named by the profile's ``execution``
         axis -- the shared seam for ``run_program`` and ``delegate``.
@@ -797,6 +808,10 @@ class LackpyService:
         limit on each cell, and validates there with ``rule_names`` only (a
         callable rule is refused: it cannot cross; ledger Ruling D). A profile whose ``policy.read_only`` is
         true runs under ``read_only_policy`` on either axis.
+
+        ``session`` is ``(session_id, profile_name)`` from ``run_program`` (Plan 3
+        Task 7, D10): a literate run then stays open in the registry, and a
+        given ``session_id`` resumes it. None runs and closes, as before.
         """
         read_only = _read_only(rp.policy)
         if timeout is None:  # an internal caller: the same capped default (review Minor 3)
@@ -809,7 +824,11 @@ class LackpyService:
                     success=False,
                     error="the process runner takes rule names, not callables")
             return await self._execute_literate(program, param_values, timeout=timeout,
-                                                read_only=read_only, rule_names=rule_names)
+                                                read_only=read_only, rule_names=rule_names,
+                                                session=session)
+        if session is not None and session[0] is not None:
+            return ExecutionResult(success=False,
+                                   error="session_id applies only to a literate profile")
 
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
@@ -820,6 +839,7 @@ class LackpyService:
     async def _execute_literate(
         self, program: str, param_values: dict[str, Any], *, timeout: float,
         read_only: bool = False, rule_names: list[str] | None = None,
+        session: tuple[str | None, str] | None = None,
     ) -> ExecutionResult:
         """Run a literate document in a session worker (Plan 3 D6, Ruling D) and adapt the result.
 
@@ -863,7 +883,29 @@ class LackpyService:
         runner = self._process_runner
         workspace = self._workspace.resolve()
 
+        def run_in_session(session_id: str | None, profile_name: str) -> ExecutionResult:
+            # Task 7 (D10): the session stays open for a retry, and a retry
+            # with its session_id resumes from the first changed cell.
+            if session_id is None:
+                live = self._sessions.open(runner=runner, workspace=workspace,
+                                           profile_name=profile_name, path_policy=policy,
+                                           cell_timeout=timeout, rule_names=rule_names,
+                                           context_config=config)
+            else:
+                try:
+                    live = self._sessions.get(session_id, workspace=workspace,
+                                              profile_name=profile_name)
+                except SessionError as e:
+                    return ExecutionResult(success=False, error=str(e))
+                live.configure(path_policy=policy, cell_timeout=timeout,
+                               rule_names=rule_names, context_config=config)
+            result = live.submit(program, param_values)
+            result.session_id = live.session_id
+            return result
+
         def run() -> ExecutionResult:
+            if session is not None:
+                return run_in_session(*session)
             channel = runner.open_session(path_policy=policy, workspace=workspace,
                                           cell_timeout=timeout, rule_names=rule_names,
                                           context_config=config)
@@ -979,7 +1021,8 @@ class LackpyService:
     async def run_program(self, program: str, profile: Profile | str | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
-                          timeout: float | None = None) -> ExecutionResult:
+                          timeout: float | None = None,
+                          session_id: str | None = None) -> ExecutionResult:
         """Validate and execute a lackpy program.
 
         The program runs in the runtime namespace (builtins, approved modules,
@@ -1000,6 +1043,12 @@ class LackpyService:
                 the run is refused before validation (``error_phase="refused"``).
                 At the limit the worker is killed (``error_phase="timeout"``).
                 In a literate document the limit applies to each cell (D8).
+            session_id: A literate run's ``session_id`` (Plan 3 D10). Every
+                literate run returns one in ``result.session_id``; passing it
+                back with a resubmitted document resumes that session from the
+                checkpoint before the first changed cell. An unknown or expired
+                id, or one from another profile or workspace, is a failed
+                result, never a fresh run.
 
         Returns:
             An ExecutionResult with output, trace, and success status.
@@ -1017,7 +1066,8 @@ class LackpyService:
         # The execution axis (one-shot restricted-Python vs literate) decides both
         # validation and execution; the seam keeps them paired (see _execute_program).
         return await self._execute_program(program, rp, param_values, timeout=seconds,
-                                           rules=rules, rule_names=names)
+                                           rules=rules, rule_names=names,
+                                           session=(session_id, self._profile_name(profile)))
 
     async def delegate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
