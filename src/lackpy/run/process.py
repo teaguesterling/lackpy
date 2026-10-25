@@ -18,6 +18,7 @@ from __future__ import annotations
 import atexit
 import math
 import os
+import select
 import signal
 import socket
 import subprocess
@@ -469,13 +470,36 @@ class SessionChannel:
             if remaining <= 0:
                 raise TimeoutError
             if cur.cell_ended:
+                # Wait for the next cell_start, and for the process too: one that
+                # dies between cell_end and cell_start (a failed fork, a failed
+                # send) closes its socket, and the checkpoints above still hold
+                # the shared channel, so it gives no EOF there. The channel wins
+                # when both are ready.
+                poller = select.poll()
+                poller.register(self._ctl.fileno(), select.POLLIN)
+                poller.register(cur.sock.fileno(), select.POLLIN)
+                ready = {fd for fd, _ in poller.poll(math.ceil(remaining * 1000))}
+                if not ready:
+                    raise TimeoutError
+                if self._ctl.fileno() not in ready:
+                    msg = cur.reader.recv(remaining)
+                    if msg is None or msg.get("event") == "exit":
+                        how = (msg or {}).get("how", "its socket closed")
+                        return {"event": "ended", "pid": cur.pid, "how": how}
+                    raise _BadMessage(f"{msg.get('event')!r} after cell_end")
                 self._ctl.settimeout(remaining)
-                data, fds, _, _ = socket.recv_fds(self._ctl, 65536, 4)
+                data, fds, msg_flags, _ = socket.recv_fds(self._ctl, 65536, 4)
                 if not data:
                     for f in fds:
                         os.close(f)
                     return {"event": "ended", "pid": cur.pid, "how": "the shared channel closed"}
                 msg = wire.decode(data.decode("ascii"))
+                if (isinstance(msg, dict) and msg.get("from") == cur.pid
+                        and (len(fds) != 1 or msg_flags & socket.MSG_CTRUNC)):
+                    for f in fds:
+                        os.close(f)
+                    raise _BadMessage("a cell_start came without its socket (is the service "
+                                      "out of file descriptors?)")
                 if (not isinstance(msg, dict) or msg.get("event") != "cell_start"
                         or msg.get("from") != cur.pid or len(fds) != 1
                         or type(msg.get("pid")) is not int or type(msg.get("index")) is not int):

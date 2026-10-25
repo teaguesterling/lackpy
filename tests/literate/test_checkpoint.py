@@ -368,3 +368,88 @@ def test_hook_forks_each_dirty_rerun_too():
     assert f"timeout: cell {first + 1} took longer than 1 s and was stopped" in r.output
     dirty = [e for e in r.metadata["ledger"].entries() if e.entry_type == "dirty"]
     assert dirty and dirty[-1].detail["outcome"] == "reified"
+
+
+def test_death_between_cell_end_and_cell_start_is_a_crash(env, runner):
+    """A process that dies in its hook, before the next cell_start, is reported at once.
+
+    The checkpoints above still hold the shared channel, so the parent must
+    watch the process's own socket too, not wait for the cell limit.
+    """
+    doc = _doc("a = 1", "b = 2", "c = 3")
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=30.0,
+                               rule_names=None, context_config={"test_exit_in_hook": 1})
+    start = time.monotonic()
+    try:
+        r = chan.submit(doc, params=None)
+    finally:
+        chan.close()
+    assert time.monotonic() - start < 5
+    assert r.success is False
+    assert r.error_phase is None
+    assert "the session process ended without a result" in (r.error or ""), r
+
+
+def test_channel_events_send_and_kill(env, runner):
+    """The SessionChannel primitives Task 7 builds on: send, events, kill, checkpoints."""
+    doc = _doc("a = 1", LOOP)
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=30.0,
+                               rule_names=None, context_config={})
+    try:
+        chan.send({"op": "submit", "document": doc, "params": None, **chan._submit_base})
+        seen = []
+        for msg in chan.events(time.monotonic() + 10):
+            seen.append(msg["event"])
+            if msg["event"] == "cell_start" and msg["index"] == len(parse(doc).cells) - 1:
+                break
+        assert seen.count("cell_start") == len(parse(doc).cells)
+        index, pid = chan.checkpoints[-1]
+        chan.kill(pid)
+        rest = list(chan.events(time.monotonic() + 5))
+        assert rest[-1]["event"] == "ended" and rest[-1]["pid"] == pid
+    finally:
+        chan.close()
+
+
+@pytest.mark.parametrize("entry", ["run_program", "delegate", "mcp.run_program",
+                                   "lackpyctl render --execute"])
+def test_every_entry_point_stops_a_cell_and_goes_on(env, monkeypatch, capsys, entry):
+    """D9: each literate route runs in the session worker, with the limit on each cell."""
+    from lackpy import service as service_module
+
+    (env["ws"] / ".lackpy").mkdir()
+    (env["ws"] / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
+    monkeypatch.setattr(service_module, "load_policy", env["loader"])
+    doc = _doc("a = 1", LOOP, "b = a + 1", prose="B={b}")
+    note = f"timeout: cell {_cell_number(doc, LOOP)} took longer than 1 s and was stopped"
+    service = LackpyService(workspace=env["ws"], path_policy_loader=env["loader"])
+    start = time.monotonic()
+    if entry == "run_program":
+        r = asyncio.run(service.run_program(doc, profile="lit", timeout=1.0))
+        text, phase = r.stdout, r.error_phase
+    elif entry == "delegate":
+        r = asyncio.run(service.delegate("x", profile="lit", _program_override=doc, timeout=1.0))
+        text, phase = r.get("stdout", ""), r["error_phase"]
+    elif entry == "mcp.run_program":
+        pytest.importorskip("mcp", reason="mcp required for the MCP entry point")
+        from lackpy.mcp import server
+        server._service = service
+        try:
+            r = asyncio.run(server.run_program(doc, profile="lit", timeout=1.0))
+        finally:
+            server._service = None
+        text, phase = r["stdout"], r["error_phase"]
+    else:
+        from lackpy.ctl import main
+        path = env["ws"] / "doc.md"
+        path.write_text(doc)
+        code = main(["render", "--execute", str(path), "--base-dir", str(env["ws"]),
+                     "--timeout", "1"])
+        assert code == 1
+        text, phase = capsys.readouterr().out, "timeout"
+    assert time.monotonic() - start < 8
+    assert phase == "timeout"
+    assert note in text, text
+    assert "B=2" in text

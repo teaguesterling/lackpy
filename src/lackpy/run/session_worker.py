@@ -93,9 +93,10 @@ def _failed(error: str) -> dict[str, Any]:
 class _Hook:
     """``context.config["checkpoint"]``: fork, and return a Resume in the checkpoint."""
 
-    def __init__(self, channel: Any, ctl: socket.socket) -> None:
+    def __init__(self, channel: Any, ctl: socket.socket, exit_at: int | None = None) -> None:
         self.channel = channel  # zygote._Channel; ``.sock`` is this process's own socket
         self.ctl = ctl
+        self.exit_at = exit_at  # test-only: exit after cell_end at this index
 
     def __call__(self, index: int) -> Resume | None:
         if threading.active_count() != 1:
@@ -103,6 +104,8 @@ class _Hook:
         # Everything this process sent for its cell is on its socket before the
         # next cell_start reaches the shared channel.
         self.channel.send({"event": "cell_end", "index": index})
+        if index == self.exit_at:
+            os._exit(EXIT_ERROR)  # test-only (--test-ops): a death before cell_start
         ours, theirs = socket.socketpair()
         me = os.getpid()
         pid = os.fork()
@@ -170,6 +173,9 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
         return _failed(str(e))
     config = dict(msg.get("config") or {})
     block, partial = config.pop("test_block_writes", False), config.pop("test_partial_frame", False)
+    exit_at = config.pop("test_exit_in_hook", None)
+    if not test_ops or type(exit_at) is not int:
+        exit_at = None
     if test_ops and (block or partial):
         # Ruling C: block inside the write, so the parent kills the cell there.
         # With ``test_partial_frame``, first send half a message on the cell's
@@ -185,7 +191,7 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
     if rules:
         config["extra_rules"] = rules
     config["trace_listener"] = channel.trace
-    config["checkpoint"] = _Hook(channel, ctl)
+    config["checkpoint"] = _Hook(channel, ctl, exit_at)
     document = msg["document"]
     ctx = ExecutionContext(base_dir=str(msg["workspace"]), params=msg.get("params") or {},
                            config=config)
