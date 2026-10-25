@@ -269,7 +269,19 @@ class LiterateInterpreter:
         # at the top of each cell. The cell runs in the child (the hook returns
         # None there); the parent is the checkpoint, and returns a Resume only
         # when the child is gone. In-process there is no hook.
+        #
+        # The rule for the code after the hook (Task 6 fix round 1 ruling): the
+        # child of the fork NEVER awaits. asyncio clears the running loop at
+        # fork (``asyncio.events.on_fork``), and the loop's epoll fd is shared
+        # with every ancestor checkpoint, so the cell path from here on must be
+        # plain synchronous code. ``test_cell_path_after_the_hook_never_awaits``
+        # pins it.
+        #
+        # ``cell_done()`` marks the end of a cell's run when no hook follows it
+        # (after the last cell, after a re-run): the parent then stops the
+        # cell's deadline, so host work is not charged to the cell.
         checkpoint = (context.config or {}).get("checkpoint")
+        cell_done = (context.config or {}).get("cell_done")
         timed_out = False
         index = 0
         while index < len(parsed.cells):
@@ -340,11 +352,14 @@ class LiterateInterpreter:
         # free: a re-exec that now hits an unknown name / error / over-ceiling
         # source re-reifies a Hole / ErrorValue / Unavailable and re-versions
         # through the very same per-cell pipeline the linear walk used.
+        if cell_done is not None:
+            cell_done()
         if refusal is None:
             refusal, rerun_timed_out = self._reexecute_dirty_subgraph(
                 parsed.cells, graph, kernel, ledger, versions, assigned_names,
                 reactive_mode, observed_effects, gate_violations, run_mark,
                 output_parts, cell_ids, values, checkpoint=checkpoint,
+                cell_done=cell_done,
             )
             timed_out = timed_out or rerun_timed_out
 
@@ -558,6 +573,7 @@ class LiterateInterpreter:
         cell_ids: dict[int, int | None] | None = None,
         values: dict[int, Any] | None = None,
         checkpoint: Any = None,
+        cell_done: Any = None,
     ) -> tuple[str | None, bool]:
         """Re-execute the dependents of this run's heals (L1.4, Teague's C1 decision).
 
@@ -726,11 +742,15 @@ class LiterateInterpreter:
                 detail["reified"] = sorted(
                     {e.name for e in reified_failures(ledger.entries()[cell_mark:]) if e.name})
                 ledger.record(DIRTY, name=None, detail=detail)
+                if cell_done is not None:
+                    cell_done()
                 continue
             outcome = self._run_resolved_cell(
                 cells[index], index, kernel, ledger, versions, assigned_names,
                 rerun_id=cell_ids.get(index), rerun=True,
             )
+            if cell_done is not None:
+                cell_done()
             if values is not None:
                 _keep_value(values, index, outcome)
             if outcome.refusal is not None:

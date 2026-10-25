@@ -30,6 +30,12 @@ def test_fork_inside_running_coroutine(tmp_path):
 
     The child finishes the coroutine and writes its marker; the parent waits for
     the child, then finishes its own copy. Both copies must see their own state.
+
+    The child has no running event loop: asyncio clears it at fork
+    (``asyncio.events.on_fork``), and the loop's epoll fd is shared with the
+    parent. So the child never awaits (ruling, Task 6 fix round 1): it must not
+    use the loop, and this test pins that ``get_running_loop()`` raises there.
+    The parent's loop still works after the child is gone.
     """
     script = textwrap.dedent(f"""
         import asyncio, os
@@ -43,10 +49,15 @@ def test_fork_inside_running_coroutine(tmp_path):
             a = await helper(21)
             pid = os.fork()
             if pid == 0:
-                b = await helper(a)  # the event loop still works in the child
+                try:
+                    asyncio.get_running_loop()
+                    loop = "running"
+                except RuntimeError:
+                    loop = "none"  # cleared at fork: the child must not await
+                b = a * 2  # plain code only, no await
                 with open(os.path.join(out, "child"), "w") as f:
-                    f.write(f"{{a}} {{b}}")
-                return "child"
+                    f.write(f"{{a}} {{b}} {{loop}}")
+                os._exit(0)  # no asyncio teardown in the child
             _, status = os.waitpid(pid, 0)
             c = await helper(a + 1)
             with open(os.path.join(out, "parent"), "w") as f:
@@ -59,7 +70,7 @@ def test_fork_inside_running_coroutine(tmp_path):
     proc = subprocess.run([sys.executable, "-I", "-c", script], timeout=30,
                           capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
-    assert (tmp_path / "child").read_text() == "42 84"
+    assert (tmp_path / "child").read_text() == "42 84 none"
     assert (tmp_path / "parent").read_text() == "42 86 0"
 
 
@@ -72,7 +83,9 @@ import time  # noqa: E402
 
 from lackpy.interpreters.literate.parser import parse  # noqa: E402
 from lackpy.profiles import Profile  # noqa: E402
-from lackpy.run.paths import load_policy  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from lackpy.run.paths import PathPolicy, load_policy  # noqa: E402
 from lackpy.run.process import ProcessRunner  # noqa: E402
 from lackpy.service import LackpyService  # noqa: E402
 
@@ -254,6 +267,7 @@ def test_zygote_death_leaves_no_process(env, runner):
 
 from lackpy.interpreters.base import ExecutionContext  # noqa: E402
 from lackpy.interpreters.literate import LiterateInterpreter  # noqa: E402
+from lackpy.interpreters.literate.kernel.forgiveness import Hole  # noqa: E402
 from lackpy.run.session_worker import Resume  # noqa: E402
 from lackpy.run.trace import TraceEntry  # noqa: E402
 
@@ -283,7 +297,7 @@ def test_hook_timeout_reifies_the_cell_as_holes():
     assert (f"timeout: cell {target + 1} took longer than 2.5 s and was stopped; "
             f"it wrote w.txt before it was stopped") in r.output
     assert "D=2" in r.output
-    assert "x" not in r.metadata["variables"] or repr(r.metadata["variables"]["x"]).startswith("⟨")
+    assert r.metadata["variables"]["x"] == Hole("x")
     assert any(e.entry_type == "timed_out" for e in r.metadata["ledger"].entries())
     assert any(e.entry_type == "hole_opened" and e.name == "c" for e in r.metadata["ledger"].entries())
     # The stopped cell's entries join the document's trace.
@@ -448,8 +462,128 @@ def test_every_entry_point_stops_a_cell_and_goes_on(env, monkeypatch, capsys, en
         code = main(["render", "--execute", str(path), "--base-dir", str(env["ws"]),
                      "--timeout", "1"])
         assert code == 1
-        text, phase = capsys.readouterr().out, "timeout"
+        text, phase = capsys.readouterr().out, None  # the CLI prints no error_phase
     assert time.monotonic() - start < 8
-    assert phase == "timeout"
+    if entry != "lackpyctl render --execute":
+        assert phase == "timeout"
     assert note in text, text
     assert "B=2" in text
+
+
+# --- fix round 1 ---------------------------------------------------------------
+
+def test_cell_that_ends_in_time_is_not_charged_for_the_handoff(env, runner):
+    """I1: after cell_end, the wait for the next cell_start is not the finished cell's time.
+
+    The test-only delay makes each handoff (cell_end to the fork) longer than the
+    cell limit. No cell runs over, so nothing may be killed or reified.
+    """
+    doc = _doc("a = 1", "b = a + 1")
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=1.0,
+                               rule_names=None, context_config={"test_handoff_delay": 1.3})
+    try:
+        r = chan.submit(doc, params=None)
+    finally:
+        chan.close()
+    assert r.success, r
+    assert r.error_phase is None
+    assert r.variables == {"a": 1, "b": 2}
+
+
+def test_post_processing_is_not_charged_to_the_last_cell(env, runner):
+    """Minor 3: the work after the last cell (bookkeeping, render, the result) is not that cell's time."""
+    doc = _doc("a = 1", "b = a + 1", prose="B={b}")
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=1.0,
+                               rule_names=None, context_config={"test_done_delay": 1.3})
+    try:
+        r = chan.submit(doc, params=None)
+    finally:
+        chan.close()
+    assert r.success, r
+    assert r.error_phase is None
+    assert "B=2" in r.stdout
+
+
+def test_stalled_handoff_ends_the_run(env, runner, monkeypatch):
+    """A handoff that takes longer than its own bound ends the run as a failure, not a cell timeout."""
+    from lackpy.run.process import SessionChannel
+    monkeypatch.setattr(SessionChannel, "HANDOFF_SECONDS", 0.5, raising=False)
+    doc = _doc("a = 1", "b = a + 1")
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=5.0,
+                               rule_names=None, context_config={"test_handoff_delay": 3.0})
+    start = time.monotonic()
+    try:
+        r = chan.submit(doc, params=None)
+    finally:
+        chan.close()
+    assert time.monotonic() - start < 2.5
+    assert r.success is False
+    assert r.error_phase is None
+    assert "did not reach its next cell within 0.5 s" in (r.error or ""), r
+
+
+def test_cell_path_after_the_hook_never_awaits():
+    """I2 ruling: the child of a checkpoint fork never uses the event loop.
+
+    After the fork the child continues ``_run_document``'s coroutine with no
+    running loop and an epoll fd shared with every ancestor, so any await there
+    is unsafe. Every hook call is inside ``_run_document`` (and its sync
+    callees, which cannot await), and ``execute`` returns right after it. So the
+    rule holds while ``_run_document`` has no ``await``/``async for``/``async
+    with``, ``_run_resolved_cell`` and ``_reexecute_dirty_subgraph`` stay plain
+    functions, and ``execute`` has nothing to await after ``_run_document``.
+    This does not see sync code that reaches for the loop explicitly.
+    """
+    import ast
+    import inspect
+
+    cls = LiterateInterpreter
+    awaits = (ast.Await, ast.AsyncFor, ast.AsyncWith)
+
+    def tree(fn):
+        return ast.parse(textwrap.dedent(inspect.getsource(fn)))
+
+    run_doc = tree(cls._run_document)
+    assert not [n for n in ast.walk(run_doc) if isinstance(n, awaits)], \
+        "_run_document awaits: the forked child would use the event loop"
+    assert "checkpoint(" in inspect.getsource(cls._run_document)
+    for name in ("_run_resolved_cell", "_reexecute_dirty_subgraph"):
+        assert not inspect.iscoroutinefunction(getattr(cls, name)), name
+    execute = tree(cls.execute)
+    found = [n for n in ast.walk(execute) if isinstance(n, awaits)]
+    assert len(found) == 1, "execute must await only _run_document"
+    call = found[0].value
+    assert isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "_run_document"
+
+
+def test_bad_first_message_leaks_no_pidfd():
+    """Minor 4: SessionChannel closes the root's pidfd when the first message is wrong."""
+    import socket as socket_module
+
+    from lackpy.run import wire
+    from lackpy.run.process import SessionChannel
+
+    def pidfds() -> int:
+        n = 0
+        for fd in os.listdir("/proc/self/fd"):
+            try:
+                n += os.readlink(f"/proc/self/fd/{fd}") == "anon_inode:[pidfd]"
+            except OSError:
+                pass
+        return n
+
+    before = pidfds()
+    ours, theirs = socket_module.socketpair()
+    ctl_ours, ctl_theirs = socket_module.socketpair(socket_module.AF_UNIX,
+                                                    socket_module.SOCK_SEQPACKET)
+    wire.send(theirs, {"event": "not-start"})
+    policy = PathPolicy(Path("/tmp"), [])
+    with pytest.raises(Exception, match="did not start"):
+        SessionChannel(os.getpid(), ours, ctl_ours, path_policy=policy, workspace=Path("/tmp"),
+                       cell_timeout=1.0, rule_names=None, context_config={})
+    for s in (ours, theirs, ctl_ours, ctl_theirs):
+        s.close()
+    assert pidfds() == before

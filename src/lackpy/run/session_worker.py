@@ -34,7 +34,9 @@ reads its instruction from its own socket. So:
 Messages, worker to parent, on a process's own socket: ``start`` (the root
 only), ``trace`` (each entry as it happens, start entries included),
 ``cell_end`` (this process's output for its cell is complete; the
-``cell_start`` for the next cell follows on the shared channel), ``done``.
+``cell_start`` for the next cell follows on the shared channel, or ``done`` on
+this socket), ``done``. The parent stops the cell's deadline at ``cell_end``;
+from there each host step has its own short bound.
 On the shared channel: ``{"event": "cell_start", "index", "pid", "from"}``.
 
 Messages, parent to worker: ``submit`` to the root; to a woken checkpoint,
@@ -93,10 +95,12 @@ def _failed(error: str) -> dict[str, Any]:
 class _Hook:
     """``context.config["checkpoint"]``: fork, and return a Resume in the checkpoint."""
 
-    def __init__(self, channel: Any, ctl: socket.socket, exit_at: int | None = None) -> None:
+    def __init__(self, channel: Any, ctl: socket.socket, exit_at: int | None = None,
+                 handoff_delay: float = 0.0) -> None:
         self.channel = channel  # zygote._Channel; ``.sock`` is this process's own socket
         self.ctl = ctl
         self.exit_at = exit_at  # test-only: exit after cell_end at this index
+        self.handoff_delay = handoff_delay  # test-only: sleep after cell_end, before the fork
 
     def __call__(self, index: int) -> Resume | None:
         if threading.active_count() != 1:
@@ -106,6 +110,8 @@ class _Hook:
         self.channel.send({"event": "cell_end", "index": index})
         if index == self.exit_at:
             os._exit(EXIT_ERROR)  # test-only (--test-ops): a death before cell_start
+        if self.handoff_delay:
+            time.sleep(self.handoff_delay)  # test-only (--test-ops): a slow handoff
         ours, theirs = socket.socketpair()
         me = os.getpid()
         pid = os.fork()
@@ -176,6 +182,12 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
     exit_at = config.pop("test_exit_in_hook", None)
     if not test_ops or type(exit_at) is not int:
         exit_at = None
+    # Test-only delays (--test-ops): between cell_end and the fork, and after
+    # the document's last cell, before done.
+    handoff_delay = config.pop("test_handoff_delay", 0.0) if test_ops else 0.0
+    done_delay = config.pop("test_done_delay", 0.0) if test_ops else 0.0
+    config.pop("test_handoff_delay", None)
+    config.pop("test_done_delay", None)
     if test_ops and (block or partial):
         # Ruling C: block inside the write, so the parent kills the cell there.
         # With ``test_partial_frame``, first send half a message on the cell's
@@ -191,7 +203,10 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
     if rules:
         config["extra_rules"] = rules
     config["trace_listener"] = channel.trace
-    config["checkpoint"] = _Hook(channel, ctl, exit_at)
+    config["checkpoint"] = _Hook(channel, ctl, exit_at, float(handoff_delay))
+    # The end of a cell's run when no hook follows it (the last cell, a re-run):
+    # what comes after is host code, not that cell's time (fix round 1).
+    config["cell_done"] = lambda: channel.send({"event": "cell_end", "index": None})
     document = msg["document"]
     ctx = ExecutionContext(base_dir=str(msg["workspace"]), params=msg.get("params") or {},
                            config=config)
@@ -200,6 +215,8 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
     if not validation.valid:
         return _failed(f"Validation failed: {'; '.join(validation.errors)}")
     result = asyncio.run(interp.execute(document, ctx))
+    if done_delay:
+        time.sleep(float(done_delay))
     meta = result.metadata
     variables = meta.get("variables", {})
     return {

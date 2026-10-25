@@ -57,6 +57,10 @@ class _BadMessage(Exception):
     pass
 
 
+class _HandoffStall(Exception):
+    """A session process sent cell_end and then did not reach its next cell in time."""
+
+
 def _traced_paths(entries: list[TraceEntry], tools: tuple[str, ...]) -> list[str]:
     """As ``service._traced_paths``: the paths of the successful ``tools`` calls, no repeats."""
     seen: dict[str, None] = {}
@@ -396,6 +400,7 @@ class _Proc:
         self.sock = sock
         self.reader = wire.Reader(sock)
         self.cell_ended = False  # it sent cell_end; its cell_start comes on the shared channel
+        self.wait_until = 0.0  # while cell_ended: the handoff bound, not the cell's deadline
         try:
             self.pidfd: int | None = os.pidfd_open(pid)
         except ProcessLookupError:
@@ -421,7 +426,20 @@ class SessionChannel:
     is built on the same methods.
 
     Not thread-safe: one caller at a time.
+
+    The cell limit runs from ``cell_start`` to the cell's ``cell_end``. From
+    ``cell_end`` to the next ``cell_start`` (the fork), and from the last
+    ``cell_end`` to ``done`` (bookkeeping, the render, the result), the process
+    runs host code only, so the cell is not charged for it: ``HANDOFF_SECONDS``
+    bounds each such step instead, and a step over it ends the run as a failure
+    of the session, never as a cell timeout.
     """
+
+    #: The bound on one host step between cells (fix round 1). Measured on
+    #: longbottom: the handoff (cell_end, socketpair, fork, cell_start) takes
+    #: about 5 ms, so 10 s is about 2000 times that. It also covers the render
+    #: and the result of a large document. A step over it is a stalled worker.
+    HANDOFF_SECONDS = 10.0
 
     def __init__(self, pid: int, sock: socket.socket, ctl: socket.socket, *,
                  path_policy: PathPolicy, workspace: Path, cell_timeout: float,
@@ -435,6 +453,10 @@ class SessionChannel:
                              "cell_timeout": cell_timeout}
         first = self._stack[0].reader.recv(SPAWN_WAIT)
         if not first or first.get("event") != "start" or first.get("pid") != pid:
+            root = self._stack[0]
+            if root.pidfd is not None:  # the caller closes the socket; the pidfd is ours
+                os.close(root.pidfd)
+                root.pidfd = None
             raise _SpawnError(f"the session process did not start (it sent {first!r})")
 
     @property
@@ -454,6 +476,10 @@ class SessionChannel:
     def events(self, deadline: float) -> Any:
         """The deepest process's messages until it ends; ``TimeoutError`` at ``deadline``.
 
+        ``deadline`` is the running cell's; between cells (after ``cell_end``)
+        each host step has ``HANDOFF_SECONDS`` instead, and a step over it raises
+        ``_HandoffStall``.
+
         A ``cell_start`` makes the new cell's process the deepest one. A process
         that ends yields ``{"event": "ended", "pid", "how"}`` and the iteration stops.
         """
@@ -466,56 +492,66 @@ class SessionChannel:
     def _next(self, deadline: float) -> dict[str, Any]:
         while True:
             cur = self._stack[-1]
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError
-            if cur.cell_ended:
-                # Wait for the next cell_start, and for the process too: one that
-                # dies between cell_end and cell_start (a failed fork, a failed
-                # send) closes its socket, and the checkpoints above still hold
-                # the shared channel, so it gives no EOF there. The channel wins
-                # when both are ready.
-                poller = select.poll()
-                poller.register(self._ctl.fileno(), select.POLLIN)
-                poller.register(cur.sock.fileno(), select.POLLIN)
-                ready = {fd for fd, _ in poller.poll(math.ceil(remaining * 1000))}
-                if not ready:
-                    raise TimeoutError
-                if self._ctl.fileno() not in ready:
-                    msg = cur.reader.recv(remaining)
-                    if msg is None or msg.get("event") == "exit":
-                        how = (msg or {}).get("how", "its socket closed")
-                        return {"event": "ended", "pid": cur.pid, "how": how}
-                    raise _BadMessage(f"{msg.get('event')!r} after cell_end")
-                self._ctl.settimeout(remaining)
-                data, fds, msg_flags, _ = socket.recv_fds(self._ctl, 65536, 4)
-                if not data:
-                    for f in fds:
-                        os.close(f)
-                    return {"event": "ended", "pid": cur.pid, "how": "the shared channel closed"}
-                msg = wire.decode(data.decode("ascii"))
-                if (isinstance(msg, dict) and msg.get("from") == cur.pid
-                        and (len(fds) != 1 or msg_flags & socket.MSG_CTRUNC)):
-                    for f in fds:
-                        os.close(f)
-                    raise _BadMessage("a cell_start came without its socket (is the service "
-                                      "out of file descriptors?)")
-                if (not isinstance(msg, dict) or msg.get("event") != "cell_start"
-                        or msg.get("from") != cur.pid or len(fds) != 1
-                        or type(msg.get("pid")) is not int or type(msg.get("index")) is not int):
-                    for f in fds:  # a packet from a process this session no longer follows
-                        os.close(f)
+            if not cur.cell_ended:
+                # A message sent before the deadline is still read at the deadline.
+                remaining = max(deadline - time.monotonic(), 0.001)
+                msg = cur.reader.recv(remaining)
+                if msg is None or msg.get("event") == "exit":
+                    how = (msg or {}).get("how", "its socket closed")
+                    return {"event": "ended", "pid": cur.pid, "how": how}
+                if msg.get("event") == "cell_end":
+                    cur.cell_ended = True
+                    cur.wait_until = time.monotonic() + self.HANDOFF_SECONDS
                     continue
-                cur.cell_ended = False
-                self._stack.append(_Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0])))
                 return msg
-            msg = cur.reader.recv(remaining)
-            if msg is None or msg.get("event") == "exit":
-                how = (msg or {}).get("how", "its socket closed")
-                return {"event": "ended", "pid": cur.pid, "how": how}
-            if msg.get("event") == "cell_end":
-                cur.cell_ended = True
+            # Between cells: the cell's deadline is stopped. Wait for the next
+            # cell_start on the shared channel, and for the process's own socket
+            # too: a process that dies here (a failed fork, a failed send)
+            # closes its socket, and the checkpoints above still hold the shared
+            # channel, so it gives no EOF there; the last cell's process sends
+            # done here. The channel wins when both are ready.
+            remaining = cur.wait_until - time.monotonic()
+            if remaining <= 0:
+                raise _HandoffStall
+            poller = select.poll()
+            poller.register(self._ctl.fileno(), select.POLLIN)
+            poller.register(cur.sock.fileno(), select.POLLIN)
+            ready = {fd for fd, _ in poller.poll(math.ceil(remaining * 1000))}
+            if not ready:
+                raise _HandoffStall
+            if self._ctl.fileno() not in ready:
+                msg = cur.reader.recv(max(cur.wait_until - time.monotonic(), 0.001))
+                if msg is None or msg.get("event") == "exit":
+                    how = (msg or {}).get("how", "its socket closed")
+                    return {"event": "ended", "pid": cur.pid, "how": how}
+                event = msg.get("event")
+                if event == "cell_end":  # another host step (cell_done, then a re-run's hook)
+                    cur.wait_until = time.monotonic() + self.HANDOFF_SECONDS
+                    continue
+                if event in ("done", "trace"):
+                    return msg
+                raise _BadMessage(f"{event!r} between cells")
+            self._ctl.settimeout(max(cur.wait_until - time.monotonic(), 0.001))
+            data, fds, msg_flags, _ = socket.recv_fds(self._ctl, 65536, 4)
+            if not data:
+                for f in fds:
+                    os.close(f)
+                return {"event": "ended", "pid": cur.pid, "how": "the shared channel closed"}
+            msg = wire.decode(data.decode("ascii"))
+            if (isinstance(msg, dict) and msg.get("from") == cur.pid
+                    and (len(fds) != 1 or msg_flags & socket.MSG_CTRUNC)):
+                for f in fds:
+                    os.close(f)
+                raise _BadMessage("a cell_start came without its socket (is the service "
+                                  "out of file descriptors?)")
+            if (not isinstance(msg, dict) or msg.get("event") != "cell_start"
+                    or msg.get("from") != cur.pid or len(fds) != 1
+                    or type(msg.get("pid")) is not int or type(msg.get("index")) is not int):
+                for f in fds:  # a packet from a process this session no longer follows
+                    os.close(f)
                 continue
+            cur.cell_ended = False
+            self._stack.append(_Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0])))
             return msg
 
     def submit(self, document: str, *, params: dict[str, Any] | None) -> ExecutionResult:
@@ -564,6 +600,10 @@ class SessionChannel:
                                         entries, error_phase="timeout")
                 deadline = time.monotonic() + self.cell_timeout
                 cell = []
+            except _HandoffStall:
+                self.close()
+                return self._failed(f"the session process did not reach its next cell within "
+                                    f"{self.HANDOFF_SECONDS:g} s and was stopped", entries)
             except (wire.WireError, _BadMessage, OSError, KeyError, TypeError) as e:
                 self.close()
                 return self._failed(f"the session process sent a message that is not valid ({e})",
