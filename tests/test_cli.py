@@ -153,3 +153,25 @@ class TestTypedParams:
         out = json.loads(capsys.readouterr().out)
         assert code == 0, out
         assert out["output"] == 10
+
+
+class TestTimeout:
+    """Plan 3 Task 5 (D8): `lackpy <file>` takes --timeout SECONDS."""
+
+    def test_file_timeout_stops_the_run(self, tmp_path, capsys):
+        prog = tmp_path / "prog.py"
+        prog.write_text('import re\nre.search(r"(a+)+$", "a" * 26 + "b")\n')
+        code = main([str(prog), "--workspace", str(tmp_path), "--timeout", "1"])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 1
+        assert out["error_phase"] == "timeout"
+        assert out["error"] == "timeout: the run took longer than 1 s and was stopped"
+
+    def test_file_timeout_over_the_cap_refuses(self, tmp_path, capsys):
+        prog = tmp_path / "prog.py"
+        prog.write_text("1\n")
+        code = main([str(prog), "--workspace", str(tmp_path), "--timeout", "500"])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 1
+        assert out["error_phase"] == "refused"
+        assert out["error"] == "timeout 500 s is over the profile's max_timeout (120 s, profile (none))"

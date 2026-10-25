@@ -22,3 +22,69 @@ def _isolated_path_policy(monkeypatch, tmp_path_factory):
 
     monkeypatch.setattr("lackpy.service.load_policy", isolated, raising=False)
     monkeypatch.setattr("lackpy.interpreters.python.load_policy", isolated, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _close_process_runners(monkeypatch):
+    """Stop every run zygote a test started (Plan 3 Task 5).
+
+    ``LackpyService`` makes a ``ProcessRunner`` on its first plain run, and most
+    tests never close their service. Each runner made during the test is
+    closed at its teardown, so no zygote outlives the test that started it.
+    """
+    from lackpy.run.process import ProcessRunner
+
+    made: list[ProcessRunner] = []
+    original = ProcessRunner.__init__
+
+    def tracking(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        made.append(self)
+
+    monkeypatch.setattr(ProcessRunner, "__init__", tracking)
+    yield
+    for runner in made:
+        runner.close()
+
+
+def _live_zygotes() -> list[int]:
+    """Live (not zombie) ``lackpy.run.zygote`` processes below this pytest process."""
+    import os
+    from pathlib import Path
+
+    parents: dict[int, int] = {}
+    states: dict[int, str] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            stat = Path(f"/proc/{entry}/stat").read_text()
+        except OSError:
+            continue
+        fields = stat[stat.rindex(")") + 2:].split()
+        states[int(entry)], parents[int(entry)] = fields[0], int(fields[1])
+    found: set[int] = set()
+    frontier = {os.getpid()}
+    while frontier:
+        frontier = {p for p, pp in parents.items() if pp in frontier and p not in found}
+        found |= frontier
+    live = []
+    for pid in sorted(found):
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            continue
+        if b"lackpy.run.zygote" in cmdline and states.get(pid) != "Z":
+            live.append(pid)
+    return live
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_zygote_left():
+    """Fail the session when a run zygote is still alive at its end (Plan 3 Task 5)."""
+    yield
+    import sys
+    if sys.platform != "linux":
+        return
+    live = _live_zygotes()
+    assert not live, f"run zygotes left alive at the end of the session: {live}"

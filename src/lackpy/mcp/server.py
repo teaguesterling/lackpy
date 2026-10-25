@@ -40,9 +40,14 @@ _READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 
 
 def set_workspace(workspace: Path) -> None:
-    """Set the workspace directory and reset the service singleton."""
+    """Set the workspace directory and reset the service singleton.
+
+    The old service is closed, so its run zygote does not outlive it.
+    """
     global _workspace, _service
     _workspace = workspace
+    if _service is not None:
+        _service.close()
     _service = None
 
 
@@ -88,20 +93,26 @@ def _json_safe(value: Any) -> Any:
 @mcp.tool(annotations=_EXECUTES)
 async def delegate(intent: str, profile: str | None = None,
                    params: dict[str, Any] | None = None,
-                   rules: list[str] | None = None) -> dict:
+                   rules: list[str] | None = None,
+                   timeout: float | None = None) -> dict:
     """Generate a program from a natural-language intent and run it. Use for a
     self-contained, multi-step mechanical task. The program is plain Python that
     the lackpy validator checks; it reads and writes files only through
     pathlib.Path, under the workspace's permission rules. `profile` names a
     configured `[profiles.<name>]` entry (model, mode, rules); omit it for the
-    default. Returns a lean result (success, output, stdout, program, the traced calls); call
-    `run_program` with the program if you need the full step trace.
+    default. `timeout` is the run's limit in seconds (default: the sandbox
+    timeout, 120 s), up to the profile's max_timeout. Returns a lean result
+    (success, output, stdout, program, the traced calls, error_phase:
+    "timeout" when the run was stopped at the limit, "refused" when it was
+    refused); call `run_program` with the program if you need the full step trace.
     """
-    r = await _get_service().delegate(intent, profile=profile, params=params, rules=rules)
+    r = await _get_service().delegate(intent, profile=profile, params=params, rules=rules,
+                                      timeout=timeout)
     return _json_safe({
         "success": r.get("success"),
         "output": r.get("output"),
         "error": r.get("error"),
+        "error_phase": r.get("error_phase"),
         "stdout": r.get("stdout"),
         "program": r.get("program"),
         "generation_tier": r.get("generation_tier"),
@@ -123,7 +134,8 @@ async def generate(intent: str, profile: str | None = None,
 @mcp.tool(annotations=_EXECUTES)
 async def run_program(program: str, profile: str | None = None,
                       params: dict[str, Any] | None = None,
-                      rules: list[str] | None = None) -> dict:
+                      rules: list[str] | None = None,
+                      timeout: float | None = None) -> dict:
     """Validate and run a program you already have (skips generation). The program
     is plain Python that the lackpy validator checks; it reads and writes files
     only through pathlib.Path, under the workspace's permission rules. With a
@@ -132,12 +144,18 @@ async def run_program(program: str, profile: str | None = None,
     `output` is the value of the last code cell's trailing expression, and
     `params` replace the defaults of the document's `params = {...}` literal.
     `rules` names extra checks: no_loops, no_nested_calls, max_depth(N),
-    max_calls(N); on the literate axis they apply to every cell. Bytes, nan and
-    infinity come back as their Python repr text."""
-    result = await _get_service().run_program(program, profile=profile, params=params, rules=rules)
+    max_calls(N); on the literate axis they apply to every cell. `timeout` is
+    the run's limit in seconds (default: the sandbox timeout, 120 s); a value
+    over the profile's max_timeout is refused before the run. On the literate
+    axis the limit is checked against the cap but not yet enforced.
+    `error_phase` is "timeout" when the run was stopped at the limit, "refused"
+    when it was refused, else null. Bytes, nan and infinity come back as their
+    Python repr text."""
+    result = await _get_service().run_program(program, profile=profile, params=params,
+                                              rules=rules, timeout=timeout)
     return _json_safe({
         "success": result.success, "output": result.output, "error": result.error,
-        "stdout": result.stdout,
+        "error_phase": result.error_phase, "stdout": result.stdout,
         "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
                    "success": e.success, "error": e.error} for e in result.trace.entries]})
 

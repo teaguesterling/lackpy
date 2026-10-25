@@ -229,7 +229,12 @@ class ProcessRunner:
         ``trace.files_read`` and ``files_modified`` are filled from the entries
         (as the service does), so they survive a kill. Stdout past ``STDOUT_CAP``
         characters is cut and marked.
+
+        Raises ``ValueError`` when ``rules`` holds anything but names: a rule
+        callable cannot cross to the worker, so the caller validates with it.
         """
+        if rules and any(type(r) is not str for r in rules):
+            raise ValueError("the process runner takes rule names, not callables")
         ours, theirs = socket.socketpair()
         with ours:
             try:

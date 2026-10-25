@@ -65,7 +65,8 @@ def _render(args) -> int:
         except ProfileError as e:
             print(f"lackpyctl render --execute: {e}", file=sys.stderr)
             return 1
-        result = asyncio.run(service.run_program(document, profile=profile))
+        result = asyncio.run(service.run_program(document, profile=profile,
+                                                 timeout=args.timeout))
         if not result.success:
             # Final review M2: show the rendered document (the cells that ran),
             # then the error; no -o file is written for a failed run.
@@ -162,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         default=None,
         help="With --execute: the configured profile to run under (default: [profile] default)",
+    )
+    render_p.add_argument(
+        "--timeout", type=float, default=None, metavar="SECONDS",
+        help="With --execute: the run's time limit in seconds, up to the profile's "
+             "max_timeout (checked against the cap; a literate run is not yet stopped at it)",
     )
     render_p.add_argument(
         "--base-dir",

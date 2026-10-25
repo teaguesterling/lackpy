@@ -186,3 +186,17 @@ def test_render_execute_failure_still_shows_the_rendered_document(tmp_path, tmp_
     captured = capsys.readouterr()
     assert "X=42" in captured.out
     assert "ZeroDivisionError" in captured.err
+
+
+def test_parser_render_timeout():
+    args = build_parser().parse_args(["render", "doc.md", "--execute", "--timeout", "2.5"])
+    assert args.timeout == 2.5
+
+
+def test_render_execute_timeout_over_the_cap_refuses(tmp_path, tmp_policy_home, capsys):
+    # Plan 3 Task 5 (D8): the cap is checked for a literate run too.
+    from lackpy.ctl import main
+    doc = _doc(tmp_path, "```lackpy\nx = 1\n```\n")
+    assert main(["render", "--execute", str(doc), "--timeout", "500"]) == 1
+    assert ("timeout 500 s is over the profile's max_timeout (120 s, profile (unnamed))"
+            in capsys.readouterr().err)

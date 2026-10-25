@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import math
 import re
 import time
 from pathlib import Path
@@ -26,7 +26,8 @@ from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.paths import PathPolicy, load_policy, read_only_policy
-from .run.runner import RestrictedRunner, _binds_params, _is_data
+from .run.process import ProcessRunner
+from .run.runner import _binds_params, _is_data
 from .run.refusal import LackpyRefusal
 from .run.trace import Trace, error_text
 
@@ -128,6 +129,30 @@ def _read_only(policy: Any) -> bool:
     if not isinstance(value, bool):
         raise ProfileError(f"profile policy.read_only must be true or false, not {value!r}")
     return value
+
+
+def _positive_seconds(value: Any) -> bool:
+    """``value`` is an int or float (not a bool), finite and above 0."""
+    return type(value) in (int, float) and math.isfinite(value) and value > 0
+
+
+def _check_max_timeout(value: Any) -> None:
+    """Fail closed on a profile ``max_timeout`` that is not a number of seconds
+    (as ``_read_only`` does for ``policy.read_only``): a TOML string or bool
+    would otherwise reach the cap comparison."""
+    if value is not None and not _positive_seconds(value):
+        raise ProfileError(f"profile max_timeout must be a positive number of seconds, "
+                           f"not {value!r}")
+
+
+def _rule_names(rules: list | None) -> list[str] | None:
+    """The rule names the worker resolves again (Plan 3 Task 5).
+
+    A caller's rule callable cannot cross to the worker: the parent validates
+    with it, on the same source, before the run, and the worker gets the names.
+    """
+    names = [r for r in rules or [] if isinstance(r, str)]
+    return names or None
 
 
 def _check_mode(mode: str | None) -> None:
@@ -237,10 +262,11 @@ class LackpyService:
         # Optional host/harness resolver for virtual tools: name -> callable | None.
         self._harness_resolver = harness_resolver
         self._path_policy_loader = path_policy_loader
-        self._runner = RestrictedRunner()
-        # Single-flight execution: serializes the process-global os.chdir in
-        # _execute so concurrent runs can't race on cwd.
-        self._exec_lock = asyncio.Lock()
+        # Plain programs run in a forked worker under a time limit (Plan 3 D9).
+        # Made on the first run, so a service that never runs starts no zygote.
+        # The worker changes into the workspace itself, so the service never
+        # calls os.chdir and concurrent runs need no lock.
+        self._process_runner: ProcessRunner | None = None
         self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
         # The toolbox is internal machinery since the kit was removed from the
@@ -353,15 +379,20 @@ class LackpyService:
         return out
 
     def close(self) -> None:
-        """Release background resources (the MCP client thread). Idempotent.
+        """Release background resources (the MCP client thread, the run zygote). Idempotent.
 
-        Best-effort: the MCP client runs on a daemon thread, so a one-shot
-        process (e.g. a CLI command) exits cleanly without calling this. Call it
-        for prompt cleanup in a long-lived host that creates many services.
+        Best-effort: the MCP client runs on a daemon thread, and the zygote
+        exits when the service's end of its control socket closes, so a
+        one-shot process (e.g. a CLI command) exits cleanly without calling
+        this. Call it for prompt cleanup in a long-lived host that creates
+        many services.
         """
         if self._mcp_client is not None:
             self._mcp_client.shutdown()
             self._mcp_client = None
+        if self._process_runner is not None:
+            self._process_runner.close()
+            self._process_runner = None
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"
@@ -494,12 +525,44 @@ class LackpyService:
         if prof.tools or prof.extra_tools:
             raise ProfileError(KIT_REMOVED)
         _read_only(prof.policy)  # a malformed read_only fails here, before any run
+        _check_max_timeout(prof.max_timeout)
         _check_mode(prof.mode)
         return ResolvedProfile(
             tools=_no_tools(), model=prof.model, mode=prof.mode, order=prof.order,
             temperature=prof.temperature, rules=prof.rules, language=prof.language,
             execution=prof.execution, sandbox=prof.sandbox, policy=prof.policy,
+            max_timeout=prof.max_timeout,
         )
+
+    def _profile_name(self, profile: Any) -> str:
+        """The profile's name for a message: ``(none)`` with no profile, and
+        ``(unnamed)`` for a ``Profile`` passed as an object."""
+        if isinstance(profile, str):
+            return profile
+        if profile is None:
+            name = self._config.profile_default
+            return name if name in self._config.profiles else "(none)"
+        return "(unnamed)"
+
+    def _check_timeout(self, timeout: Any, rp: ResolvedProfile,
+                       profile: Any) -> tuple[float, str | None]:
+        """The run's time limit in seconds, and the refusal text when it is refused (D8).
+
+        ``None`` is ``config.sandbox_timeout``. A value that is not a finite
+        number above 0 is refused, and so is a value over the cap: the
+        profile's ``max_timeout``, else ``config.sandbox_timeout``.
+        """
+        if timeout is None:
+            seconds = self._config.sandbox_timeout
+        elif not _positive_seconds(timeout):
+            return 0.0, f"timeout must be a positive number of seconds, not {timeout!r}"
+        else:
+            seconds = timeout
+        cap = rp.max_timeout if rp.max_timeout is not None else self._config.sandbox_timeout
+        if seconds > cap:
+            return seconds, (f"timeout {seconds:g} s is over the profile's max_timeout "
+                             f"({cap:g} s, profile {self._profile_name(profile)})")
+        return seconds, None
 
     def _configured_profile(self, name: str) -> Profile:
         try:
@@ -674,17 +737,33 @@ class LackpyService:
             interpreter=interpreter, kibitzer_session=self._kibitzer,
         )
 
-    async def _execute(self, program: str, param_values: dict[str, Any],
-                       *, read_only: bool = False) -> ExecutionResult:
-        """Run an (already validated) program through the restricted runner.
+    async def _execute(self, program: str, param_values: dict[str, Any], *,
+                       timeout: float, read_only: bool = False,
+                       rules: list[str] | None = None) -> ExecutionResult:
+        """Run an (already validated) program in a worker, under ``timeout`` seconds.
 
-        The single execution path shared by ``run_program`` and ``delegate``.
-        Held under ``_exec_lock`` so the process-global ``os.chdir`` is
-        single-flight. No tool callables are bound (stepy100 Task 7), so no
-        run needs the event loop and the runner runs inline.
+        The single execution path shared by ``run_program`` and ``delegate``
+        (Plan 3 D9). The PathPolicy is loaded here, in the service, on every
+        run (a settings change takes effect on the next run), and crosses to
+        the worker as data. A malformed settings file gives a failed result
+        whose error names the file; it never raises. The worker changes into
+        the workspace and validates again, with the ``rules`` names.
+        ``ProcessRunner.run`` blocks, so it runs in a thread; the zygote is a
+        separate process, so the service's threads do not reach it.
         """
-        async with self._exec_lock:
-            return self._run_sync(program, param_values, read_only=read_only)
+        try:
+            policy = self._load_path_policy(read_only=read_only)
+        except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
+            return ExecutionResult(success=False, error=_policy_error(e))
+        if self._process_runner is None:  # no await since the check: one runner
+            self._process_runner = ProcessRunner(memory_mb=self._config.sandbox_memory_mb)
+        runner = self._process_runner
+        try:
+            return await asyncio.to_thread(
+                runner.run, program, params=param_values, path_policy=policy,
+                workspace=self._workspace.resolve(), timeout=timeout, rules=rules)
+        except RuntimeError as e:  # no os.fork: loud, and never an in-process run
+            return ExecutionResult(success=False, error=str(e))
 
     def _load_path_policy(self, *, read_only: bool) -> PathPolicy:
         """The workspace ``PathPolicy`` through the service's policy seam, loaded
@@ -694,28 +773,10 @@ class LackpyService:
         policy = loader(self._workspace)
         return read_only_policy(policy) if read_only else policy
 
-    def _run_sync(self, program: str, param_values: dict[str, Any],
-                  *, read_only: bool = False) -> ExecutionResult:
-        """Load the PathPolicy, switch into the workspace, run, restore cwd.
-
-        The policy is loaded on every run, so a settings change takes effect on
-        the next run. A malformed settings file gives a failed result whose
-        error names the file; it never raises.
-        """
-        try:
-            policy = self._load_path_policy(read_only=read_only)
-        except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
-            return ExecutionResult(success=False, error=_policy_error(e))
-        prev_cwd = os.getcwd()
-        try:
-            os.chdir(self._workspace)
-            return self._runner.run(program, params=param_values, path_policy=policy)
-        finally:
-            os.chdir(prev_cwd)
-
     async def _execute_program(
         self, program: str, rp: ResolvedProfile, param_values: dict[str, Any],
-        *, rules: list | None = None,
+        *, timeout: float | None = None, rules: list | None = None,
+        rule_names: list[str] | None = None,
     ) -> ExecutionResult:
         """Route a program to the execution model named by the profile's ``execution``
         axis -- the shared seam for ``run_program`` and ``delegate``.
@@ -727,8 +788,11 @@ class LackpyService:
         LiterateInterpreter: every cell is validated against the program so far
         and runs in one CellSession under the workspace PathPolicy (literate
         stepy D2, D9). Any other axis is restricted Python -- always validated
-        with no allowed names (parked item 1: there is no skip), then run
-        through the restricted runner. A profile whose ``policy.read_only`` is
+        with no allowed names (parked item 1: there is no skip), with the
+        caller's ``rules`` (callables included), then run in a worker under
+        ``timeout`` seconds (Plan 3 D9), which validates again with
+        ``rule_names``. The literate axis still runs in-process, with no time
+        limit, until Plan 3 Task 6. A profile whose ``policy.read_only`` is
         true runs under ``read_only_policy`` on either axis.
         """
         read_only = _read_only(rp.policy)
@@ -739,7 +803,10 @@ class LackpyService:
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
             return ExecutionResult(success=False, error=validation_error(validation))
-        return await self._execute(program, param_values, read_only=read_only)
+        if timeout is None:  # an internal caller: the default limit, uncapped by a profile
+            timeout = self._config.sandbox_timeout
+        return await self._execute(program, param_values, timeout=timeout,
+                                   read_only=read_only, rules=rule_names)
 
     async def _execute_literate(
         self, program: str, param_values: dict[str, Any], *, read_only: bool = False,
@@ -750,7 +817,7 @@ class LackpyService:
         The ``PathPolicy`` comes through the same seam as ``run_program``'s
         (``_load_path_policy``); a load failure is a failed result, never a
         raise. The document's ``Path`` resolves against the workspace, so no
-        ``os.chdir`` is made and the run does not take ``_exec_lock`` (D8).
+        ``os.chdir`` is made (D8).
         No toolset is passed: there is no kit grade, so no static ceiling; the
         policy is the boundary (a read-only profile adds the write deny).
 
@@ -909,7 +976,8 @@ class LackpyService:
 
     async def run_program(self, program: str, profile: Profile | str | None = None,
                           params: dict[str, Any] | None = None, sandbox: Any = None,
-                          rules: list | None = None) -> ExecutionResult:
+                          rules: list | None = None,
+                          timeout: float | None = None) -> ExecutionResult:
         """Validate and execute a lackpy program.
 
         The program runs in the runtime namespace (builtins, approved modules,
@@ -924,19 +992,31 @@ class LackpyService:
             params: Values for the program's ``params`` literal.
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules to apply before execution.
+            timeout: The run's time limit in seconds (Plan 3 D8); None is
+                ``config.sandbox_timeout``. Over the profile's ``max_timeout``
+                (default ``config.sandbox_timeout``), or not a number above 0,
+                the run is refused before validation (``error_phase="refused"``).
+                At the limit the worker is killed (``error_phase="timeout"``).
+                A literate document is only checked against the cap: it runs
+                in-process, with no limit, until Plan 3 Task 6.
 
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
         try:
             rp = self._resolve_profile(profile)
+            names = _rule_names(rules)
             rules = resolve_rules(rules)
         except (ProfileError, ValueError) as e:
             return ExecutionResult(success=False, error=str(e))
+        seconds, refusal = self._check_timeout(timeout, rp, profile)
+        if refusal is not None:
+            return ExecutionResult(success=False, error=refusal, error_phase="refused")
         param_values, _ = self._resolve_params(params)
         # The execution axis (one-shot restricted-Python vs literate) decides both
         # validation and execution; the seam keeps them paired (see _execute_program).
-        return await self._execute_program(program, rp, param_values, rules=rules)
+        return await self._execute_program(program, rp, param_values, timeout=seconds,
+                                           rules=rules, rule_names=names)
 
     async def delegate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
@@ -945,7 +1025,8 @@ class LackpyService:
                        mode: str | None = None,
                        interpreter: Any = None,
                        model: str | None = None,
-                       temperature: float | None = None) -> dict[str, Any]:
+                       temperature: float | None = None,
+                       timeout: float | None = None) -> dict[str, Any]:
         """Generate and execute a program from a natural language intent in one step.
 
         Combines generate and run_program: generates a program from intent, then
@@ -961,11 +1042,14 @@ class LackpyService:
             interpreter: An interpreter instance whose ``system_prompt_hint()``
                 is forwarded to the prompt builder. When omitted, the default
                 lackpy prompt is used (pre-prompt, style guide, skeleton).
+            timeout: The run's time limit in seconds, as ``run_program``'s. A
+                refused value is refused before generation. A timed-out run is
+                returned as it is: the caller decides on a retry (D7).
 
         Returns:
             A dict with keys: success, program, generation_tier,
             generation_time_ms, execution_time_ms, total_time_ms, trace,
-            files_read, files_modified, output, error.
+            files_read, files_modified, output, error, error_phase.
 
         Raises:
             RuntimeError: If all inference providers fail to produce a valid program.
@@ -975,10 +1059,15 @@ class LackpyService:
             rp = self._resolve_profile(profile)
             if not _program_override:  # only generation runs the strategy
                 _check_mode(mode or rp.mode or self._config.inference_mode)
+            names = _rule_names(rules)
             rules = resolve_rules(rules)
         except (ProfileError, ValueError) as e:
             return {"success": False, "program": _program_override, "output": None,
-                    "stdout": "", "error": str(e), "trace": []}
+                    "stdout": "", "error": str(e), "error_phase": None, "trace": []}
+        seconds, refusal = self._check_timeout(timeout, rp, profile)
+        if refusal is not None:  # before generation: no model call for a refused run
+            return {"success": False, "program": _program_override, "output": None,
+                    "stdout": "", "error": refusal, "error_phase": "refused", "trace": []}
         # The model actually used (per-call override or the profile's, else configured) —
         # the same value `generate` uses, so kibitzer logs the real model, not a reflection.
         effective_model = (model if model is not None else rp.model) or self._llm_model
@@ -1019,6 +1108,7 @@ class LackpyService:
                         "program": gen_result.program,
                         "generation_tier": gen_result.provider_name,
                         "error": "Kibitzer mode policy violation: " + "; ".join(v.reason for v in violations),
+                        "error_phase": None,
                         # The keys every other delegate result has (review M4).
                         "output": None, "stdout": "", "trace": [],
                         "correction_strategy": gen_result.correction_strategy,
@@ -1034,7 +1124,7 @@ class LackpyService:
         # literate path validates internally by parsing.
         # Review M5: the caller's rules are re-applied here too.
         exec_result = await self._execute_program(gen_result.program, rp, param_values,
-                                                  rules=rules)
+                                                  timeout=seconds, rules=rules, rule_names=names)
 
         # Kibitzer: get coaching suggestions after execution
         if self._kibitzer:
@@ -1088,6 +1178,7 @@ class LackpyService:
             "output": exec_result.effective_output,
             "stdout": exec_result.stdout,
             "error": exec_result.error,
+            "error_phase": exec_result.error_phase,
             "correction_strategy": gen_result.correction_strategy,
             "correction_attempts": gen_result.correction_attempts,
         }
@@ -1110,8 +1201,9 @@ class LackpyService:
         self, path: Path,
         params: dict[str, Any] | None = None,
         sandbox: Any = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Load and run a Lackey file.
+        """Load and run a Lackey file (``timeout`` as ``delegate``'s).
 
         The run body reads each param as a bare name (``self.path`` becomes
         ``path``), and params bind no bare names since stepy100 Task 5. So the
@@ -1159,6 +1251,7 @@ class LackpyService:
             intent="",
             params=passed or None,
             _program_override=prefix + run_body,
+            timeout=timeout,
         )
 
     async def create_lackey(

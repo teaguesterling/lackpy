@@ -33,6 +33,9 @@ _ENVELOPE_ERRORS = (RuntimeError, FileNotFoundError, UnknownToolError, NotImplem
                     ProfileError)
 
 
+_TIMEOUT_HELP = ("The run's time limit in seconds (default: [sandbox] timeout_seconds, 120); "
+                 "over the profile's max_timeout it is refused")
+
 _TOOLS_REMOVED = "--tools was removed with the tool kits in lackpy stepy100; use pathlib.Path"
 
 
@@ -104,21 +107,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--param", action="append", default=None, help="Parameter: key=value (repeatable)")
     parser.add_argument("--validate", action="store_true", default=False, help="Validate without running")
     parser.add_argument("--mode", default=None, help="Inference mode: 1-shot, spm (default: from config or legacy)")
+    parser.add_argument("--timeout", type=float, default=None, metavar="SECONDS",
+                        help=_TIMEOUT_HELP)
 
     return parser
 
 
 async def _run_file(svc: Any, path: Path, profile: str | None, params: dict[str, str],
-                    sandbox: Any) -> dict[str, Any]:
+                    sandbox: Any, timeout: float | None = None) -> dict[str, Any]:
     """Run a file — a Lackey file, or a plain program."""
     content = path.read_text()
     if "Lackey" in content and "def run" in content:
         defaults = {n: spec.get("default") for n, spec in svc.parse_lackey(path).params.items()}
-        return await svc.run_lackey(path, params=_coerce_params(params, defaults), sandbox=sandbox)
+        return await svc.run_lackey(path, params=_coerce_params(params, defaults), sandbox=sandbox,
+                                    timeout=timeout)
     exec_result = await svc.run_program(content, profile=profile,
-                                        params=_coerce_params(params, _program_defaults(content)))
+                                        params=_coerce_params(params, _program_defaults(content)),
+                                        timeout=timeout)
     return {"success": exec_result.success, "output": exec_result.effective_output,
-            "stdout": exec_result.stdout, "error": exec_result.error}
+            "stdout": exec_result.stdout, "error": exec_result.error,
+            "error_phase": exec_result.error_phase}
 
 
 def _file_entrypoint(raw_args: list[str]) -> int:
@@ -130,6 +138,7 @@ def _file_entrypoint(raw_args: list[str]) -> int:
     ep.add_argument("--validate", action="store_true", default=False)
     ep.add_argument("--workspace", type=Path, default=None)
     ep.add_argument("--sandbox", default=None)
+    ep.add_argument("--timeout", type=float, default=None)
     args, _ = ep.parse_known_args(raw_args)
     if any(a == "--tools" or a.startswith("--tools=") for a in raw_args):
         ep.error(_TOOLS_REMOVED)
@@ -153,7 +162,7 @@ def _file_entrypoint(raw_args: list[str]) -> int:
         print(json.dumps(out, indent=2))
         return 0 if result.valid else 1
 
-    result_dict = asyncio.run(_run_file(svc, path, profile, params, args.sandbox))
+    result_dict = asyncio.run(_run_file(svc, path, profile, params, args.sandbox, args.timeout))
     print(json.dumps(result_dict, indent=2, default=str))
     return 0 if result_dict.get("success") else 1
 
@@ -230,7 +239,8 @@ def main(argv: list[str] | None = None) -> int:
 
         # Default: delegate (generate + run)
         try:
-            result = asyncio.run(svc.delegate(args.intent, profile=profile, mode=mode))
+            result = asyncio.run(svc.delegate(args.intent, profile=profile, mode=mode,
+                                              timeout=args.timeout))
         except _ENVELOPE_ERRORS as e:
             # A caller parses one stream. Emitting the success envelope on stdout
             # and this one on stderr means anybody reading stdout records a failed
@@ -248,9 +258,11 @@ def main(argv: list[str] | None = None) -> int:
         if program.strip():
             from .service import LackpyService
             svc = LackpyService(workspace=workspace)
-            exec_result = asyncio.run(svc.run_program(program, profile=args.profile))
+            exec_result = asyncio.run(svc.run_program(program, profile=args.profile,
+                                                      timeout=args.timeout))
             out_dict = {"success": exec_result.success, "output": exec_result.effective_output,
-                        "stdout": exec_result.stdout, "error": exec_result.error}
+                        "stdout": exec_result.stdout, "error": exec_result.error,
+                        "error_phase": exec_result.error_phase}
             print(json.dumps(out_dict, indent=2, default=str))
             return 0 if exec_result.success else 1
 

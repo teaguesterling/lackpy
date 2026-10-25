@@ -49,7 +49,7 @@ DEFAULT_EXECUTION = "one-shot"
 # Recognized [profiles.<name>] keys — anything else is rejected so typos surface early.
 _PROFILE_KEYS = frozenset({
     "tools", "extra_tools", "model", "mode", "order", "temperature",
-    "rules", "language", "execution", "sandbox", "policy",
+    "rules", "language", "execution", "sandbox", "policy", "max_timeout",
 })
 
 
@@ -76,6 +76,9 @@ class Profile:
     execution: str = DEFAULT_EXECUTION
     sandbox: str | None = None
     policy: dict[str, Any] | None = None
+    # The cap on a run's ``timeout`` in seconds (Plan 3 spec D8); None is
+    # ``config.sandbox_timeout``.
+    max_timeout: float | None = None
 
     @classmethod
     def from_config(cls, data: dict[str, Any]) -> "Profile":
@@ -107,6 +110,9 @@ class ResolvedProfile:
     execution: str = DEFAULT_EXECUTION
     sandbox: str | None = None
     policy: dict[str, Any] | None = None
+    # The cap on a run's ``timeout`` in seconds (Plan 3 spec D8); None is
+    # ``config.sandbox_timeout``.
+    max_timeout: float | None = None
 
     # A profile's grade/description ARE its tools' — never independently set (invariant 3).
     @property
@@ -165,6 +171,7 @@ def resolve_profile(
         execution=prof.execution,
         sandbox=_or_default(prof.sandbox, "sandbox"),
         policy=prof.policy,
+        max_timeout=prof.max_timeout,
     )
 
 

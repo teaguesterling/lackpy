@@ -168,3 +168,26 @@ def test_validate_follows_the_literate_axis(workspace):
     assert bad["valid"] is False
     assert any("document cell 2" in v["message"] for v in bad["violations"]), bad
     assert [v["message"] for v in bad["violations"]] == bad["errors"]
+
+
+# --- Plan 3 Task 5: the timeout parameter (D8) through FastMCP ---
+
+def test_mcp_timeout_param(workspace):
+    """Gate 1 and gate 7 over MCP: run_program takes `timeout`; both tools return error_phase."""
+    import time
+    regex = 'import re\nre.search(r"(a+)+$", "a" * 26 + "b")'
+    start = time.monotonic()
+    out = _call("run_program", {"program": regex, "timeout": 1})
+    assert time.monotonic() - start < 1 + 1.5
+    assert out["success"] is False
+    assert out["error_phase"] == "timeout"
+    assert out["error"] == "timeout: the run took longer than 1 s and was stopped"
+    ok = _call("run_program", {"program": "1"})
+    assert ok["success"] is True and ok["error_phase"] is None
+    refused = _call("run_program", {"program": "1", "timeout": 1000})
+    assert refused["error_phase"] == "refused"
+    assert refused["error"] == ("timeout 1000 s is over the profile's max_timeout "
+                                "(120 s, profile (none))")
+    import inspect
+    assert "timeout" in inspect.signature(server.delegate).parameters
+    assert "timeout" in inspect.signature(server.run_program).parameters
