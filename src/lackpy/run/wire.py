@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import socket
+import time
 from typing import Any
 
 _DATA_SCALARS = (type(None), bool, int, float, str)
@@ -100,7 +101,7 @@ class Reader:
     def recv(self, timeout: float | None) -> dict[str, Any] | None:
         """The next message; None at EOF; ``TimeoutError`` at ``timeout`` seconds."""
         old = self._sock.gettimeout()
-        self._sock.settimeout(timeout)
+        deadline = None if timeout is None else time.monotonic() + timeout
         try:
             while True:
                 end = self._buf.find(b"\n")
@@ -115,6 +116,13 @@ class Reader:
                     return msg
                 if len(self._buf) > self._max:
                     raise WireError(f"line longer than {self._max} bytes")
+                if deadline is None:
+                    self._sock.settimeout(None)
+                else:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("timed out waiting for a message")
+                    self._sock.settimeout(remaining)
                 chunk = self._sock.recv(min(65536, self._max + 1 - len(self._buf)))
                 if not chunk:
                     if self._buf:

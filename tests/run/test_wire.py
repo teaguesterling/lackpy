@@ -28,8 +28,16 @@ def test_round_trip(value):
 def test_round_trip_keeps_nested_types():
     back = decode(encode(_NESTED))
     assert type(back["a"][0]) is tuple and type(back["a"][0][1]) is set
-    assert type(back["a"][2][1]) is frozenset or isinstance(back["a"][2], dict)
-    assert type(back["t"]) is tuple
+    assert type(back["a"][1]) is bytes
+    assert type(back["a"][2]) is dict and type(back["a"][2][1]) is frozenset
+    assert type(back["t"]) is tuple and type(back["t"][0]) is dict
+
+
+def test_nested_frozenset_is_not_decoded_as_a_set():
+    back = decode(encode([frozenset({"x"}), {"k": (b"b", {1})}]))
+    assert type(back[0]) is frozenset
+    assert type(back[1]["k"]) is tuple and type(back[1]["k"][0]) is bytes
+    assert type(back[1]["k"][1]) is set
 
 
 def test_bool_stays_bool_and_int_stays_int():
@@ -74,6 +82,34 @@ def test_reader_eof_timeout_and_cap():
         a.close()
         assert reader.recv(1) is None
     finally:
+        a.close()
+        b.close()
+
+
+def test_reader_timeout_is_one_deadline_not_per_recv():
+    import threading
+    import time
+    a, b = socket.socketpair()
+    stop = threading.Event()
+
+    def dribble():
+        while not stop.is_set():
+            try:
+                a.sendall(b"x")
+            except OSError:
+                return
+            time.sleep(0.05)
+
+    t = threading.Thread(target=dribble, daemon=True)
+    t.start()
+    try:
+        start = time.monotonic()
+        with pytest.raises(TimeoutError):
+            Reader(b).recv(timeout=0.3)
+        assert time.monotonic() - start < 0.5
+    finally:
+        stop.set()
+        t.join()
         a.close()
         b.close()
 

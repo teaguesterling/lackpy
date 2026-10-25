@@ -90,8 +90,7 @@ def record_call(trace: Trace, tool: str,
             duration_ms=(time.perf_counter() - start) * 1000,
             success=False, error=error_text(e),
         ))
-        if trace.listener:
-            trace.listener(trace.entries[-1])
+        _notify(trace)
         if on_done:
             on_done(False)
         raise
@@ -101,11 +100,21 @@ def record_call(trace: Trace, tool: str,
         duration_ms=(time.perf_counter() - start) * 1000,
         success=True, error=None,
     ))
-    if trace.listener:
-        trace.listener(trace.entries[-1])
+    _notify(trace)
     if on_done:
         on_done(True)
     return result
+
+
+def _notify(trace: Trace) -> None:
+    """Call the listener with the newest entry. Its failure never changes the run:
+    the entry stays, ``on_done`` still runs, and the program's own exception propagates."""
+    if trace.listener is None:
+        return
+    try:
+        trace.listener(trace.entries[-1])
+    except Exception:
+        pass
 
 
 def error_text(e: BaseException) -> str:
