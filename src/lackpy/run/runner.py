@@ -75,7 +75,8 @@ class RestrictedRunner:
         except RUNTIME_FAILURES as e:
             # Exception covers RecursionError and MemoryError (design §8, gate 4).
             return ExecutionResult(success=False, error=error_text(e),
-                                   trace=trace, stdout="".join(captured))
+                                   trace=trace, stdout="".join(captured),
+                                   error_phase="refused" if isinstance(e, LackpyRefusal) else None)
 
     def _run(self, program: str, params: dict[str, Any],
              program_file: str | None, path_policy: Any,

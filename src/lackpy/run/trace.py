@@ -33,6 +33,17 @@ class TraceEntry:
     success: bool
     error: str | None
 
+    def to_data(self) -> dict[str, Any]:
+        """The entry as a plain dict, for the wire."""
+        return {"step": self.step, "tool": self.tool, "args": self.args,
+                "result": self.result, "duration_ms": self.duration_ms,
+                "success": self.success, "error": self.error}
+
+    @classmethod
+    def from_data(cls, d: dict[str, Any]) -> "TraceEntry":
+        return cls(step=d["step"], tool=d["tool"], args=d["args"], result=d["result"],
+                   duration_ms=d["duration_ms"], success=d["success"], error=d["error"])
+
 
 @dataclass
 class Trace:
@@ -42,11 +53,14 @@ class Trace:
         entries: Ordered list of TraceEntry records, one per tool call.
         files_read: Paths of files read during execution (populated by tools).
         files_modified: Paths of files written or modified during execution.
+        listener: Called with each entry right after ``record_call`` appends it,
+            so a worker can stream entries as they happen. Not part of equality.
     """
 
     entries: list[TraceEntry] = field(default_factory=list)
     files_read: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
+    listener: Callable[[TraceEntry], None] | None = field(default=None, repr=False, compare=False)
 
 
 def record_call(trace: Trace, tool: str,
@@ -76,6 +90,8 @@ def record_call(trace: Trace, tool: str,
             duration_ms=(time.perf_counter() - start) * 1000,
             success=False, error=error_text(e),
         ))
+        if trace.listener:
+            trace.listener(trace.entries[-1])
         if on_done:
             on_done(False)
         raise
@@ -85,6 +101,8 @@ def record_call(trace: Trace, tool: str,
         duration_ms=(time.perf_counter() - start) * 1000,
         success=True, error=None,
     ))
+    if trace.listener:
+        trace.listener(trace.entries[-1])
     if on_done:
         on_done(True)
     return result

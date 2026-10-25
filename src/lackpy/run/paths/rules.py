@@ -271,6 +271,28 @@ class PathPolicy:
             Path(_norm(self.workspace / p)) for p in (*builtin, *protected)))
         self._protected = {b.casefold() for p in self.protected for b in _bases(p)}
 
+    def to_data(self) -> dict:
+        """The policy as plain data (str and list), for the worker socket."""
+        return {
+            "workspace": str(self.workspace),
+            "rules": [{"kind": r.kind, "effect": r.effect, "pattern": r.pattern,
+                       "anchor": str(r.anchor), "source": r.source,
+                       "home": None if r.home is None else str(r.home)}
+                      for r in self.rules],
+            "extra_dirs": [str(d) for d in self.extra_dirs],
+            "protected": [str(p) for p in self.protected],
+        }
+
+    @classmethod
+    def from_data(cls, d: dict) -> "PathPolicy":
+        """Rebuild the policy ``to_data`` described; ``check`` decides the same way."""
+        rules = [PathRule(kind=r["kind"], effect=r["effect"], pattern=r["pattern"],
+                          anchor=Path(r["anchor"]), source=r["source"],
+                          home=None if r["home"] is None else Path(r["home"]))
+                 for r in d["rules"]]
+        return cls(Path(d["workspace"]), rules, [Path(p) for p in d["extra_dirs"]],
+                   protected=[Path(p) for p in d["protected"]])
+
     def absolute(self, path: Path | str) -> Path:
         """``path`` joined to the workspace when relative, not normalized."""
         return self.workspace / path

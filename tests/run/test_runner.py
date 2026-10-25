@@ -252,6 +252,12 @@ class TestRuntimeNamespace:
         assert not result.success
         assert result.error == "type(...).mro is not allowed in lackpy"
 
+    def test_refusal_sets_error_phase(self, runner):
+        refused = runner.run("type(3).mro")
+        assert refused.error_phase == "refused"
+        assert runner.run("1/0").error_phase is None
+        assert runner.run("1").error_phase is None
+
     def test_refusal_escapes_except_exception(self, runner):
         result = runner.run("try:\n    type(3).mro\nexcept Exception:\n    pass")
         assert not result.success
