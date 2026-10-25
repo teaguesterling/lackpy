@@ -911,7 +911,7 @@ y = {1: 'a', 2: 'b'}.get(x, 'c')
 
 ### Path members
 
-`exists`, `glob`, `is_dir`, `is_file`, `iterdir`, `joinpath`, `mkdir`, `name`, `parent`, `parts`, `read_bytes`, `read_text`, `relative_to`, `rglob`, `stem`, `suffix`, `with_suffix`, `write_bytes`, `write_text`
+`as_posix`, `exists`, `glob`, `is_dir`, `is_file`, `is_symlink`, `iterdir`, `joinpath`, `match`, `mkdir`, `name`, `parent`, `parts`, `read_bytes`, `read_text`, `relative_to`, `rglob`, `stat`, `stem`, `suffix`, `with_name`, `with_suffix`, `write_bytes`, `write_text`
 
 The `/` operator joins paths, for example `Path(d) / name`.
 

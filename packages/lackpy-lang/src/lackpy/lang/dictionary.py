@@ -59,11 +59,13 @@ PATH_MEMBERS: frozenset[str] = frozenset({
     "exists", "is_file", "is_dir", "glob", "rglob", "iterdir", "mkdir",
     "name", "stem", "suffix", "parent", "parts",
     "with_suffix", "relative_to", "joinpath",
+    "stat", "with_name", "match", "as_posix", "is_symlink",
 })
 
 PATH_IO_METHODS: frozenset[str] = frozenset({
     "read_text", "write_text", "read_bytes", "write_bytes",
     "glob", "rglob", "iterdir", "mkdir", "exists", "is_file", "is_dir",
+    "stat", "is_symlink",
 })
 
 UNAPPROVED: dict[str, str] = {

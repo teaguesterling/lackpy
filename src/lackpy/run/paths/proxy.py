@@ -60,6 +60,16 @@ def _is_dunder(name: str) -> bool:
     return name.startswith("__") and name.endswith("__")
 
 
+class _Stat:
+    """The result of ``Path.stat()``: the two values a program may read, nothing else."""
+
+    __slots__ = ("st_size", "st_mtime")
+
+    def __init__(self, st_size: int, st_mtime: float) -> None:
+        self.st_size = st_size
+        self.st_mtime = st_mtime
+
+
 class _PathMeta(type):
     def __getattribute__(cls, attr: str) -> Any:
         if _is_dunder(attr):
@@ -234,6 +244,15 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
         def with_suffix(self, suffix: str) -> "Path":
             return new(raw(self).with_suffix(suffix))
 
+        def with_name(self, name: str) -> "Path":
+            return new(raw(self).with_name(name))
+
+        def match(self, pattern: str) -> bool:
+            return raw(self).match(pattern)
+
+        def as_posix(self) -> str:
+            return raw(self).as_posix()
+
         def relative_to(self, *others: Any, **kwargs: Any) -> "Path":
             return new(raw(self).relative_to(*(unwrap(o) for o in others), **kwargs))
 
@@ -246,6 +265,15 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
         exists = io("exists", "read")
         is_file = io("is_file", "read")
         is_dir = io("is_dir", "read")
+        is_symlink = io("is_symlink", "read")
+
+        def stat(self) -> "_Stat":
+            def call() -> "_Stat":
+                absolute = target(self, "read")
+                with as_built(self):
+                    st = absolute.stat()
+                return _Stat(st.st_size, st.st_mtime)  # not os.stat_result: two names only
+            return traced("stat", self, call)
 
         def glob(self, pattern: Any, **kwargs: Any) -> Iterator["Path"]:
             def call() -> Iterator["Path"]:
