@@ -62,8 +62,8 @@ EXIT_REFUSED = 5
 STDOUT_CHUNK = 256 * 1024
 #: How long a worker waits for its op after ``start``.
 OP_WAIT = 60.0
-#: A failed run whose peak virtual size came within this margin of ``RLIMIT_AS``
-#: is reported as the memory cap (a full deque raises SystemError, not MemoryError;
+#: A run that failed with SystemError, and whose peak virtual size came within this
+#: margin of ``RLIMIT_AS``, is reported as the memory cap (a full deque raises SystemError, not MemoryError;
 #: measured at 256 MiB: VmPeak 262104 kB for the deque, 245228 kB for a list).
 #: The margin is at most an eighth of the cap: a worker starts near 47 MiB, so at
 #: a small cap a fixed 32 MiB would call every failure "memory".
@@ -187,9 +187,11 @@ def _run_one(channel: _Channel, msg: dict[str, Any], memory_mb: int | None) -> d
     policy = PathPolicy.from_data(msg["policy"])
     runner = _WorkerRunner(channel)
     result = runner.run(program, params=msg.get("params"), path_policy=policy)
+    # A MemoryError is always the cap. VmPeak is only consulted for a SystemError
+    # (the deque at the cap): VmPeak stays high after a freed allocation, so any
+    # other exception is reported as itself (fix round 1).
     memory = isinstance(runner.failure, MemoryError) or (
-        not result.success and result.error_phase != "refused"
-        and _near_memory_limit(memory_mb))
+        isinstance(runner.failure, SystemError) and _near_memory_limit(memory_mb))
     return {"success": result.success, "output": result.output, "error": result.error,
             "variables": result.variables, "error_phase": result.error_phase,
             "memory": memory}

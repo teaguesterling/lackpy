@@ -324,6 +324,30 @@ def test_small_memory_cap_keeps_ordinary_errors(ws):
     assert "division" in result.error
 
 
+def test_freed_allocation_then_error_keeps_the_error(runner, ws):
+    """Fix round 1: a high VmPeak from a freed allocation does not make a later error "memory"."""
+    result = _run(runner, "s = 'a' * 455000000\n1 / 0", ws, timeout=10)
+    assert result.success is False
+    assert "division by zero" in result.error, result.error
+
+
+def test_freed_allocation_then_keyerror_keeps_the_error(runner, ws):
+    result = _run(runner, "n = len('a' * 465000000)\n{}['k']", ws, timeout=10)
+    assert result.success is False
+    assert result.error == "'k'", result.error
+
+
+def test_no_fork_raises(monkeypatch, ws):
+    """Global constraint: without os.fork the runner raises; it never falls back silently."""
+    monkeypatch.delattr(os, "fork")
+    r = ProcessRunner()
+    try:
+        with pytest.raises(RuntimeError, match=r"^the process runner needs os\.fork \(Linux\)$"):
+            _run(r, "1", ws)
+    finally:
+        r.close()
+
+
 def test_concurrent_runs_do_not_cross(runner, tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     for w, text in ((a, "A"), (b, "B")):

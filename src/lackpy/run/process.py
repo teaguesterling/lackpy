@@ -149,6 +149,9 @@ class ProcessRunner:
     # --- the zygote ----------------------------------------------------------
 
     def _start_zygote(self) -> None:
+        if not hasattr(os, "fork"):
+            # Global constraint: never fall back to an in-process run silently.
+            raise RuntimeError("the process runner needs os.fork (Linux)")
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         env = {k: os.environ[k] for k in ENV_KEEP if k in os.environ}
         try:
