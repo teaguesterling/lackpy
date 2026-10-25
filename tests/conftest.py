@@ -26,12 +26,14 @@ def _isolated_path_policy(monkeypatch, tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _close_process_runners(monkeypatch):
-    """Stop every run zygote a test started (Plan 3 Task 5).
+    """Stop every run zygote a test started for itself (Plan 3 Task 5).
 
-    ``LackpyService`` makes a ``ProcessRunner`` on its first plain run, and most
-    tests never close their service. Each runner made during the test is
-    closed at its teardown, so no zygote outlives the test that started it.
+    Each ``ProcessRunner`` made during the test is closed at its teardown,
+    except the process's shared runners (``shared_runner``, which every
+    ``LackpyService`` uses): those live for the session and
+    ``_no_zygote_left`` closes them at its end.
     """
+    from lackpy.run import process
     from lackpy.run.process import ProcessRunner
 
     made: list[ProcessRunner] = []
@@ -43,8 +45,10 @@ def _close_process_runners(monkeypatch):
 
     monkeypatch.setattr(ProcessRunner, "__init__", tracking)
     yield
+    shared = {id(r) for r in process._shared.values()}
     for runner in made:
-        runner.close()
+        if id(runner) not in shared:
+            runner.close()
 
 
 def _live_zygotes() -> list[int]:
@@ -81,9 +85,15 @@ def _live_zygotes() -> list[int]:
 
 @pytest.fixture(autouse=True, scope="session")
 def _no_zygote_left():
-    """Fail the session when a run zygote is still alive at its end (Plan 3 Task 5)."""
+    """Fail the session when a run zygote is still alive at its end (Plan 3 Task 5).
+
+    The shared runners are closed first: they are the only ones meant to
+    outlive a test.
+    """
     yield
     import sys
+    from lackpy.run.process import close_shared_runners
+    close_shared_runners()
     if sys.platform != "linux":
         return
     live = _live_zygotes()

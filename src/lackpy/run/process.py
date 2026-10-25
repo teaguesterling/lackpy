@@ -15,6 +15,7 @@ The run's clock starts when the worker exists: the zygote's own start (about
 
 from __future__ import annotations
 
+import atexit
 import math
 import os
 import signal
@@ -32,7 +33,7 @@ from .limits import ENV_KEEP, STDOUT_CAP
 from .paths import PathPolicy
 from .trace import Trace, TraceEntry
 
-__all__ = ["ProcessRunner", "STDOUT_CAP"]
+__all__ = ["ProcessRunner", "STDOUT_CAP", "close_shared_runners", "shared_runner"]
 
 STDOUT_MARK = "\n[lackpy: output cut at 10 MB]"
 #: How long the parent keeps reading after the kill, for what the worker already sent.
@@ -336,6 +337,39 @@ class ProcessRunner:
             if msg is not None and msg.get("event") == "environ":
                 return msg["environ"]
             return None
+
+
+_shared: dict[int, ProcessRunner] = {}
+_shared_lock = threading.Lock()
+
+
+def shared_runner(memory_mb: int) -> ProcessRunner:
+    """The process's one ``ProcessRunner`` for ``memory_mb`` (Task 5 fix round 1 ruling).
+
+    Every ``LackpyService`` in a process shares it, so the zygote starts once.
+    Runs share no state: the program, params, policy, workspace and rules
+    cross on each run, and each run has its own forked worker.
+    """
+    with _shared_lock:
+        runner = _shared.get(memory_mb)
+        if runner is None:
+            runner = _shared[memory_mb] = ProcessRunner(memory_mb=memory_mb)
+        return runner
+
+
+def close_shared_runners() -> None:
+    """Stop every shared runner's zygote. A later ``shared_runner`` call starts a new one.
+
+    Registered with ``atexit``; tests call it at the end of the session.
+    """
+    with _shared_lock:
+        runners = list(_shared.values())
+        _shared.clear()
+    for runner in runners:
+        runner.close()
+
+
+atexit.register(close_shared_runners)
 
 
 def _kill(pidfd: int | None) -> None:

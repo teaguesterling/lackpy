@@ -26,7 +26,7 @@ from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
 from .run.paths import PathPolicy, load_policy, read_only_policy
-from .run.process import ProcessRunner
+from .run.process import ProcessRunner, shared_runner
 from .run.runner import _binds_params, _is_data
 from .run.refusal import LackpyRefusal
 from .run.trace import Trace, error_text
@@ -263,9 +263,11 @@ class LackpyService:
         self._harness_resolver = harness_resolver
         self._path_policy_loader = path_policy_loader
         # Plain programs run in a forked worker under a time limit (Plan 3 D9).
-        # Made on the first run, so a service that never runs starts no zygote.
-        # The worker changes into the workspace itself, so the service never
-        # calls os.chdir and concurrent runs need no lock.
+        # The runner is the process's shared one for the memory cap
+        # (``shared_runner``), taken on the first run, so a service that never
+        # runs starts no zygote. The service does not own it. The worker
+        # changes into the workspace itself, so the service never calls
+        # os.chdir and concurrent runs need no lock.
         self._process_runner: ProcessRunner | None = None
         self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
@@ -379,20 +381,19 @@ class LackpyService:
         return out
 
     def close(self) -> None:
-        """Release background resources (the MCP client thread, the run zygote). Idempotent.
+        """Release background resources (the MCP client thread). Idempotent.
 
-        Best-effort: the MCP client runs on a daemon thread, and the zygote
-        exits when the service's end of its control socket closes, so a
-        one-shot process (e.g. a CLI command) exits cleanly without calling
-        this. Call it for prompt cleanup in a long-lived host that creates
-        many services.
+        Best-effort: the MCP client runs on a daemon thread, so a one-shot
+        process (e.g. a CLI command) exits cleanly without calling this. Call it
+        for prompt cleanup in a long-lived host that creates many services.
+        The run zygote is shared by every service in the process, so this
+        drops the service's reference only; ``close_shared_runners`` (also
+        run at interpreter exit) stops it.
         """
         if self._mcp_client is not None:
             self._mcp_client.shutdown()
             self._mcp_client = None
-        if self._process_runner is not None:
-            self._process_runner.close()
-            self._process_runner = None
+        self._process_runner = None
 
     def _init_inference_providers(self) -> None:
         templates_dir = self._config.config_dir / "templates"
@@ -548,17 +549,18 @@ class LackpyService:
                        profile: Any) -> tuple[float, str | None]:
         """The run's time limit in seconds, and the refusal text when it is refused (D8).
 
-        ``None`` is ``config.sandbox_timeout``. A value that is not a finite
-        number above 0 is refused, and so is a value over the cap: the
-        profile's ``max_timeout``, else ``config.sandbox_timeout``.
+        The one place the rule lives. The cap is the profile's
+        ``max_timeout``, else ``config.sandbox_timeout``. ``None`` is
+        ``min(config.sandbox_timeout, cap)`` and is never refused (fix round 1
+        ruling). An explicit value that is not a finite number above 0 is
+        refused, and so is one over the cap.
         """
-        if timeout is None:
-            seconds = self._config.sandbox_timeout
-        elif not _positive_seconds(timeout):
-            return 0.0, f"timeout must be a positive number of seconds, not {timeout!r}"
-        else:
-            seconds = timeout
         cap = rp.max_timeout if rp.max_timeout is not None else self._config.sandbox_timeout
+        if timeout is None:
+            return min(self._config.sandbox_timeout, cap), None
+        if not _positive_seconds(timeout):
+            return 0.0, f"timeout must be a positive number of seconds, not {timeout!r}"
+        seconds = timeout
         if seconds > cap:
             return seconds, (f"timeout {seconds:g} s is over the profile's max_timeout "
                              f"({cap:g} s, profile {self._profile_name(profile)})")
@@ -755,8 +757,8 @@ class LackpyService:
             policy = self._load_path_policy(read_only=read_only)
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
-        if self._process_runner is None:  # no await since the check: one runner
-            self._process_runner = ProcessRunner(memory_mb=self._config.sandbox_memory_mb)
+        if self._process_runner is None:
+            self._process_runner = shared_runner(self._config.sandbox_memory_mb)
         runner = self._process_runner
         try:
             return await asyncio.to_thread(
@@ -803,8 +805,8 @@ class LackpyService:
         validation = validate(program, allowed_names=set(), extra_rules=rules)
         if not validation.valid:
             return ExecutionResult(success=False, error=validation_error(validation))
-        if timeout is None:  # an internal caller: the default limit, uncapped by a profile
-            timeout = self._config.sandbox_timeout
+        if timeout is None:  # an internal caller: the same capped default (review Minor 3)
+            timeout, _ = self._check_timeout(None, rp, None)
         return await self._execute(program, param_values, timeout=timeout,
                                    read_only=read_only, rules=rule_names)
 

@@ -171,6 +171,47 @@ async def test_unnamed_profile_cap_text(make):
     assert result.error == "timeout 4 s is over the profile's max_timeout (2 s, profile (unnamed))"
 
 
+async def test_default_timeout_is_capped_by_the_profile(make):
+    """Fix round 1 ruling: with no timeout, the limit is min(sandbox_timeout, cap)."""
+    svc = make(profiles={"short": {"max_timeout": 1}})
+    start = time.monotonic()
+    result = await svc.run_program(FOREVER, profile="short")
+    elapsed = time.monotonic() - start
+    assert result.error_phase == "timeout", result.error
+    assert result.error == "timeout: the run took longer than 1 s and was stopped"
+    assert elapsed < 1 + 1, elapsed
+
+
+async def test_default_timeout_is_capped_through_delegate(make):
+    svc = make(profiles={"short": {"max_timeout": 1}})
+    result = await svc.delegate("x", profile="short", _program_override=FOREVER)
+    assert result["error_phase"] == "timeout", result["error"]
+    assert result["error"] == "timeout: the run took longer than 1 s and was stopped"
+
+
+async def test_default_timeout_is_capped_through_profile_default(make):
+    svc = make(profile_default="short", profiles={"short": {"max_timeout": 1}})
+    result = await svc.run_program(FOREVER)
+    assert result.error_phase == "timeout", result.error
+    assert result.error == "timeout: the run took longer than 1 s and was stopped"
+
+
+async def test_execute_program_default_is_capped(make):
+    """Minor 3: the internal path with timeout=None takes the same capped default."""
+    svc = make(profiles={"short": {"max_timeout": 1}})
+    rp = svc._resolve_profile("short")
+    result = await svc._execute_program(FOREVER, rp, {})
+    assert result.error_phase == "timeout", result.error
+    assert result.error == "timeout: the run took longer than 1 s and was stopped"
+
+
+async def test_explicit_timeout_over_a_lower_cap_still_refuses(make):
+    svc = make(profile_default="short", profiles={"short": {"max_timeout": 1}})
+    result = await svc.run_program("1", timeout=2)
+    assert result.error_phase == "refused"
+    assert result.error == "timeout 2 s is over the profile's max_timeout (1 s, profile short)"
+
+
 async def test_max_timeout_raises_the_cap(make):
     svc = make(sandbox_timeout=3, profiles={"long": {"max_timeout": 300}})
     result = await svc.run_program("1", profile="long", timeout=200)
@@ -266,18 +307,57 @@ def test_process_runner_refuses_callable_rules(ws):
         r.close()
 
 
-async def test_close_stops_the_zygote(make):
+async def test_services_share_one_runner(make):
+    """Fix round 1 ruling: one ProcessRunner per process for each memory cap."""
+    a, b, c = make(), make(), make(sandbox_memory_mb=300)
+    for svc in (a, b, c):
+        assert (await svc.run_program("1")).success
+    assert a._process_runner is b._process_runner
+    assert c._process_runner is not a._process_runner
+    assert c._process_runner.memory_mb == 300
+
+
+async def test_close_keeps_the_shared_runner(make):
+    """A service's close() does not stop the zygote that other services share."""
+    a, b = make(), make()
+    assert (await a.run_program("1")).success
+    zygote = a._process_runner._proc
+    a.close()
+    a.close()  # idempotent
+    assert zygote.poll() is None
+    assert (await b.run_program("1")).success
+    assert b._process_runner._proc is zygote
+
+
+async def test_close_shared_runners_stops_the_zygotes(make):
+    from lackpy.run.process import close_shared_runners
     svc = make()
     assert (await svc.run_program("1")).success
     zygote = svc._process_runner._proc
-    assert zygote is not None and zygote.poll() is None
-    svc.close()
+    close_shared_runners()
     assert zygote.poll() is not None
-    svc.close()  # idempotent
+    assert (await svc.run_program("1")).success  # a later run starts a new one
+
+
+def test_shared_runners_are_closed_at_exit():
+    """The shared runners are closed by an atexit handler."""
+    import subprocess
+    script = (
+        "import atexit\n"
+        "seen = []\n"
+        "real = atexit.register\n"
+        "atexit.register = lambda f, *a, **k: (seen.append(f), real(f, *a, **k))[1]\n"
+        "import lackpy.run.process as p\n"
+        "print(p.close_shared_runners in seen)\n")
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                         timeout=30)
+    assert out.stdout.strip() == "True", out.stderr
 
 
 async def test_no_fork_is_a_failed_result(make, monkeypatch):
     """Without os.fork the run fails loudly, as a result, never in-process."""
+    from lackpy.run.process import close_shared_runners
+    close_shared_runners()  # a zygote that is already running would fork for us
     svc = make()
     monkeypatch.delattr(os, "fork")
     result = await svc.run_program("1")
