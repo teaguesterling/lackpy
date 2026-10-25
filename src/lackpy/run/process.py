@@ -441,6 +441,12 @@ class SessionChannel:
     #: and the result of a large document. A step over it is a stalled worker.
     HANDOFF_SECONDS = 10.0
 
+    #: How long past a cell's deadline the parent still reads that cell's
+    #: messages, for a cell_end sent in time behind a backlog (fix round 2). A
+    #: line is read in microseconds, so 0.1 s drains a backlog of thousands; a
+    #: cell may overrun its limit by at most this much.
+    DEADLINE_GRACE = 0.1
+
     def __init__(self, pid: int, sock: socket.socket, ctl: socket.socket, *,
                  path_policy: PathPolicy, workspace: Path, cell_timeout: float,
                  rule_names: list[str] | None, context_config: dict[str, Any]) -> None:
@@ -493,8 +499,13 @@ class SessionChannel:
         while True:
             cur = self._stack[-1]
             if not cur.cell_ended:
-                # A message sent before the deadline is still read at the deadline.
-                remaining = max(deadline - time.monotonic(), 0.001)
+                # The deadline holds even while messages keep arriving (fix
+                # round 2): past ``deadline + DEADLINE_GRACE`` nothing more is
+                # read. Within the grace, a backlog sent before the deadline is
+                # still read, so a cell_end sent in time is honoured.
+                remaining = deadline + self.DEADLINE_GRACE - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
                 msg = cur.reader.recv(remaining)
                 if msg is None or msg.get("event") == "exit":
                     how = (msg or {}).get("how", "its socket closed")

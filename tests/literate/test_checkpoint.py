@@ -587,3 +587,32 @@ def test_bad_first_message_leaks_no_pidfd():
     for s in (ours, theirs, ctl_ours, ctl_theirs):
         s.close()
     assert pidfds() == before
+
+
+# --- fix round 2 ---------------------------------------------------------------
+
+def test_a_cell_that_streams_trace_entries_still_times_out(env, runner):
+    """N1: steady trace messages must not hold off the deadline.
+
+    The cell reads a file in a loop far past its limit, so its process sends a
+    trace entry for every read. The run must still stop it at the limit.
+    """
+    (env["ws"] / "f.txt").write_text("x")
+    cell = ("from pathlib import Path\n"
+            "for i in range(100000000):\n"
+            "    t = Path('f.txt').read_text()")
+    doc = _doc("a = 1", cell, "b = a + 1", prose="B={b}")
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=1.0,
+                               rule_names=None, context_config={})
+    start = time.monotonic()
+    try:
+        r = chan.submit(doc, params=None)
+    finally:
+        chan.close()
+    elapsed = time.monotonic() - start
+    assert r.error_phase == "timeout", r.error
+    assert elapsed < 2.0, elapsed
+    reads = [e for e in r.trace.entries if e.tool == "Path.read_text"]
+    assert len(reads) > 100, len(reads)  # the loop really streamed entries
+    assert "B=2" in r.stdout
