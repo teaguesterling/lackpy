@@ -323,6 +323,8 @@ def main():
     )
     parser.add_argument("--num-predict", type=int, default=8192, help="Max tokens for model response (default: 8192)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show model responses on stderr")
+    parser.add_argument("--timeout", type=float, default=120.0,
+                        help="Seconds for each cell of a resubmitted document (default: 120)")
     args = parser.parse_args()
 
     output = asyncio.run(run_literate_agent(
@@ -333,6 +335,7 @@ def main():
         verbose=args.verbose,
         persona=args.persona,
         num_predict=args.num_predict,
+        timeout=args.timeout,
     ))
     print(output)
 

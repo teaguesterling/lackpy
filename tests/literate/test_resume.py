@@ -696,3 +696,20 @@ def test_reap_closes_idle_sessions(env):
     registry.reap()
     assert idle._closed
     assert idle.session_id not in registry
+
+
+def test_literate_agent_main_takes_a_timeout(agent, monkeypatch, capsys):
+    """Final review minor (D8): main() passes --timeout to run_literate_agent."""
+    seen = {}
+
+    async def fake(prompt, **kwargs):
+        seen.update(kwargs)
+        return "done"
+
+    monkeypatch.setattr(agent, "run_literate_agent", fake)
+    monkeypatch.setattr(sys, "argv", ["literate_agent.py", "x", "--timeout", "7.5"])
+    agent.main()
+    assert seen.get("timeout") == 7.5
+    monkeypatch.setattr(sys, "argv", ["literate_agent.py", "x"])
+    agent.main()
+    assert seen.get("timeout") == 120.0  # run_literate_agent's own default
