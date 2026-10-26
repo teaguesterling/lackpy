@@ -47,7 +47,9 @@ _CLOSES = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 def set_workspace(workspace: Path) -> None:
     """Set the workspace directory and reset the service singleton.
 
-    The old service is closed, so its run zygote does not outlive it.
+    The old service is closed: its literate sessions end. The run zygote is
+    shared by every service in the process (``shared_runner``), so it outlives
+    the service; ``close_shared_runners`` (also run at exit) stops it.
     """
     global _workspace, _service
     _workspace = workspace
@@ -106,7 +108,8 @@ async def delegate(intent: str, profile: str | None = None,
     pathlib.Path, under the workspace's permission rules. `profile` names a
     configured `[profiles.<name>]` entry (model, mode, rules); omit it for the
     default. `timeout` is the run's limit in seconds (default: the sandbox
-    timeout, 120 s), up to the profile's max_timeout. Returns a lean result
+    timeout, 120 s, or the profile's max_timeout when that is lower), up to the
+    profile's max_timeout. Returns a lean result
     (success, output, stdout, program, the traced calls, error_phase:
     "timeout" when the run was stopped at the limit, "refused" when it was
     refused); call `run_program` with the program if you need the full step trace.
@@ -151,8 +154,9 @@ async def run_program(program: str, profile: str | None = None,
     `params` replace the defaults of the document's `params = {...}` literal.
     `rules` names extra checks: no_loops, no_nested_calls, max_depth(N),
     max_calls(N); on the literate axis they apply to every cell. `timeout` is
-    the run's limit in seconds (default: the sandbox timeout, 120 s); a value
-    over the profile's max_timeout is refused before the run. On the literate
+    the run's limit in seconds (default: the sandbox timeout, 120 s, or the
+    profile's max_timeout when that is lower); a value over the profile's
+    max_timeout is refused before the run. On the literate
     axis the limit applies to each cell: a cell over it is stopped and noted,
     and the document goes on. A literate run returns a `session_id`: to retry,
     pass it back with the full corrected document, and the run resumes from

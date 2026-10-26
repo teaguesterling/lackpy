@@ -1056,7 +1056,8 @@ class LackpyService:
             sandbox: Reserved for future sandbox configuration (unused).
             rules: Additional validation rules to apply before execution.
             timeout: The run's time limit in seconds (Plan 3 D8); None is
-                ``config.sandbox_timeout``. Over the profile's ``max_timeout``
+                ``min(config.sandbox_timeout, max_timeout)``, and is never
+                refused. Over the profile's ``max_timeout``
                 (default ``config.sandbox_timeout``), or not a number above 0,
                 the run is refused before validation (``error_phase="refused"``).
                 At the limit the worker is killed (``error_phase="timeout"``).
@@ -1115,7 +1116,8 @@ class LackpyService:
             interpreter: An interpreter instance whose ``system_prompt_hint()``
                 is forwarded to the prompt builder. When omitted, the default
                 lackpy prompt is used (pre-prompt, style guide, skeleton).
-            timeout: The run's time limit in seconds, as ``run_program``'s. A
+            timeout: The run's time limit in seconds, as ``run_program``'s:
+                None is ``min(config.sandbox_timeout, max_timeout)``. A
                 refused value is refused before generation. A timed-out run is
                 returned as it is: the caller decides on a retry (D7).
 
