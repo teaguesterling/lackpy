@@ -65,8 +65,10 @@ def _shape(document: str) -> tuple[Any, list[tuple[Any, ...]]] | None:
 class LiterateRun:
     """The parent's handle on one literate session worker.
 
-    Not for concurrent use by design, but safe: ``submit`` and ``close`` take
-    one lock. ``last_used`` is the clock's time at the start and the end of the
+    Not for concurrent use by design, but safe: ``submit`` and ``configure``
+    take one lock. ``close`` never waits for it (final review I2): during a
+    submit it kills the session's processes, the submit returns "ended
+    without a result", and the submit's thread closes the channel. ``last_used`` is the clock's time at the start and the end of the
     last call. ``busy`` is True while a caller holds the run (a registry lease,
     or a submit): a registry never closes a busy run. A closed run refuses
     ``submit``; it never runs fresh silently (fix round 1, minor 7).
@@ -102,6 +104,10 @@ class LiterateRun:
         self._timeout = float(cell_timeout)
         self._max_timeout = float(cell_timeout)
         self._closed = False
+        # Final review I2: ``_state`` guards ``_closed`` and ``_active`` (a
+        # submit holds the lock and runs); close takes only ``_state``.
+        self._state = threading.Lock()
+        self._active = False
         self.busy = False
         self.last_used = clock()
         self.configure(path_policy=path_policy, cell_timeout=cell_timeout,
@@ -141,15 +147,23 @@ class LiterateRun:
     def submit(self, document: str, params: dict[str, Any] | None = None) -> ExecutionResult:
         """Run ``document``, resuming from the checkpoint before its first changed cell."""
         with self._lock:
-            if self._closed:
-                self.busy = False
-                return ExecutionResult(success=False,
-                                       error=f"session {self.session_id!r} is closed")
+            with self._state:
+                if self._closed:
+                    self.busy = False
+                    return ExecutionResult(success=False,
+                                           error=f"session {self.session_id!r} is closed")
+                self._active = True
             self.busy = True
             self.last_used = self._clock()
             try:
                 return self._submit(document, dict(params or {}))
             finally:
+                with self._state:
+                    self._active = False
+                    closed = self._closed
+                if closed:  # closed during the submit: its processes are killed; free the rest
+                    self._close_channel()
+                    self._last = None
                 self.busy = False
                 self.last_used = self._clock()
 
@@ -177,6 +191,8 @@ class LiterateRun:
             path_policy=self._policy, workspace=self.workspace, cell_timeout=self._timeout,
             rule_names=rule_names, context_config=config, max_checkpoints=self.max_checkpoints,
             cpu_timeout=self._max_timeout, max_checkpoint_mb=self.max_checkpoint_mb)
+        if self._closed:  # closed while the worker started: close saw no channel to kill
+            return ExecutionResult(success=False, error=f"session {self.session_id!r} is closed")
         return self._channel.submit(document, params=params or None)
 
     def _close_channel(self) -> None:
@@ -185,9 +201,20 @@ class LiterateRun:
             self._channel = None
 
     def close(self) -> None:
-        """Stop every process of the session; later submits refuse. Idempotent."""
-        with self._lock:
+        """Stop every process of the session; later submits refuse. Idempotent.
+
+        Never waits for a running submit (final review I2): it kills the
+        session's processes, and the submit's thread closes the channel.
+        """
+        with self._state:
             self._closed = True
+            active = self._active
+            channel = self._channel
+        if active:
+            if channel is not None:
+                channel.kill_all()
+            return
+        with self._lock:  # no submit runs: at most a configure, or a submit's cleanup
             self._close_channel()
             self._last = None
 

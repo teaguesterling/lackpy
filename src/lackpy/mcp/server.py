@@ -15,6 +15,7 @@ internal toolbox views.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from pathlib import Path
 from typing import Any
@@ -172,10 +173,13 @@ async def run_program(program: str, profile: str | None = None,
 
 
 @mcp.tool(annotations=_CLOSES)
-def close_session(session_id: str) -> dict:
+async def close_session(session_id: str) -> dict:
     """End a literate session that `run_program` returned, and stop its processes.
     `closed` is false when the session was unknown or had already ended."""
-    return {"session_id": session_id, "closed": _get_service().close_session(session_id)}
+    # Final review I2: off the event loop, so a close never stalls other calls.
+    service = _get_service()
+    return {"session_id": session_id,
+            "closed": await asyncio.to_thread(service.close_session, session_id)}
 
 
 @mcp.tool(annotations=_WRITES_FILE)

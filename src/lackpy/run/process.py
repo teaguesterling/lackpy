@@ -438,16 +438,26 @@ class _Proc:
         # Only a walk checkpoint holds the state from before its cell.
         self.walk = True
         self.after_walk = False
+        # Final review I2: another thread may signal this process (``kill``)
+        # while the session's thread closes it; the lock keeps a closed pidfd's
+        # number, reused by a new fd, from being signalled.
+        self._pidfd_lock = threading.Lock()
         try:
             self.pidfd: int | None = pidfd_open(pid)
         except OSError:  # gone (ProcessLookupError), or no pidfd (EMFILE...): see concerns
             self.pidfd = None
 
+    def kill(self) -> None:
+        """SIGKILL the process; safe from any thread, and after ``close``."""
+        with self._pidfd_lock:
+            _kill(self.pidfd)
+
     def close(self) -> None:
-        _kill(self.pidfd)
-        if self.pidfd is not None:
-            os.close(self.pidfd)
-            self.pidfd = None
+        with self._pidfd_lock:
+            _kill(self.pidfd)
+            if self.pidfd is not None:
+                os.close(self.pidfd)
+                self.pidfd = None
         self.sock.close()
 
 
@@ -843,6 +853,16 @@ class SessionChannel:
         return ExecutionResult(success=r["success"], output=r.get("output"), stdout=r["stdout"],
                                error=error, trace=_trace(entries), variables=variables,
                                error_phase=phase)
+
+    def kill_all(self) -> None:
+        """SIGKILL every process of the session and close nothing (final review I2).
+
+        The one method that is safe from another thread while a submit runs:
+        that submit then sees its processes end and returns "ended without a
+        result". The caller still calls ``close`` from the submit's thread.
+        """
+        for p in list(self._stack):
+            p.kill()
 
     def close(self) -> None:
         """Stop every process of the session, the deepest first."""

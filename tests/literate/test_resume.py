@@ -627,3 +627,35 @@ def test_a_bad_checkpoint_budget_is_refused(env, runner, budget):
         _literate_run(env, runner, max_checkpoint_mb=budget)
     with pytest.raises(ValueError, match="max_checkpoint_mb"):
         SessionRegistry(max_checkpoint_mb=budget)
+
+
+# --- final review I2: close does not wait for a running submit -------------------
+
+def test_close_does_not_wait_for_a_running_submit(env, runner):
+    """close() stops the session's processes at once; the in-flight submit then
+    reports a failure, and the run refuses later submits."""
+    import threading
+
+    run = _literate_run(env, runner, cell_timeout=20.0)
+    out: list = []
+    worker = threading.Thread(target=lambda: out.append(run.submit(_doc(LOG, LOOP), None)))
+    worker.start()
+    try:
+        end = time.monotonic() + 10
+        while time.monotonic() < end and not (run._channel and run._channel.checkpoints):
+            time.sleep(0.02)
+        assert run._channel and run._channel.checkpoints, "the loop cell never started"
+        time.sleep(0.3)  # the loop cell is running
+        pids = [pid for _, pid in run._channel.checkpoints] + [run._channel.pid]
+        start = time.monotonic()
+        run.close()
+        took = time.monotonic() - start
+    finally:
+        worker.join(30)
+    assert took < 2.0, took  # well under the 20 s cell limit
+    assert not worker.is_alive()
+    assert out and out[0].success is False, out
+    assert "ended without a result" in out[0].error, out[0].error
+    assert run._channel is None  # the submit's thread closed the channel's fds
+    assert _wait_gone(pids) == []
+    assert run.submit(_doc(LOG, FIX), None).error == f"session {run.session_id!r} is closed"

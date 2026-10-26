@@ -240,3 +240,33 @@ def test_resume_through_mcp_session_id(literate_ws):
     assert gone["success"] is False
     assert gone["error"] == f"unknown or expired session_id {sid!r}"
     assert (literate_ws / "log.txt").read_text().count("line") == 1  # never a silent fresh run
+
+
+def test_close_session_does_not_wait_for_a_running_run(literate_ws):
+    """Final review I2: close_session runs off the event loop and does not wait for
+    the session's running document; that run reports a failure."""
+    import asyncio
+    import inspect
+    import time
+
+    assert inspect.iscoroutinefunction(server.close_session)
+    first = _call("run_program", {"program": _lit(LOG, "b = a + 1"), "profile": "lit",
+                                  "timeout": 20})
+    sid = first["session_id"]
+
+    async def scenario():
+        running = asyncio.create_task(server.mcp.call_tool(
+            "run_program", {"program": _lit(LOG, "b = a + 1", LOOP), "profile": "lit",
+                            "timeout": 20, "session_id": sid}))
+        await asyncio.sleep(2.0)  # the resume reaches the loop cell
+        start = time.monotonic()
+        closed = await server.mcp.call_tool("close_session", {"session_id": sid})
+        took = time.monotonic() - start
+        return await asyncio.wait_for(running, 30), closed, took
+
+    ran, closed, took = asyncio.run(scenario())
+    assert took < 2.0, took  # well under the 20 s cell limit
+    closed = _strict_json((closed[0] if isinstance(closed, tuple) else closed)[0].text)
+    assert closed == {"session_id": sid, "closed": True}
+    ran = _strict_json((ran[0] if isinstance(ran, tuple) else ran)[0].text)
+    assert ran["success"] is False, ran
