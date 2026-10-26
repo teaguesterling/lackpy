@@ -39,6 +39,7 @@ table defines it. Otherwise it uses the service configuration.
 | `rules` | Extra rule names. Parsed, but the service does not apply them yet. |
 | `language` | The language axis. The default is `restricted-python`. |
 | `execution` | The execution axis. The default is `one-shot`. |
+| `max_timeout` | The most seconds that a run may ask for with `timeout`. See [Time limits](time-limits.md). |
 | `sandbox`, `policy` | Parsed, but not enforced. |
 
 A key that is not in this table is an error, so a misspelt key does not pass

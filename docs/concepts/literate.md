@@ -435,6 +435,159 @@ Two mechanisms apply, in two layers:
 
 The static check is a planner over the policy. It is not a second policy.
 
+## Time limits and retries
+
+Every cell has a time limit. The page [Time limits](time-limits.md) gives the
+full rules. This section shows what a document sees.
+
+A code cell, or a prose cell with an interpolation, that runs longer than the
+limit is stopped. This is a timeout. A timeout is not a refusal: the session
+stays open, the document goes on, and the caller can retry.
+
+This document has a cell that never ends. The first code cell writes a file.
+The second code cell loops:
+
+````markdown title="A cell that never ends"
+# Stuck cell
+
+```lackpy
+from pathlib import Path
+
+Path("log.txt").write_text("cell 1 ran\n")
+total = 5
+```
+
+```lackpy
+for i in iter(int, 1):
+    total = total + 1
+```
+
+The total is {total}.
+````
+
+`lackpyctl render --execute --profile docs --timeout 2` printed this
+(measured on 2026-10-25, run `lackpyctl:173`, exit code 1). The first line
+is the error message, and the rest is the rendered document:
+
+```text
+lackpyctl render --execute: timeout: cell 3 took longer than 2 s and was stopped; hole: cell blocked by total
+# Stuck cell
+
+[kernel] timeout: cell 3 took longer than 2 s and was stopped [/kernel]
+[kernel] holes: cell skipped (blocked by total) [/kernel]
+```
+
+Four points to read in this output:
+
+- The cell number counts every cell of the document, prose included. The title
+  line is cell 1. So the looping cell is cell 3.
+- The cell that was stopped binds each name it would have bound to a hole. The
+  prose `{total}` is skipped, as it is after an error (see
+  [Holes and errors](#holes-and-errors)).
+- Cell 2 is not affected. The state of the document is the state from before the
+  stopped cell.
+- If the stopped cell wrote a file before the stop, the note names it:
+  `; it wrote log.txt before it was stopped`. The trace has the writes that
+  lackpy confirmed. A write that had started but was not confirmed is named in
+  the note. It is not in `trace.files_modified`.
+
+### Retry by resubmitting
+
+A timeout ends no session, so the caller retries. The caller sends the full
+corrected document. lackpy does not retry for the caller.
+
+A document runs in a session worker. The worker takes one checkpoint (a fork of
+its process) before each segment. A segment ends at any cell that can run code:
+a code cell, or a prose cell with an interpolation. A prose cell with no
+interpolation runs no code, so it takes no checkpoint.
+
+A retry resumes at the cell `k`, where `k` is the smaller of two numbers:
+
+- the first cell whose text changed since the last submission;
+- the first cell that was stopped in the last run.
+
+The cells before `k` do not run again, so their writes do not repeat. The
+resume starts at the checkpoint of the segment that holds `k`. The comparison
+of cell text is exact. It covers the cell type, the source, the annotations
+and the frontmatter.
+
+If the checkpoint for that point is gone (the session dropped it for memory,
+see [Memory](#memory)), or the submission has other params, the document runs
+fresh. So does the first submission of a session.
+
+A short script submitted a document with two code cells to one service, using
+`LackpyService.run_program`. The first code cell appends a line to `log.txt`
+and sets `total = 5`. The second code cell loops. The script made four calls
+with `profile="docs"`. Calls 2 to 4 passed the `session_id` of call 1:
+
+1. the document with the looping second code cell, with `timeout=2`;
+2. the same document with the second code cell rewritten as `total = total * 2`;
+3. the document with the first code cell changed (`total = 7`);
+4. the document of call 2 again, after `close_session`.
+
+The script labels the code cells "cell 1" and "cell 2" in its own text, which
+counts code cells only. The `[kernel]` note counts every cell, and the title
+is cell 1 of the document. The output below
+was measured on 2026-10-25 with the script run through `blq exec` (run
+`python:175`). It is pasted without change:
+
+```text
+--- 1. cell 2 loops, timeout 2 s: success=False error_phase=timeout session_id=set
+# Retry
+
+[kernel] timeout: cell 3 took longer than 2 s and was stopped [/kernel]
+[kernel] holes: cell skipped (blocked by total) [/kernel]
+log.txt: ['cell 1 ran']
+--- 2. cell 2 rewritten, same session_id: success=True error_phase=None session_id=set
+# Retry
+
+
+The total is 10.
+log.txt: ['cell 1 ran']
+--- 3. cell 1 changed, same session_id: success=True error_phase=None session_id=set
+# Retry
+
+
+The total is 14.
+log.txt: ['cell 1 ran', 'cell 1 ran']
+close_session: True
+4. closed id: success=False error_phase=None error=unknown or expired session_id '1d80cceb88f849d8bf0003bb0858c9bf'
+```
+
+Call 2 resumed at the stopped cell. The first code cell did not run again:
+`log.txt` has one line. Call 3 changed the first code cell, so the document
+ran fresh, and `log.txt` has two lines. Call 4 shows the error for a closed
+session.
+
+These cases are not resumed. They run fresh:
+
+- an append-only resubmission after a run that completed all its cells;
+- a resubmission that pauses at `@continue` in `literate_agent`.
+
+### Sessions over MCP
+
+`run_program` returns a `session_id` for a document on a literate profile. Pass
+it back with the full corrected document to resume. A call without a
+`session_id` starts a fresh session. `literate_agent` keeps its own session
+between rounds.
+
+Call `close_session(session_id)` when you are done. A session also ends after
+600 s without a call (lackpy reaps it on the next registry call), or when the
+registry evicts it. An unknown or expired `session_id` is an error. It is never
+a silent fresh run. A session belongs to one workspace and one profile.
+
+### Memory
+
+Each checkpoint is a process. Python writes reference counts, so a checkpoint
+copies any value that a cell iterates over. The session keeps at most 32
+checkpoints and at most 1024 MiB of measured memory (Pss) across them. When a
+limit is passed, it drops checkpoints and keeps two: the checkpoint before the
+last cell that did not succeed, and the latest one.
+
+Measured without the memory budget: 32 checkpoints over about 100 MB of ints
+held 2862 MiB Pss. This is why the budget exists. A document with large values
+has fewer resume points. A resume point that was dropped runs fresh.
+
 ## What was removed
 
 The literate interpreter had a kit of tools and ran cells with host builtins.

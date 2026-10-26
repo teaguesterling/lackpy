@@ -151,6 +151,16 @@ the shape.
 against it repeatedly. `source(path)` with an explicit argument overrides the
 default.
 
+### Time limits
+
+`LackpyService` runs the `python` and `literate` interpreters in a worker
+process with a time limit, a memory cap and a CPU-time limit (Linux only). See
+[Time limits](time-limits.md).
+
+Direct use of an interpreter, as in the examples above, runs in your process.
+Direct use of `RestrictedRunner` or `CellSession` also runs in-process, and has
+no time limit. The caller chooses this route, and the caller is host code.
+
 ## Registering a custom interpreter
 
 Interpreters register themselves through the module-level registry. Bundled
