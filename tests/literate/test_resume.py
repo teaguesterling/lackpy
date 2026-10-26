@@ -661,3 +661,38 @@ def test_close_does_not_wait_for_a_running_submit(env, runner):
     assert run._channel is None  # the submit's thread closed the channel's fds
     assert _wait_gone(pids) == []
     assert run.submit(_doc(LOG, FIX), None).error == f"session {run.session_id!r} is closed"
+
+
+# --- final review I4: every registry call reaps idle sessions --------------------
+
+def _idle_registry(env):
+    """A registry with one session past its idle time. The run never submitted, so it
+    started no process (the runner is never called)."""
+    from lackpy.run.sessions import SessionRegistry
+
+    now = [0.0]
+    registry = SessionRegistry(idle_seconds=5, clock=lambda: now[0])
+    idle = registry.open(runner=object(), workspace=env["ws"], profile_name="lit",
+                         path_policy=env["loader"](env["ws"]), cell_timeout=1.0)
+    idle.release()
+    now[0] += 6
+    return registry, idle
+
+
+def test_close_reaps_idle_sessions(env):
+    registry, idle = _idle_registry(env)
+    registry.close("another")
+    assert idle._closed
+
+
+def test_contains_reaps_idle_sessions(env):
+    registry, idle = _idle_registry(env)
+    assert "another" not in registry
+    assert idle._closed
+
+
+def test_reap_closes_idle_sessions(env):
+    registry, idle = _idle_registry(env)
+    registry.reap()
+    assert idle._closed
+    assert idle.session_id not in registry

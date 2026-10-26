@@ -1071,6 +1071,9 @@ class LackpyService:
         Returns:
             An ExecutionResult with output, trace, and success status.
         """
+        # Final review I4: every run_program reaches the registry, so idle
+        # literate sessions end even when only plain programs run.
+        self._sessions.reap()
         try:
             rp = self._resolve_profile(profile)
             names = _rule_names(rules)

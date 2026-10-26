@@ -27,8 +27,8 @@ retries one.
 A :class:`SessionRegistry` holds the runs that MCP calls name by
 ``session_id``. A session belongs to one workspace and one profile. It ends on
 an explicit close, after ``idle_seconds`` without a call, or when the registry
-is full (the session idle longest goes first). Idle sessions are reaped when
-the registry is next used.
+is full (the session idle longest goes first). Idle sessions are reaped at the
+start of every registry call (final review I4).
 """
 
 from __future__ import annotations
@@ -298,13 +298,27 @@ class SessionRegistry:
     def close(self, session_id: str) -> None:
         """End the session ``session_id``. An unknown id is ignored."""
         with self._lock:
+            ended = self._reap()
             run = self._runs.pop(session_id, None)
         if run is not None:
-            run.close()
+            ended.append(run)
+        for r in ended:
+            r.close()
+
+    def reap(self) -> None:
+        """Close the sessions idle longer than ``idle_seconds`` (final review I4)."""
+        with self._lock:
+            ended = self._reap()
+        for r in ended:
+            r.close()
 
     def __contains__(self, session_id: str) -> bool:
         with self._lock:
-            return session_id in self._runs
+            ended = self._reap()
+            held = session_id in self._runs
+        for r in ended:
+            r.close()
+        return held
 
     def close_all(self) -> None:
         with self._lock:

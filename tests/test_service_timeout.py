@@ -400,3 +400,18 @@ async def test_delegate_bounds_the_literate_checkpoints(make, monkeypatch):
     assert len(seen) == 1
     assert seen[0].get("max_checkpoints") == svc._sessions.max_checkpoints == 32
     assert seen[0].get("max_checkpoint_mb") == svc._sessions.max_checkpoint_mb == 1024
+
+
+async def test_run_program_reaps_idle_sessions(make, ws):
+    """Final review I4: a plain run_program reaches the registry, so idle sessions end."""
+    from lackpy.run.sessions import SessionRegistry
+
+    svc = make()
+    now = [0.0]
+    svc._sessions = SessionRegistry(idle_seconds=5, clock=lambda: now[0])
+    idle = svc._sessions.open(runner=object(), workspace=ws, profile_name="lit",
+                              path_policy=PathPolicy(ws, []), cell_timeout=1.0)
+    idle.release()  # never submitted: no process
+    now[0] += 6
+    assert (await svc.run_program("1")).success
+    assert idle._closed
