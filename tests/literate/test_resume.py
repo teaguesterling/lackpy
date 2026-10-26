@@ -581,7 +581,9 @@ def test_the_checkpoint_budget_bounds_a_large_value(env, runner):
     D10 keeps stay under it, and a resume at the stopped cell still works."""
     sums = [f"s{i} = sum(big)" for i in range(1, 13)]
     first_doc = _doc(LOG + "\n" + BIG, *sums, LOOP, "big = 0", prose="")
-    run = _literate_run(env, runner, cell_timeout=2.0, max_checkpoint_mb=256)
+    # Final review I3: cell 1 builds the large value in 1.2-2.0 s under suite load,
+    # so 2 s flaked; 10 s gives the cells that are not LOOP room (LOOP costs 10 s).
+    run = _literate_run(env, runner, cell_timeout=10.0, max_checkpoint_mb=256)
     try:
         first = run.submit(first_doc, None)
         assert first.error_phase == "timeout", first
