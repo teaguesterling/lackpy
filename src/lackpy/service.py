@@ -272,7 +272,9 @@ class LackpyService:
         self._process_runner: ProcessRunner | None = None
         # The live literate sessions a later run_program names by session_id
         # (Plan 3 Task 7, D10). Closed with the service.
-        self._sessions = SessionRegistry()
+        # Each session's checkpoints: at most 32 processes (fds), and at most
+        # 1024 MiB of measured Pss (fix round 2 ruling).
+        self._sessions = SessionRegistry(max_checkpoints=32, max_checkpoint_mb=1024)
         self._mcp_client: Any = None  # lazily created if [mcp_servers] are configured
         self.toolbox = Toolbox()
         # The toolbox is internal machinery since the kit was removed from the

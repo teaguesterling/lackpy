@@ -43,7 +43,7 @@ from ..interpreters.literate import runs_no_code
 from ..interpreters.literate.parser import parse
 from .base import ExecutionResult
 from .paths import PathPolicy
-from .process import _check_max_checkpoints
+from .process import _check_checkpoint_budget, _check_max_checkpoints
 
 
 class SessionError(Exception):
@@ -83,8 +83,11 @@ class LiterateRun:
                  context_config: dict[str, Any] | None = None,
                  max_checkpoints: int = 32, session_id: str | None = None,
                  clock: Callable[[], float] = time.monotonic,
-                 max_timeout: float | None = None) -> None:
+                 max_timeout: float | None = None,
+                 max_checkpoint_mb: float | None = 1024) -> None:
         _check_max_checkpoints(max_checkpoints)
+        _check_checkpoint_budget(max_checkpoint_mb)
+        self.max_checkpoint_mb = max_checkpoint_mb
         self.session_id = session_id or uuid.uuid4().hex
         self.workspace = Path(workspace)
         self.profile_name = profile_name
@@ -173,7 +176,7 @@ class LiterateRun:
         self._channel = self._runner.open_session(
             path_policy=self._policy, workspace=self.workspace, cell_timeout=self._timeout,
             rule_names=rule_names, context_config=config, max_checkpoints=self.max_checkpoints,
-            cpu_timeout=self._max_timeout)
+            cpu_timeout=self._max_timeout, max_checkpoint_mb=self.max_checkpoint_mb)
         return self._channel.submit(document, params=params or None)
 
     def _close_channel(self) -> None:
@@ -193,12 +196,17 @@ class SessionRegistry:
     """The live literate sessions that MCP calls name by ``session_id`` (D10).
 
     The defaults are starting values; the Task 7 report has the measured memory.
+    ``max_checkpoints`` bounds each session's checkpoint count (and so its fds);
+    ``max_checkpoint_mb`` bounds their measured Pss (fix round 2).
     """
 
     def __init__(self, *, max_sessions: int = 8, idle_seconds: float = 600,
                  max_checkpoints: int = 32,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 max_checkpoint_mb: float | None = 1024) -> None:
         _check_max_checkpoints(max_checkpoints)
+        _check_checkpoint_budget(max_checkpoint_mb)
+        self.max_checkpoint_mb = max_checkpoint_mb
         self.max_sessions = max_sessions
         self.idle_seconds = idle_seconds
         self.max_checkpoints = max_checkpoints
@@ -221,7 +229,7 @@ class SessionRegistry:
                           path_policy=path_policy, cell_timeout=cell_timeout,
                           rule_names=rule_names, context_config=context_config,
                           max_checkpoints=self.max_checkpoints, clock=self._clock,
-                          max_timeout=max_timeout)
+                          max_timeout=max_timeout, max_checkpoint_mb=self.max_checkpoint_mb)
         run.busy = True
         with self._lock:
             ended = self._reap()

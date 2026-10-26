@@ -340,7 +340,8 @@ class ProcessRunner:
                      rule_names: list[str] | None,
                      context_config: dict[str, Any],
                      max_checkpoints: int | None = None,
-                     cpu_timeout: float | None = None) -> "SessionChannel":
+                     cpu_timeout: float | None = None,
+                     max_checkpoint_mb: float | None = None) -> "SessionChannel":
         """Start a literate session worker (``spawn_session``) and return its channel.
 
         The whole literate interpreter runs in the worker, with a checkpoint fork
@@ -350,6 +351,8 @@ class ProcessRunner:
         interpreter's ``context.config`` as data (the policy, the hook and the
         rules are added in the worker). ``max_checkpoints`` bounds the live
         checkpoints (Task 7); None is no bound, else it must be at least 2.
+        ``max_checkpoint_mb`` bounds their summed Pss in MiB (fix round 2);
+        None is no budget.
         ``cpu_timeout`` (default ``cell_timeout``) sets the CPU backstop of each
         session process: the longest cell limit a later submit may use (fix
         round 1, ruling B). RLIMIT_CPU counts each forked process from zero
@@ -361,6 +364,7 @@ class ProcessRunner:
         if rule_names and any(type(r) is not str for r in rule_names):
             raise ValueError("the process runner takes rule names, not callables")
         _check_max_checkpoints(max_checkpoints)
+        _check_checkpoint_budget(max_checkpoint_mb)
         ours, theirs = socket.socketpair()
         ctl_ours, ctl_theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         try:
@@ -374,7 +378,8 @@ class ProcessRunner:
                                      workspace=workspace, cell_timeout=cell_timeout,
                                      rule_names=rule_names, context_config=context_config,
                                      max_checkpoints=max_checkpoints,
-                                     cpu_timeout=max(cell_timeout, cpu_timeout or 0.0))
+                                     cpu_timeout=max(cell_timeout, cpu_timeout or 0.0),
+                                     max_checkpoint_mb=max_checkpoint_mb)
         except (_SpawnError, OSError, wire.WireError) as e:
             ours.close()
             ctl_ours.close()
@@ -474,8 +479,11 @@ class SessionChannel:
                  path_policy: PathPolicy, workspace: Path, cell_timeout: float,
                  rule_names: list[str] | None, context_config: dict[str, Any],
                  max_checkpoints: int | None = None,
-                 cpu_timeout: float | None = None) -> None:
+                 cpu_timeout: float | None = None,
+                 max_checkpoint_mb: float | None = None) -> None:
         _check_max_checkpoints(max_checkpoints)
+        _check_checkpoint_budget(max_checkpoint_mb)
+        self.max_checkpoint_mb = max_checkpoint_mb
         self.pid = pid
         #: The parent's wall limit for each cell. A caller may change it between
         #: submits, up to ``cpu_timeout`` (the CPU backstop set at spawn).
@@ -615,24 +623,50 @@ class SessionChannel:
             return msg
 
     def _evict(self) -> None:
-        """Beyond ``max_checkpoints``, checkpoint processes exit (spec D10, fix round 1 I3).
+        """Checkpoint processes exit beyond the bounds (spec D10; fix rounds 1 and 2).
 
-        Kept always: the checkpoint before the last cell stopped at the limit,
-        and the latest checkpoint (the deepest process's parent). Dropped first:
-        the checkpoints of the re-run pass (past the walk, so never a resume
-        point), then the oldest of the rest. A dropped checkpoint's children
-        live on: a waiting checkpoint has no PDEATHSIG.
+        Two bounds: ``max_checkpoints`` (the count, which bounds fds) and
+        ``max_checkpoint_mb`` (the summed Pss of the waiting checkpoints, read
+        from ``/proc/<pid>/smaps_rollup`` after each cell_start). The order is
+        the same for both. Kept always: the checkpoint before the last cell
+        stopped at the limit, and the latest checkpoint (the deepest process's
+        parent). Dropped first: the checkpoints of the re-run pass (past the
+        walk, so never a resume point), then the oldest of the rest. When only
+        the kept ones are left, they stay, even over the budget. A dropped
+        checkpoint's children live on: a waiting checkpoint has no PDEATHSIG.
         """
-        if self.max_checkpoints is None:
+        if self.max_checkpoints is not None:
+            while len(self._stack) - 1 > self.max_checkpoints:
+                victim = self._victim()
+                if victim is None:
+                    break
+                self._drop(victim)
+        if self.max_checkpoint_mb is None:
             return
-        while len(self._stack) - 1 > self.max_checkpoints:
-            keep = {self._stack[-1].pid, self._stack[-1].parent, self._protect}
-            candidates = [p for p in self._stack[:-1] if p.pid not in keep]
-            if not candidates:
-                return
-            victim = next((p for p in candidates if p.after_walk), candidates[0])
-            self._stack.remove(victim)
-            victim.close()
+        budget = self.max_checkpoint_mb * 1024
+        pss = {p.pid: _pss_kib(p.pid) for p in self._stack[:-1]}
+        total = sum(pss.values())
+        # The total after a drop is estimated by subtraction: the shared pages
+        # of the dropped process count more in the others' Pss afterwards, so
+        # the estimate is low; the next cell_start reads it again.
+        while total > budget:
+            victim = self._victim()
+            if victim is None:
+                break  # only the D10 checkpoints are left: kept over the budget
+            total -= pss.get(victim.pid, 0)
+            self._drop(victim)
+
+    def _victim(self) -> "_Proc | None":
+        """The next checkpoint to drop, in the D10 order; None when only the kept ones are left."""
+        keep = {self._stack[-1].pid, self._stack[-1].parent, self._protect}
+        candidates = [p for p in self._stack[:-1] if p.pid not in keep]
+        if not candidates:
+            return None
+        return next((p for p in candidates if p.after_walk), candidates[0])
+
+    def _drop(self, victim: "_Proc") -> None:
+        self._stack.remove(victim)
+        victim.close()
 
     def submit(self, document: str, *, params: dict[str, Any] | None) -> ExecutionResult:
         """Run ``document`` in the session; never raises for anything the document does.
@@ -844,6 +878,32 @@ def close_shared_runners() -> None:
 
 
 atexit.register(close_shared_runners)
+
+
+def _pss_kib(pid: int) -> int:
+    """The process's Pss in KiB, from ``/proc/<pid>/smaps_rollup``.
+
+    A file that cannot be read (missing: the process is gone, or a kernel
+    without smaps_rollup; or permission denied) counts as 0, so the budget
+    never fails a run: it then bounds only what it can read.
+    """
+    try:
+        with open(f"/proc/{pid}/smaps_rollup") as f:
+            for line in f:
+                if line.startswith("Pss:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
+
+
+def _check_checkpoint_budget(max_checkpoint_mb: float | None) -> None:
+    if max_checkpoint_mb is None:
+        return
+    if (type(max_checkpoint_mb) not in (int, float) or not math.isfinite(max_checkpoint_mb)
+            or max_checkpoint_mb <= 0):
+        raise ValueError(f"max_checkpoint_mb must be a number of MiB above 0, "
+                         f"not {max_checkpoint_mb!r}")
 
 
 def _check_max_checkpoints(max_checkpoints: int | None) -> None:

@@ -563,3 +563,67 @@ def test_literate_agent_uses_the_configured_memory_cap(agent, env, monkeypatch):
     asyncio.run(agent.run_literate_agent("x", base_dir=str(env["ws"]), generate=generate,
                                          policy_loader=env["loader"]))
     assert seen == [384]
+
+
+# --- Task 7 fix round 2: a measured memory budget for the checkpoints ------------
+
+BIG = "big = list(range(1000000, 3800000))"  # about 100 MB of int objects
+
+
+def _pss_mib(pid: int) -> float:
+    with open(f"/proc/{pid}/smaps_rollup") as f:
+        return next(int(line.split()[1]) for line in f if line.startswith("Pss:")) / 1024
+
+
+def test_the_checkpoint_budget_bounds_a_large_value(env, runner):
+    """Every later cell iterates a large value, so each checkpoint holds its own copy
+    (I5: about 87 MiB each). With a 256 MiB budget, the checkpoints other than the two
+    D10 keeps stay under it, and a resume at the stopped cell still works."""
+    sums = [f"s{i} = sum(big)" for i in range(1, 13)]
+    first_doc = _doc(LOG + "\n" + BIG, *sums, LOOP, "big = 0", prose="")
+    run = _literate_run(env, runner, cell_timeout=2.0, max_checkpoint_mb=256)
+    try:
+        first = run.submit(first_doc, None)
+        assert first.error_phase == "timeout", first
+        stack = run._channel._stack
+        deepest = stack[-1]
+        kept = {deepest.pid, deepest.parent, run._channel._protect}
+        others = sum(_pss_mib(p.pid) for p in stack if p.pid not in kept)
+        assert others <= 256, (others, len(stack))
+        fixed = run.submit(_doc(LOG + "\n" + BIG, *sums, FIX, "big = 0", prose=""), None)
+    finally:
+        run.close()
+    assert fixed.success, fixed
+    assert fixed.variables.get("b") == 21
+    assert _lines(env) == 1
+
+
+def test_budget_eviction_keeps_the_d10_checkpoints(env, runner):
+    """A budget below one checkpoint drops every checkpoint but the D10 two, and does not loop."""
+    cells = [LOG, LOOP] + [f"c{i} = {i}" for i in range(2, 7)]
+    run = _literate_run(env, runner, max_checkpoint_mb=1)
+    try:
+        first = run.submit(_doc(*cells), None)
+        assert first.error_phase == "timeout", first
+        assert len(run._channel._stack) <= 3, run._channel._stack
+        fixed = run.submit(_doc(LOG, FIX, *cells[2:]), None)
+    finally:
+        run.close()
+    assert fixed.success, fixed
+    assert _lines(env) == 1
+
+
+def test_an_unreadable_smaps_counts_as_zero():
+    from lackpy.run import process
+
+    assert process._pss_kib(2 ** 31 - 1) == 0  # no such process: counted as 0, never raised
+
+
+@pytest.mark.parametrize("budget", [0, -5, "big"])
+def test_a_bad_checkpoint_budget_is_refused(env, runner, budget):
+    from lackpy.run.sessions import SessionRegistry
+
+    with pytest.raises(ValueError, match="max_checkpoint_mb"):
+        _literate_run(env, runner, max_checkpoint_mb=budget)
+    with pytest.raises(ValueError, match="max_checkpoint_mb"):
+        SessionRegistry(max_checkpoint_mb=budget)
