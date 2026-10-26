@@ -32,6 +32,7 @@ from . import wire
 from .base import ExecutionResult
 from .limits import ENV_KEEP, STDOUT_CAP
 from .paths import PathPolicy
+from .pidfd import check as _check_pidfd, pidfd_open, pidfd_send_signal
 from .trace import START_SUFFIX, Trace, TraceEntry
 
 __all__ = ["ProcessRunner", "STDOUT_CAP", "SessionChannel", "close_shared_runners",
@@ -161,6 +162,9 @@ class ProcessRunner:
         if not hasattr(os, "fork"):
             # Global constraint: never fall back to an in-process run silently.
             raise RuntimeError("the process runner needs os.fork (Linux)")
+        # Final review C1: every kill goes through a pidfd, never a pid. Fail
+        # loud here, before any worker exists, when neither path works.
+        _check_pidfd()
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         env = {k: os.environ[k] for k in ENV_KEEP if k in os.environ}
         try:
@@ -263,9 +267,14 @@ class ProcessRunner:
                                        error=f"the run process could not be started ({e})")
             self.last_pid = pid
             try:
-                pidfd: int | None = os.pidfd_open(pid)
+                pidfd: int | None = pidfd_open(pid)
             except ProcessLookupError:
-                pidfd = None
+                pidfd = None  # already gone: its exit event says how
+            except OSError as e:
+                # Final review C1: with no pidfd the worker could not be killed
+                # at the deadline. It gets no program, and exits on EOF.
+                return ExecutionResult(success=False,
+                                       error=f"the run process could not be watched ({e})")
             deadline = time.monotonic() + timeout
             run = _Run(pid, pidfd)
             try:
@@ -430,8 +439,8 @@ class _Proc:
         self.walk = True
         self.after_walk = False
         try:
-            self.pidfd: int | None = os.pidfd_open(pid)
-        except ProcessLookupError:
+            self.pidfd: int | None = pidfd_open(pid)
+        except OSError:  # gone (ProcessLookupError), or no pidfd (EMFILE...): see concerns
             self.pidfd = None
 
     def close(self) -> None:
@@ -916,6 +925,6 @@ def _kill(pidfd: int | None) -> None:
     if pidfd is None:
         return
     try:
-        signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+        pidfd_send_signal(pidfd, signal.SIGKILL)
     except OSError:
         pass  # already gone

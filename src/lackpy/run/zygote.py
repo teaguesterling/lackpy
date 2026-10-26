@@ -45,6 +45,7 @@ from typing import Any
 
 from lackpy.lang.validator import validate
 from lackpy.run import wire
+from lackpy.run.pidfd import pidfd_open, pidfd_send_signal
 from lackpy.run.limits import ENV_KEEP, STDOUT_CAP, apply_child_limits
 from lackpy.run import session_worker
 # Warm: a session root and its checkpoint forks find the literate interpreter
@@ -352,7 +353,7 @@ def _spawn(control: socket.socket, data: bytes, fds: list[int],
         _child(run_fd, control, children, msg, test_ops, zygote_pid, ctl_fd)
     if ctl_fd is not None:
         os.close(ctl_fd)  # the zygote keeps only the root's socket, for the exit event
-    pidfd = os.pidfd_open(pid)
+    pidfd = pidfd_open(pid)
     children[pidfd] = (pid, socket.socket(fileno=run_fd))
     poller.register(pidfd, select.POLLIN)
     _reply(control, {"event": "spawned", "pid": pid})
@@ -361,7 +362,7 @@ def _spawn(control: socket.socket, data: bytes, fds: list[int],
 def _shutdown(children: dict[int, tuple[int, socket.socket]]) -> None:
     for pidfd, (pid, sock) in children.items():
         try:
-            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+            pidfd_send_signal(pidfd, signal.SIGKILL)
         except OSError:
             pass
     for pidfd, (pid, sock) in children.items():

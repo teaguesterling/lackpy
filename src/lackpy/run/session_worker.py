@@ -66,6 +66,7 @@ from typing import Any
 
 from . import wire
 from .limits import PR_SET_PDEATHSIG, _prctl
+from .pidfd import pidfd_open
 from .trace import TraceEntry
 
 #: Exit statuses, as the zygote's.
@@ -141,7 +142,7 @@ class _Hook:
             selector = getattr(asyncio.get_running_loop(), "_selector", None)
             self.epfd = selector.fileno() if selector is not None else -1
             try:
-                self.zygote = os.pidfd_open(os.getppid())
+                self.zygote = pidfd_open(os.getppid())
             except OSError:
                 os._exit(EXIT_ERROR)
         # Everything this process sent for its cell is on its socket before the
@@ -200,7 +201,7 @@ class _Hook:
         """Wait until the child ``pid`` is gone; exit when the session is."""
         try:
             _prctl(PR_SET_PDEATHSIG, 0)
-            child = os.pidfd_open(pid)
+            child = pidfd_open(pid)
         except OSError:
             os._exit(EXIT_ERROR)
         sock = self.channel.sock
