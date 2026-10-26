@@ -222,15 +222,17 @@ class LiterateRun:
 class SessionRegistry:
     """The live literate sessions that MCP calls name by ``session_id`` (D10).
 
-    The defaults are starting values; the Task 7 report has the measured memory.
+    The defaults are tight on purpose (Teague, 2026-10-25): at most 2 sessions
+    of 256 MiB of checkpoints each, until a machine-wide limit exists. The Task 7
+    report has the measured memory.
     ``max_checkpoints`` bounds each session's checkpoint count (and so its fds);
     ``max_checkpoint_mb`` bounds their measured Pss (fix round 2).
     """
 
-    def __init__(self, *, max_sessions: int = 8, idle_seconds: float = 600,
+    def __init__(self, *, max_sessions: int = 2, idle_seconds: float = 600,
                  max_checkpoints: int = 32,
                  clock: Callable[[], float] = time.monotonic,
-                 max_checkpoint_mb: float | None = 1024) -> None:
+                 max_checkpoint_mb: float | None = 256) -> None:
         _check_max_checkpoints(max_checkpoints)
         _check_checkpoint_budget(max_checkpoint_mb)
         self.max_checkpoint_mb = max_checkpoint_mb

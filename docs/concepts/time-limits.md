@@ -136,8 +136,8 @@ A short summary of the rules:
 - Over MCP, `run_program` returns `session_id` for a literate profile. Pass it
   back with the corrected document. Call `close_session(session_id)` when done.
 - A session ends at `close_session`, after 600 s without a call (lackpy reaps it
-  on the next registry call), or by eviction. The defaults are 8 sessions, 32
-  checkpoints for each session, and 1024 MiB (Pss) of checkpoints for each
+  on the next registry call), or by eviction. The defaults are 2 sessions, 32
+  checkpoints for each session, and 256 MiB (Pss) of checkpoints for each
   session.
 - These runs are not resumed, so they run fresh: an append-only resubmission
   after a run that completed all its cells, a resubmission that pauses at
