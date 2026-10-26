@@ -358,3 +358,27 @@ def test_concurrent_runs_do_not_cross(runner, tmp_path):
     gb = _in_thread(lambda: _run(runner, prog, b))
     assert (ga().output, gb().output) == ("A", "B")
     assert os.getcwd() not in (str(a), str(b))
+
+
+_ENTRY = {"step": 0, "args": [], "result": None, "duration_ms": 0.0, "success": True,
+          "error": None}
+
+
+@pytest.mark.parametrize("tool", [5, None, ["Path.read_text"]])
+def test_a_trace_entry_whose_tool_is_not_a_str_is_a_bad_message(tool):
+    """Final review minor: a non-str tool was an AttributeError (``.endswith``) that
+    escaped ProcessRunner.run; it is a bad message, so the run is a failed result."""
+    from lackpy.run import process
+
+    run = process._Run(1, None)
+    with pytest.raises(process._BadMessage):
+        run.take({"event": "trace", "entry": dict(_ENTRY, tool=tool)})
+
+
+def test_trace_entry_from_data_refuses_a_non_str_tool():
+    """The session paths (``_follow``, the timeout drain) catch TypeError, so the one
+    check in from_data covers them too."""
+    from lackpy.run.trace import TraceEntry
+
+    with pytest.raises(TypeError, match="tool"):
+        TraceEntry.from_data(dict(_ENTRY, tool=5))

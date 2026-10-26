@@ -41,6 +41,10 @@ class TraceEntry:
 
     @classmethod
     def from_data(cls, d: dict[str, Any]) -> "TraceEntry":
+        """``TypeError`` when ``tool`` is not a str: the parent reads entries from a
+        worker, and every reader treats a TypeError as a bad message."""
+        if type(d["tool"]) is not str:
+            raise TypeError(f"a trace entry's tool must be str, not {type(d['tool']).__name__}")
         return cls(step=d["step"], tool=d["tool"], args=d["args"], result=d["result"],
                    duration_ms=d["duration_ms"], success=d["success"], error=d["error"])
 
