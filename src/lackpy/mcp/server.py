@@ -37,6 +37,10 @@ _EXECUTES = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 _WRITES_FILE = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                idempotentHint=True, openWorldHint=False)
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+# `close_session` stops a session's processes (destructive) and reaches nothing
+# outside lackpy (closed world); closing twice is the same as once.
+_CLOSES = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                          idempotentHint=True, openWorldHint=False)
 
 
 def set_workspace(workspace: Path) -> None:
@@ -167,7 +171,7 @@ async def run_program(program: str, profile: str | None = None,
                    "success": e.success, "error": e.error} for e in result.trace.entries]})
 
 
-@mcp.tool(annotations=_EXECUTES)
+@mcp.tool(annotations=_CLOSES)
 def close_session(session_id: str) -> dict:
     """End a literate session that `run_program` returned, and stop its processes.
     `closed` is false when the session was unknown or had already ended."""

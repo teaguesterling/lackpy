@@ -556,6 +556,10 @@ class LackpyService:
             return name if name in self._config.profiles else "(none)"
         return "(unnamed)"
 
+    def _timeout_cap(self, rp: ResolvedProfile) -> float:
+        """The profile's cap on a run's timeout: ``max_timeout``, else ``config.sandbox_timeout``."""
+        return rp.max_timeout if rp.max_timeout is not None else self._config.sandbox_timeout
+
     def _check_timeout(self, timeout: Any, rp: ResolvedProfile,
                        profile: Any) -> tuple[float, str | None]:
         """The run's time limit in seconds, and the refusal text when it is refused (D8).
@@ -566,7 +570,7 @@ class LackpyService:
         ruling). An explicit value that is not a finite number above 0 is
         refused, and so is one over the cap.
         """
-        cap = rp.max_timeout if rp.max_timeout is not None else self._config.sandbox_timeout
+        cap = self._timeout_cap(rp)
         if timeout is None:
             return min(self._config.sandbox_timeout, cap), None
         if not _positive_seconds(timeout):
@@ -789,7 +793,8 @@ class LackpyService:
     async def _execute_program(
         self, program: str, rp: ResolvedProfile, param_values: dict[str, Any],
         *, timeout: float | None = None, rules: list | None = None,
-        rule_names: list[str] | None = None, session: tuple[str | None, str] | None = None,
+        rule_names: list[str] | None = None,
+        session: tuple[str | None, str, float] | None = None,
     ) -> ExecutionResult:
         """Route a program to the execution model named by the profile's ``execution``
         axis -- the shared seam for ``run_program`` and ``delegate``.
@@ -809,7 +814,7 @@ class LackpyService:
         callable rule is refused: it cannot cross; ledger Ruling D). A profile whose ``policy.read_only`` is
         true runs under ``read_only_policy`` on either axis.
 
-        ``session`` is ``(session_id, profile_name)`` from ``run_program`` (Plan 3
+        ``session`` is ``(session_id, profile_name, timeout cap)`` from ``run_program`` (Plan 3
         Task 7, D10): a literate run then stays open in the registry, and a
         given ``session_id`` resumes it. None runs and closes, as before.
         """
@@ -839,7 +844,7 @@ class LackpyService:
     async def _execute_literate(
         self, program: str, param_values: dict[str, Any], *, timeout: float,
         read_only: bool = False, rule_names: list[str] | None = None,
-        session: tuple[str | None, str] | None = None,
+        session: tuple[str | None, str, float] | None = None,
     ) -> ExecutionResult:
         """Run a literate document in a session worker (Plan 3 D6, Ruling D) and adapt the result.
 
@@ -883,23 +888,31 @@ class LackpyService:
         runner = self._process_runner
         workspace = self._workspace.resolve()
 
-        def run_in_session(session_id: str | None, profile_name: str) -> ExecutionResult:
+        def run_in_session(session_id: str | None, profile_name: str,
+                           cap: float) -> ExecutionResult:
             # Task 7 (D10): the session stays open for a retry, and a retry
-            # with its session_id resumes from the first changed cell.
+            # with its session_id resumes from the first changed cell. The
+            # worker's CPU backstop is the profile's cap, so a retry with a
+            # longer timeout keeps the session (fix round 1, ruling B). Both
+            # open and get lease the run; its submit ends the lease.
             if session_id is None:
                 live = self._sessions.open(runner=runner, workspace=workspace,
                                            profile_name=profile_name, path_policy=policy,
                                            cell_timeout=timeout, rule_names=rule_names,
-                                           context_config=config)
+                                           context_config=config, max_timeout=cap)
             else:
                 try:
                     live = self._sessions.get(session_id, workspace=workspace,
                                               profile_name=profile_name)
                 except SessionError as e:
                     return ExecutionResult(success=False, error=str(e))
+            try:
                 live.configure(path_policy=policy, cell_timeout=timeout,
-                               rule_names=rule_names, context_config=config)
-            result = live.submit(program, param_values)
+                               rule_names=rule_names, context_config=config, max_timeout=cap)
+                result = live.submit(program, param_values)
+            except BaseException:
+                live.release()
+                raise
             result.session_id = live.session_id
             return result
 
@@ -1067,7 +1080,8 @@ class LackpyService:
         # validation and execution; the seam keeps them paired (see _execute_program).
         return await self._execute_program(program, rp, param_values, timeout=seconds,
                                            rules=rules, rule_names=names,
-                                           session=(session_id, self._profile_name(profile)))
+                                           session=(session_id, self._profile_name(profile),
+                                                    self._timeout_cap(rp)))
 
     async def delegate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,

@@ -339,7 +339,8 @@ class ProcessRunner:
     def open_session(self, *, path_policy: PathPolicy, workspace: Path, cell_timeout: float,
                      rule_names: list[str] | None,
                      context_config: dict[str, Any],
-                     max_checkpoints: int | None = None) -> "SessionChannel":
+                     max_checkpoints: int | None = None,
+                     cpu_timeout: float | None = None) -> "SessionChannel":
         """Start a literate session worker (``spawn_session``) and return its channel.
 
         The whole literate interpreter runs in the worker, with a checkpoint fork
@@ -348,25 +349,32 @@ class ProcessRunner:
         validates every cell with them (ledger Ruling D). ``context_config`` is the
         interpreter's ``context.config`` as data (the policy, the hook and the
         rules are added in the worker). ``max_checkpoints`` bounds the live
-        checkpoints (Task 7); None is no bound.
+        checkpoints (Task 7); None is no bound, else it must be at least 2.
+        ``cpu_timeout`` (default ``cell_timeout``) sets the CPU backstop of each
+        session process: the longest cell limit a later submit may use (fix
+        round 1, ruling B). RLIMIT_CPU counts each forked process from zero
+        (measured), so it applies to each cell.
 
         Raises ``ValueError`` when ``rule_names`` holds anything but names, and
         ``RuntimeError`` when the session process cannot be started.
         """
         if rule_names and any(type(r) is not str for r in rule_names):
             raise ValueError("the process runner takes rule names, not callables")
+        _check_max_checkpoints(max_checkpoints)
         ours, theirs = socket.socketpair()
         ctl_ours, ctl_theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         try:
             try:
-                pid = self._spawn(theirs, math.ceil(cell_timeout) + CPU_MARGIN, ctl_theirs)
+                cpu = max(cell_timeout, cpu_timeout or 0.0)
+                pid = self._spawn(theirs, math.ceil(cpu) + CPU_MARGIN, ctl_theirs)
             finally:
                 theirs.close()
                 ctl_theirs.close()
             channel = SessionChannel(pid, ours, ctl_ours, path_policy=path_policy,
                                      workspace=workspace, cell_timeout=cell_timeout,
                                      rule_names=rule_names, context_config=context_config,
-                                     max_checkpoints=max_checkpoints)
+                                     max_checkpoints=max_checkpoints,
+                                     cpu_timeout=max(cell_timeout, cpu_timeout or 0.0))
         except (_SpawnError, OSError, wire.WireError) as e:
             ours.close()
             ctl_ours.close()
@@ -397,9 +405,15 @@ class ProcessRunner:
 class _Proc:
     """One live process of a session, as the parent follows it."""
 
-    def __init__(self, index: int | None, pid: int, sock: socket.socket) -> None:
+    def __init__(self, index: int | None, pid: int, sock: socket.socket,
+                 parent: int | None = None) -> None:
         self.index = index  # the cell it runs; None for the root
         self.pid = pid
+        self.parent = parent  # the pid of the checkpoint that forked it; None for the root
+        # Set when it forks: the cell it is the checkpoint before, and whether
+        # that fork was in the walk. A checkpoint forks at one index only (an
+        # instruction forks again at the same index).
+        self.before: tuple[int, bool] | None = None
         self.sock = sock
         self.reader = wire.Reader(sock)
         self.cell_ended = False  # it sent cell_end; its cell_start comes on the shared channel
@@ -459,10 +473,20 @@ class SessionChannel:
     def __init__(self, pid: int, sock: socket.socket, ctl: socket.socket, *,
                  path_policy: PathPolicy, workspace: Path, cell_timeout: float,
                  rule_names: list[str] | None, context_config: dict[str, Any],
-                 max_checkpoints: int | None = None) -> None:
+                 max_checkpoints: int | None = None,
+                 cpu_timeout: float | None = None) -> None:
+        _check_max_checkpoints(max_checkpoints)
         self.pid = pid
+        #: The parent's wall limit for each cell. A caller may change it between
+        #: submits, up to ``cpu_timeout`` (the CPU backstop set at spawn).
         self.cell_timeout = cell_timeout
+        self.cpu_timeout = max(cell_timeout, cpu_timeout or 0.0)
         self.max_checkpoints = max_checkpoints
+        #: The cells (``cell_start`` index) stopped at the limit, in the state the
+        #: session holds now: cleared by ``submit``, and by ``resume(index)`` for
+        #: those at ``index`` or later (fix round 1, ruling A).
+        self.stopped: set[int] = set()
+        self._protect: int | None = None  # the checkpoint before the last stopped cell
         #: True after a submit or resume that ended with the document's result:
         #: then every process but the deepest is a checkpoint waiting in its hook.
         self.finished = False
@@ -582,15 +606,33 @@ class SessionChannel:
                     os.close(f)
                 continue
             cur.cell_ended = False
-            new = _Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0]))
+            new = _Proc(msg["index"], msg["pid"], socket.socket(fileno=fds[0]), parent=cur.pid)
             new.walk = not cur.after_walk
             new.after_walk = cur.after_walk
+            cur.before = (msg["index"], new.walk)
             self._stack.append(new)
-            # Task 7: beyond the cap, the oldest checkpoint exits. The ones
-            # after it live on (a waiting checkpoint has no PDEATHSIG).
-            while self.max_checkpoints is not None and len(self._stack) - 1 > self.max_checkpoints:
-                self._stack.pop(0).close()
+            self._evict()
             return msg
+
+    def _evict(self) -> None:
+        """Beyond ``max_checkpoints``, checkpoint processes exit (spec D10, fix round 1 I3).
+
+        Kept always: the checkpoint before the last cell stopped at the limit,
+        and the latest checkpoint (the deepest process's parent). Dropped first:
+        the checkpoints of the re-run pass (past the walk, so never a resume
+        point), then the oldest of the rest. A dropped checkpoint's children
+        live on: a waiting checkpoint has no PDEATHSIG.
+        """
+        if self.max_checkpoints is None:
+            return
+        while len(self._stack) - 1 > self.max_checkpoints:
+            keep = {self._stack[-1].pid, self._stack[-1].parent, self._protect}
+            candidates = [p for p in self._stack[:-1] if p.pid not in keep]
+            if not candidates:
+                return
+            victim = next((p for p in candidates if p.after_walk), candidates[0])
+            self._stack.remove(victim)
+            victim.close()
 
     def submit(self, document: str, *, params: dict[str, Any] | None) -> ExecutionResult:
         """Run ``document`` in the session; never raises for anything the document does.
@@ -603,9 +645,11 @@ class SessionChannel:
         (the root itself ran over), the run ends with the timeout text.
         """
         self.finished = False
+        self.stopped.clear()
+        self._protect = None
         try:
             self.send({"op": "submit", "document": document, "params": params,
-                       **self._submit_base})
+                       **self._submit_base, "cell_timeout": self.cell_timeout})
         except wire.WireError as e:
             return ExecutionResult(success=False, error=f"the document's params cannot be sent: {e}")
         except OSError:
@@ -615,16 +659,18 @@ class SessionChannel:
     def _checkpoint_for(self, index: int) -> int | None:
         """The stack position of the live walk checkpoint before cell ``index``, or None.
 
-        Only a process with a successor in the stack is a candidate: it forked
-        that successor in its hook and waits there, inside the kernel loop, so
-        it can still run. The deepest process (which finished the document and
-        left ``asyncio.run``) never is. Nor is a checkpoint of the re-run pass.
+        Only a process that forked a child in its hook is a candidate (it
+        recorded ``before``): it waits there, inside the kernel loop, so it can
+        still run. The deepest process (which finished the document and left
+        ``asyncio.run``) never forked, so it never is. Nor is a checkpoint of
+        the re-run pass (its fork was not in the walk).
         """
         if not self.finished:
             return None
-        for j in range(len(self._stack) - 1):
-            nxt = self._stack[j + 1]
-            if nxt.index == index and nxt.walk:
+        # The stack may have holes (eviction), so the checkpoint is found by
+        # what it recorded at its fork, not by the process after it.
+        for j, p in enumerate(self._stack[:-1]):
+            if p.before == (index, True):
                 return j
         return None
 
@@ -644,6 +690,7 @@ class SessionChannel:
         if j is None:
             raise ValueError(f"no checkpoint can resume cell {index}")
         self.finished = False
+        self.stopped = {i for i in self.stopped if i < index}
         while len(self._stack) > j + 1:
             self._stack.pop().close()
         checkpoint = self._stack[j]
@@ -724,6 +771,9 @@ class SessionChannel:
         # The checkpoint forks a child to carry out the instruction (Task 7):
         # wait for its cell_start on the shared channel.
         checkpoint = self._stack[-1]
+        if dead.index is not None:
+            self.stopped.add(dead.index)
+            self._protect = checkpoint.pid
         checkpoint.cell_ended = True
         checkpoint.wait_until = time.monotonic() + self.HANDOFF_SECONDS
         try:
@@ -794,6 +844,12 @@ def close_shared_runners() -> None:
 
 
 atexit.register(close_shared_runners)
+
+
+def _check_max_checkpoints(max_checkpoints: int | None) -> None:
+    """D10 keeps two checkpoints (before the last stopped cell, and the latest), so at least 2."""
+    if max_checkpoints is not None and (type(max_checkpoints) is not int or max_checkpoints < 2):
+        raise ValueError(f"max_checkpoints must be an int of at least 2, not {max_checkpoints!r}")
 
 
 def _kill(pidfd: int | None) -> None:

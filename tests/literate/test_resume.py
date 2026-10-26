@@ -195,7 +195,9 @@ def test_resume_twice_from_the_same_checkpoint(env, runner):
 
 
 def test_checkpoints_over_the_cap_exit(env, runner):
-    """Beyond max_checkpoints the oldest checkpoint process exits; a resume before it runs fresh."""
+    """Beyond max_checkpoints, checkpoints exit (spec D10, fix round 1 I3): the one
+    before the stopped cell and the latest are kept, the oldest of the rest go. A
+    resume before a dropped one runs fresh."""
     cells = [LOG, "c1 = 1", "c2 = 2", "c3 = 3", "c4 = 4"]
     run = _literate_run(env, runner, max_checkpoints=2)
     try:
@@ -203,11 +205,12 @@ def test_checkpoints_over_the_cap_exit(env, runner):
         assert first.error_phase == "timeout", first
         live = [pid for _, pid in run._channel.checkpoints]
         assert len(run._channel._stack) <= 3, run._channel._stack
-        # The newest checkpoint is kept: a fix of the last cell resumes.
+        # The checkpoint before the stopped (last) cell is kept: its fix resumes.
         second = run.submit(_doc(*cells, FIX), None)
         assert second.success, second
         assert _lines(env) == 1
-        # Cell 2's checkpoint was dropped: a change there runs fresh.
+        # The checkpoint before cell 2 (index 1) was among the oldest: dropped, so a
+        # change there runs fresh.
         third = run.submit(_doc(LOG, "c1 = 10", *cells[2:], FIX), None)
         assert third.success, third
         assert _lines(env) == 2
@@ -286,6 +289,7 @@ def test_idle_session_reaped(env, runner):
     pids = [pid for _, pid in run._channel.checkpoints] + [run._channel.pid]
     now[0] += 4
     assert registry.get(run.session_id, workspace=env["ws"], profile_name="lit") is run
+    run.release()  # get() leases the run (fix round 1); a leased run is never reaped
     now[0] += 6
     with pytest.raises(SessionError, match="unknown or expired session_id"):
         registry.get(run.session_id, workspace=env["ws"], profile_name="lit")
@@ -297,11 +301,15 @@ def test_a_full_registry_closes_the_session_idle_longest(env, runner):
 
     now = [0.0]
     registry = SessionRegistry(max_sessions=2, clock=lambda: now[0])
+    # open() and get() lease a run (fix round 1); each lease ends where the run is last used.
     first = _open(registry, env, runner)
+    first.release()
     now[0] += 1
     second = _open(registry, env, runner)
+    second.release()
     now[0] += 1
     registry.get(first.session_id, workspace=env["ws"], profile_name="lit")  # first is used again
+    first.release()
     now[0] += 1
     third = _open(registry, env, runner)
     try:
@@ -345,3 +353,213 @@ def test_literate_agent_resubmission_resumes(agent, env):
     assert "took longer than 1 s" in calls[2]  # the model is shown the timeout
     assert "B=21" in out, out
     assert _lines(env) == 1
+
+
+# --- Task 7 fix round 1 -----------------------------------------------------------
+
+import threading  # noqa: E402
+
+from lackpy.interpreters.literate.parser import parse  # noqa: E402
+
+# Prose that runs for far longer than any limit here (no `**` in lackpy).
+SLOW_PROSE = "> X={sum(range(10000000000))}"
+
+
+def _cell_number(doc: str, text: str) -> int:
+    """The document number (from 1, prose counted) of the first cell that holds ``text``."""
+    return next(i for i, c in enumerate(parse(doc).cells) if text in c.content) + 1
+
+
+def _bounded_submit(run, runner, doc, params=None, bound=15.0):
+    """``run.submit`` in a thread; None if it did not return within ``bound`` seconds.
+
+    On a hang the zygote is stopped, so the session's processes exit and the
+    thread returns (a waiting checkpoint exits when the zygote is gone).
+    """
+    box = {}
+    t = threading.Thread(target=lambda: box.setdefault("r", run.submit(doc, params)), daemon=True)
+    t.start()
+    t.join(bound)
+    if t.is_alive():
+        runner.close()
+        t.join(10)
+        return None
+    return box["r"]
+
+
+@pytest.mark.parametrize("where", ["segment_start", "middle", "trailing"])
+def test_a_slow_prose_cell_times_out_and_the_document_goes_on(env, runner, where):
+    """C1: a prose interpolation over the limit is reified as timed out, once.
+
+    ``segment_start``: the document's first cell. ``middle``: between two code
+    cells. ``trailing``: the last cell, with no code cell after it.
+    """
+    docs = {
+        "segment_start": _doc(SLOW_PROSE, "b = 1"),
+        "middle": _doc("a = 1", SLOW_PROSE, "b = a + 1"),
+        "trailing": _doc("a = 1", "b = a + 1", SLOW_PROSE, prose=""),
+    }
+    doc = docs[where]
+    run = _literate_run(env, runner)
+    try:
+        r = _bounded_submit(run, runner, doc)
+        assert r is not None, "submit did not return: the slow prose cell ran again and again"
+    finally:
+        run.close()
+    assert r.error_phase == "timeout", r
+    n = _cell_number(doc, "sum(range(")
+    assert r.stdout.count(f"timeout: cell {n} took longer than 1 s and was stopped") == 1, r.stdout
+    assert r.variables.get("b") in (1, 2), r
+    if where != "trailing":
+        assert "B=" in r.stdout
+
+
+def test_the_resume_route_validates_as_the_fresh_route(env, runner):
+    """I2: a document the fresh route refuses as a whole is refused the same way on resume."""
+    bad = _doc(LOG, prose="") + "\n```lackpy @nosuch\nb = 1\n```\n"  # a parse error
+    chan = runner.open_session(path_policy=env["loader"](env["ws"]), workspace=env["ws"],
+                               cell_timeout=1.0, rule_names=None, context_config={})
+    try:
+        fresh = chan.submit(bad, params=None)
+    finally:
+        chan.close()
+    assert fresh.success is False and fresh.error, fresh
+    chan = runner.open_session(path_policy=env["loader"](env["ws"]), workspace=env["ws"],
+                               cell_timeout=1.0, rule_names=None, context_config={})
+    try:
+        assert chan.submit(_doc(LOG, LOOP), params=None).error_phase == "timeout"
+        assert chan.can_resume(1)
+        resumed = chan.resume(1, bad)
+    finally:
+        chan.close()
+    assert (resumed.success, resumed.error) == (False, fresh.error)
+
+
+def test_an_identical_resubmission_resumes_at_the_stopped_cell(env, runner):
+    """Pending ruling A: k = min(first changed cell, first cell that did not complete)."""
+    run = _literate_run(env, runner)
+    try:
+        # The document ends on the stopped cell: no prose segment after it.
+        assert run.submit(_doc(LOG, LOOP, prose=""), None).error_phase == "timeout"
+        again = run.submit(_doc(LOG, LOOP, prose=""), None)
+    finally:
+        run.close()
+    assert again.error_phase == "timeout", again
+    assert _lines(env) == 1  # cell 1 did not run again
+
+
+# About 3.7 s of CPU on longbottom: over a 1 s limit, under a 15 s one.
+SLOWISH = 'import re\nre.search(r"(a+)+$", "a" * 25 + "b")\nb = a + 1'
+
+
+def test_a_longer_timeout_keeps_the_session(env):
+    """Pending ruling B, Teague's retry path: the same document with a longer timeout
+    resumes at the stopped cell, which now finishes; cell 1 wrote its line once."""
+    from lackpy.profiles import Profile
+    from lackpy.service import LackpyService
+
+    service = LackpyService(workspace=env["ws"], path_policy_loader=env["loader"])
+    lit = Profile(execution="literate")
+    doc = _doc(LOG, SLOWISH, prose="")
+    try:
+        first = asyncio.run(service.run_program(doc, profile=lit, timeout=1))
+        assert first.error_phase == "timeout", first
+        second = asyncio.run(service.run_program(doc, profile=lit, timeout=15,
+                                                 session_id=first.session_id))
+    finally:
+        service.close()
+    assert second.success, second
+    assert second.session_id == first.session_id
+    assert second.variables.get("b") == 21
+    assert _lines(env) == 1
+
+
+def test_eviction_keeps_the_checkpoint_before_the_failed_cell(env, runner):
+    """I3 (spec D10): with max_checkpoints=2, the checkpoint before the last cell that
+    did not succeed is kept, as is the latest, while later cells add checkpoints."""
+    cells = [LOG, LOOP] + [f"c{i} = {i}" for i in range(2, 7)]
+    run = _literate_run(env, runner, max_checkpoints=2)
+    try:
+        first = run.submit(_doc(*cells), None)
+        assert first.error_phase == "timeout", first
+        assert len(run._channel.checkpoints) <= 3
+        fixed = run.submit(_doc(LOG, FIX, *cells[2:]), None)
+    finally:
+        run.close()
+    assert fixed.success, fixed
+    assert fixed.variables.get("b") == 21
+    assert _lines(env) == 1
+
+
+@pytest.mark.parametrize("cap", [0, 1])
+def test_max_checkpoints_below_two_is_refused(env, runner, cap):
+    from lackpy.run.sessions import SessionRegistry
+
+    with pytest.raises(ValueError, match="max_checkpoints"):
+        _literate_run(env, runner, max_checkpoints=cap)
+    with pytest.raises(ValueError, match="max_checkpoints"):
+        SessionRegistry(max_checkpoints=cap)
+
+
+def test_a_leased_run_is_never_evicted(env, runner):
+    """Minor 7: open() and get() lease the run; eviction skips a leased run."""
+    from lackpy.run.sessions import SessionRegistry
+
+    registry = SessionRegistry(max_sessions=1)
+    first = _open(registry, env, runner)  # leased, not yet submitted
+    second = _open(registry, env, runner)
+    try:
+        assert first.session_id in registry  # not evicted while leased
+        r = first.submit(_doc(LOG, FIX), None)
+        assert r.success, r
+        assert _lines(env) == 1
+    finally:
+        registry.close(first.session_id)
+        registry.close(second.session_id)
+
+
+def test_a_closed_run_refuses_submit(env, runner):
+    """Minor 7: a closed LiterateRun never runs fresh silently."""
+    run = _literate_run(env, runner)
+    run.close()
+    r = run.submit(_doc(LOG, FIX), None)
+    assert r.success is False
+    assert r.error == f"session {run.session_id!r} is closed"
+    assert _lines(env) == 0
+
+
+def test_literate_agent_resubmission_follows_continue(agent, env):
+    """I4: a resubmitted document that ends in @continue keeps following @continue."""
+    responses = [
+        "<compute>\nx = 1 // 0\n</compute>\n",
+        "<compute>\na = 2\n</compute>\n\n<compute continue>",
+        "<compute>\nb = a + 1\n</compute>\n\nB={b}.\n",
+        "never asked",
+    ]
+    calls = []
+
+    async def generate(prompt, **kwargs):
+        calls.append(prompt)
+        return responses.pop(0)
+
+    out = asyncio.run(agent.run_literate_agent(
+        "x", base_dir=str(env["ws"]), generate=generate, policy_loader=env["loader"],
+        max_iterations=4, timeout=5.0))
+    assert len(calls) == 3
+    assert "B=3." in out, out
+
+
+def test_literate_agent_uses_the_configured_memory_cap(agent, env, monkeypatch):
+    """Minor 11: the agent's runner takes sandbox.memory_mb from the workspace config."""
+    (env["ws"] / ".lackpy").mkdir()
+    (env["ws"] / ".lackpy" / "config.toml").write_text("[sandbox]\nmemory_mb = 384\n")
+    seen = []
+    real = agent.shared_runner
+    monkeypatch.setattr(agent, "shared_runner", lambda mb: seen.append(mb) or real(mb))
+
+    async def generate(prompt, **kwargs):
+        return "Plain prose.\n"
+
+    asyncio.run(agent.run_literate_agent("x", base_dir=str(env["ws"]), generate=generate,
+                                         policy_loader=env["loader"]))
+    assert seen == [384]

@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
+from lackpy.config import load_config
 from lackpy.interpreters.literate import (
     COMPUTE_CONTINUE_MARKER,
     CONTINUE_MARKER,
@@ -28,6 +29,7 @@ from lackpy.interpreters.literate import (
     LiterateSession,
     StopScanner,
 )
+from lackpy.interpreters.literate.session import split_at_continue
 from lackpy.prompts import DEFAULT_PERSONA, PERSONAS, compose
 from lackpy.run.paths import load_policy
 from lackpy.run.process import shared_runner
@@ -140,8 +142,9 @@ async def run_literate_agent(
     A full-document resubmission (after a Left) runs in the agent's one
     :class:`LiterateRun`, a session worker with ``timeout`` seconds for each
     cell (Plan 3 D8, D10): a resubmission resumes from the checkpoint before
-    its first changed cell. A ``@continue`` in a resubmitted document is not
-    followed: its result is the answer.
+    its first changed cell. A resubmitted document that pauses at
+    ``@continue`` runs as before Task 7: in a new in-process session, and the
+    rounds after it follow the pause (those rounds have no time limit).
 
     ``generate`` replaces :func:`call_ollama` (tests pass a stub); ``policy_loader``
     replaces :func:`load_policy` (tests pass one with a temporary home).
@@ -164,21 +167,22 @@ async def run_literate_agent(
         return LiterateSession(context, interpreter=interpreter, max_rounds=max_iterations)
 
     session = new_session()
-    literate_run = LiterateRun(shared_runner(512), workspace=work_dir,
+    memory_mb = load_config(work_dir).sandbox_memory_mb
+    literate_run = LiterateRun(shared_runner(memory_mb), workspace=work_dir,
                                profile_name="literate_agent",
                                path_policy=context.config["path_policy"], cell_timeout=timeout)
-    resubmission = False  # the next response is a full-document resubmission
     try:
         return await _rounds(
-            user_prompt, generate, session, literate_run, resubmission, work_dir, model,
+            user_prompt, generate, new_session, session, literate_run, work_dir, model,
             system_prompt, num_predict, verbose, max_iterations, persona)
     finally:
         literate_run.close()
 
 
-async def _rounds(user_prompt, generate, session, literate_run, resubmission, work_dir, model,
+async def _rounds(user_prompt, generate, new_session, session, literate_run, work_dir, model,
                   system_prompt, num_predict, verbose, max_iterations, persona) -> str:
     """The model-call loop of :func:`run_literate_agent`."""
+    resubmission = False  # the next response is a full-document resubmission
     # The raw responses of the rounds the current session accepted (Right), in
     # order: the retry prompt after a Left shows them, so the model can
     # resubmit the whole document.
@@ -216,6 +220,13 @@ async def _rounds(user_prompt, generate, session, literate_run, resubmission, wo
             print(response, file=sys.stderr)
             print("--- End Response ---\n", file=sys.stderr)
 
+        if resubmission and split_at_continue(response)[1]:
+            # A resubmitted document that pauses at @continue keeps following
+            # @continue, as before Task 7 (fix round 1, I4): it runs once in a
+            # new in-process session, and the rounds after it continue there.
+            session = new_session()
+            accepted = []
+            resubmission = False
         if resubmission:
             # The prefix rule (D10): the resubmitted document resumes from the
             # checkpoint before its first changed cell, so the cells before it

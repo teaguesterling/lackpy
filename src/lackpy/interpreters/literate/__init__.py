@@ -31,7 +31,7 @@ from ..base import (
 from .annotations import kernel_note
 from ...run.cells import CellSession
 from ...run.trace import START_SUFFIX, Trace, TraceEntry
-from .compiler import compile_cell
+from .compiler import compile_cell, prose_segments
 from .display import DEFAULT_DISPLAY_THRESHOLD
 from .effects import as_grade, classify_cell, exceeds_ceiling, path_writes
 from .kernel import CellResult, LightweightKernel
@@ -281,13 +281,16 @@ class LiterateInterpreter:
         # (after the last cell, after a re-run): the parent then stops the
         # cell's deadline, so host work is not charged to the cell.
         #
-        # Task 7: a prose cell takes no checkpoint of its own. The hook runs at
-        # the start of each segment: the first cell, and each cell after a
-        # non-prose cell. A segment is a run of prose cells and the cell after
-        # them, so its checkpoint is also the one before each of its prose
-        # cells (a resume from it renders only prose again). A timeout returned
-        # there belongs to the segment's first non-prose cell: the prose before
-        # it renders as usual.
+        # Task 7: a cell that runs no code (prose with no interpolation,
+        # ``runs_no_code``) takes no checkpoint of its own. The hook runs at the
+        # start of each segment: the first cell, and each cell after one that
+        # can run code. A segment is a run of no-code cells and the one cell
+        # after them that can run code (a code cell, or prose with an
+        # interpolation), so its checkpoint is also the one before each of its
+        # no-code cells (a resume from it renders only plain text again). A
+        # timeout returned there belongs to that one cell, the only one in the
+        # segment that runs code (fix round 1, C1): it is reified, and the
+        # plain text before it renders as usual.
         checkpoint = (context.config or {}).get("checkpoint")
         cell_done = (context.config or {}).get("cell_done")
         timed_out = False
@@ -295,21 +298,31 @@ class LiterateInterpreter:
         index = 0
         while index < len(parsed.cells):
             cell = parsed.cells[index]
-            segment_start = index == 0 or parsed.cells[index - 1].cell_type != "prose"
+            segment_start = index == 0 or not runs_no_code(parsed.cells[index - 1])
             resume = (checkpoint(index) if checkpoint is not None and kernel.refusal is None
                       and segment_start else None)
             if resume is not None and resume.kind == "resume":
                 # Task 7: continue at ``index`` over the new document's cells,
-                # with the params the first run applied.
-                reparsed = parse(resume.document or "")
-                params_error = None
-                if context.params and not reparsed.errors:
-                    params_error = _apply_document_params(reparsed, context.params)
-                if reparsed.errors or params_error is not None:
+                # with the params the first run applied. The document is
+                # validated as the fresh route validates it (the session
+                # worker's ``_submit``), and refused with the same text (fix
+                # round 1, I2).
+                validation = self.validate(resume.document or "", context)
+                if not validation.valid:
                     return InterpreterExecutionResult(
                         success=False,
-                        error=(f"Configuration error: {params_error}" if params_error
-                               else "Parse errors: " + "; ".join(reparsed.errors)),
+                        error=f"Validation failed: {'; '.join(validation.errors)}",
+                        output_format="none",
+                        duration_ms=(time.perf_counter() - start) * 1000,
+                    )
+                reparsed = parse(resume.document or "")
+                params_error = None
+                if context.params:
+                    params_error = _apply_document_params(reparsed, context.params)
+                if params_error is not None:
+                    return InterpreterExecutionResult(
+                        success=False,
+                        error=f"Configuration error: {params_error}",
                         output_format="none",
                         duration_ms=(time.perf_counter() - start) * 1000,
                     )
@@ -321,7 +334,7 @@ class LiterateInterpreter:
             if resume is not None:  # "timeout": the child was stopped at the limit
                 timed_out = True
                 pending_timeout = resume
-            if pending_timeout is not None and cell.cell_type != "prose":
+            if pending_timeout is not None and not runs_no_code(cell):
                 values.pop(index, None)
                 output_parts.append(_reify_timeout_for_cell(
                     cell, index, pending_timeout, kernel, ledger, versions, assigned_names,
@@ -1294,6 +1307,15 @@ def _reify_error_for_cell(
     if reify:
         note += f" — bound as error value: {', '.join(reify)}"
     return kernel_note(note) + "\n"
+
+
+def runs_no_code(cell: Cell) -> bool:
+    """True for a prose cell with no interpolation: it renders without running code.
+
+    Such a cell takes no checkpoint, and a timeout never belongs to it (Plan 3
+    Task 7). The prefix rule (``lackpy.run.sessions``) uses the same test.
+    """
+    return cell.cell_type == "prose" and all(seg.expr is None for seg in prose_segments(cell))
 
 
 def _gate_violations(parsed: ParseResult, context: ExecutionContext) -> dict[int, str]:

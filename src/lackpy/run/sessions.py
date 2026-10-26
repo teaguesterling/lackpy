@@ -8,9 +8,12 @@ applies the prefix rule to each full-document submission:
   last submission's, and finds the first index ``k`` where they differ. The
   comparison is exact: cell type, source text, annotation arguments and
   options, and the frontmatter.
-- A prose cell takes no checkpoint of its own: the checkpoint at the start of
-  a run of prose cells serves each of them. So the resume point is the start
-  of the segment that holds cell ``k``.
+- ``k`` is no later than the first cell that did not complete in the session's
+  last run (it was stopped at the limit): an identical resubmission resumes
+  at the stopped cell (fix round 1, ruling A).
+- A cell that runs no code (prose with no interpolation) takes no checkpoint
+  of its own: the checkpoint at the start of a run of such cells serves each
+  of them. So the resume point is the start of the segment that holds ``k``.
 - If a checkpoint that can still run holds that point, the processes for that
   cell and every newer one are stopped, and the checkpoint resumes the new
   document there. The cells before it do not run again.
@@ -36,9 +39,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from ..interpreters.literate import runs_no_code
 from ..interpreters.literate.parser import parse
 from .base import ExecutionResult
 from .paths import PathPolicy
+from .process import _check_max_checkpoints
 
 
 class SessionError(Exception):
@@ -52,7 +57,8 @@ def _shape(document: str) -> tuple[Any, list[tuple[Any, ...]]] | None:
         return None
     fm = parsed.frontmatter
     cells = [(c.cell_type, c.content, tuple(sorted(c.annotation_args.items())),
-              tuple(sorted(c.options.items())), c.truncated) for c in parsed.cells]
+              tuple(sorted(c.options.items())), c.truncated, runs_no_code(c))
+             for c in parsed.cells]
     return (fm.echo, fm.output, fm.interpreter), cells
 
 
@@ -61,7 +67,14 @@ class LiterateRun:
 
     Not for concurrent use by design, but safe: ``submit`` and ``close`` take
     one lock. ``last_used`` is the clock's time at the start and the end of the
-    last call.
+    last call. ``busy`` is True while a caller holds the run (a registry lease,
+    or a submit): a registry never closes a busy run. A closed run refuses
+    ``submit``; it never runs fresh silently (fix round 1, minor 7).
+
+    ``cell_timeout`` is the wall limit for each cell, and may change on each
+    ``configure``. ``max_timeout`` (default ``cell_timeout``) is the CPU
+    backstop the worker is spawned with: a later limit up to it keeps the
+    session (fix round 1, ruling B).
     """
 
     def __init__(self, runner: Any, *, workspace: Path, profile_name: str,
@@ -69,7 +82,9 @@ class LiterateRun:
                  rule_names: list[str] | None = None,
                  context_config: dict[str, Any] | None = None,
                  max_checkpoints: int = 32, session_id: str | None = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 max_timeout: float | None = None) -> None:
+        _check_max_checkpoints(max_checkpoints)
         self.session_id = session_id or uuid.uuid4().hex
         self.workspace = Path(workspace)
         self.profile_name = profile_name
@@ -81,30 +96,52 @@ class LiterateRun:
         self._last: tuple[Any, dict[str, Any]] | None = None  # (shape, params) last submitted
         self._settings: tuple[Any, ...] = ()
         self._policy = path_policy
+        self._timeout = float(cell_timeout)
+        self._max_timeout = float(cell_timeout)
+        self._closed = False
         self.busy = False
         self.last_used = clock()
         self.configure(path_policy=path_policy, cell_timeout=cell_timeout,
-                       rule_names=rule_names, context_config=context_config)
+                       rule_names=rule_names, context_config=context_config,
+                       max_timeout=max_timeout)
 
     def configure(self, *, path_policy: PathPolicy, cell_timeout: float,
                   rule_names: list[str] | None = None,
-                  context_config: dict[str, Any] | None = None) -> None:
-        """Set what the worker runs under. A change closes the worker, so the next submit is fresh.
+                  context_config: dict[str, Any] | None = None,
+                  max_timeout: float | None = None) -> None:
+        """Set what the worker runs under.
 
-        The checkpoints hold the old policy, rules, config and CPU limit, so a
-        resume under other settings would not run as the call asks.
+        A change of policy, rules or config closes the worker, so the next
+        submit is fresh: the checkpoints hold the old ones. A new
+        ``cell_timeout`` keeps the worker while it is within the CPU backstop
+        the worker was spawned with (``max_timeout``); above it, the worker is
+        closed.
         """
-        settings = (path_policy.to_data(), float(cell_timeout),
-                    list(rule_names) if rule_names else None, dict(context_config or {}))
+        settings = (path_policy.to_data(), list(rule_names) if rule_names else None,
+                    dict(context_config or {}))
+        cap = max(float(cell_timeout), float(max_timeout or 0.0))
         with self._lock:
-            if settings != self._settings:
+            channel = self._channel
+            if settings != self._settings or (
+                    channel is not None and float(cell_timeout) > channel.cpu_timeout):
                 self._close_channel()
-                self._settings = settings
-                self._policy = path_policy
+            self._settings = settings
+            self._policy = path_policy
+            self._timeout = float(cell_timeout)
+            self._max_timeout = cap
+
+    def release(self) -> None:
+        """End a registry lease without a submit."""
+        self.busy = False
+        self.last_used = self._clock()
 
     def submit(self, document: str, params: dict[str, Any] | None = None) -> ExecutionResult:
         """Run ``document``, resuming from the checkpoint before its first changed cell."""
         with self._lock:
+            if self._closed:
+                self.busy = False
+                return ExecutionResult(success=False,
+                                       error=f"session {self.session_id!r} is closed")
             self.busy = True
             self.last_used = self._clock()
             try:
@@ -121,19 +158,22 @@ class LiterateRun:
                 and last[0] is not None and last[1] == params and last[0][0] == shape[0]):
             old, new = last[0][1], shape[1]
             k = next((i for i, (a, b) in enumerate(zip(old, new)) if a != b), min(len(old), len(new)))
+            k = min([k, *channel.stopped])  # ruling A: no later than a stopped cell
             start = k
-            while start > 0 and new[start - 1][0] == "prose":
+            while start > 0 and new[start - 1][-1]:  # back over cells that run no code
                 start -= 1
             if channel.can_resume(start):
+                channel.cell_timeout = self._timeout
                 return channel.resume(start, document)
         return self._fresh(document, params)
 
     def _fresh(self, document: str, params: dict[str, Any]) -> ExecutionResult:
         self._close_channel()
-        _, timeout, rule_names, config = self._settings
+        _, rule_names, config = self._settings
         self._channel = self._runner.open_session(
-            path_policy=self._policy, workspace=self.workspace, cell_timeout=timeout,
-            rule_names=rule_names, context_config=config, max_checkpoints=self.max_checkpoints)
+            path_policy=self._policy, workspace=self.workspace, cell_timeout=self._timeout,
+            rule_names=rule_names, context_config=config, max_checkpoints=self.max_checkpoints,
+            cpu_timeout=self._max_timeout)
         return self._channel.submit(document, params=params or None)
 
     def _close_channel(self) -> None:
@@ -142,8 +182,9 @@ class LiterateRun:
             self._channel = None
 
     def close(self) -> None:
-        """Stop every process of the session. Idempotent."""
+        """Stop every process of the session; later submits refuse. Idempotent."""
         with self._lock:
+            self._closed = True
             self._close_channel()
             self._last = None
 
@@ -157,6 +198,7 @@ class SessionRegistry:
     def __init__(self, *, max_sessions: int = 8, idle_seconds: float = 600,
                  max_checkpoints: int = 32,
                  clock: Callable[[], float] = time.monotonic) -> None:
+        _check_max_checkpoints(max_checkpoints)
         self.max_sessions = max_sessions
         self.idle_seconds = idle_seconds
         self.max_checkpoints = max_checkpoints
@@ -167,16 +209,26 @@ class SessionRegistry:
     def open(self, *, runner: Any, workspace: Path, profile_name: str,
              path_policy: PathPolicy, cell_timeout: float,
              rule_names: list[str] | None = None,
-             context_config: dict[str, Any] | None = None) -> LiterateRun:
-        """A new session. When the registry is full, the session idle longest is closed."""
+             context_config: dict[str, Any] | None = None,
+             max_timeout: float | None = None) -> LiterateRun:
+        """A new session, leased to the caller (its submit ends the lease).
+
+        When the registry is full, the session idle longest is closed. A leased
+        session is never closed: with every session leased, the registry holds
+        one more than ``max_sessions`` until a lease ends.
+        """
         run = LiterateRun(runner, workspace=workspace, profile_name=profile_name,
                           path_policy=path_policy, cell_timeout=cell_timeout,
                           rule_names=rule_names, context_config=context_config,
-                          max_checkpoints=self.max_checkpoints, clock=self._clock)
+                          max_checkpoints=self.max_checkpoints, clock=self._clock,
+                          max_timeout=max_timeout)
+        run.busy = True
         with self._lock:
             ended = self._reap()
-            while self._runs and len(self._runs) >= self.max_sessions:
-                idle = [r for r in self._runs.values() if not r.busy] or list(self._runs.values())
+            while len(self._runs) >= self.max_sessions:
+                idle = [r for r in self._runs.values() if not r.busy]
+                if not idle:
+                    break
                 oldest = min(idle, key=lambda r: r.last_used)
                 ended.append(self._runs.pop(oldest.session_id))
             self._runs[run.session_id] = run
@@ -185,7 +237,9 @@ class SessionRegistry:
         return run
 
     def get(self, session_id: str, *, workspace: Path, profile_name: str) -> LiterateRun:
-        """The live session ``session_id``; ``SessionError`` when it is unknown, expired or not this caller's."""
+        """The live session ``session_id``, leased to the caller (its submit, or
+        ``release``, ends the lease); ``SessionError`` when it is unknown, expired
+        or not this caller's."""
         with self._lock:
             ended = self._reap()
             run = self._runs.get(session_id)
@@ -196,6 +250,7 @@ class SessionRegistry:
                              f"{self._runs[session_id].profile_name!r} in "
                              f"{self._runs[session_id].workspace}")
                 else:
+                    run.busy = True  # the lease: eviction and reaping skip it
                     run.last_used = self._clock()
             else:
                 error = f"unknown or expired session_id {session_id!r}"
