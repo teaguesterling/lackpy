@@ -380,3 +380,23 @@ async def test_literate_runs_in_a_session_worker(make, ws):
     assert result.output == 2
     assert svc._process_runner is not None
     assert svc._process_runner.last_pid not in (None, os.getpid())
+
+
+async def test_delegate_bounds_the_literate_checkpoints(make, monkeypatch):
+    """Final review I1: delegate's literate session takes the registry's checkpoint
+    bounds, as run_program's does; with none, its checkpoints were unbounded."""
+    seen: list[dict] = []
+    real = ProcessRunner.open_session
+
+    def spy(self, **kw):
+        seen.append(kw)
+        return real(self, **kw)
+
+    monkeypatch.setattr(ProcessRunner, "open_session", spy)
+    svc = make()
+    doc = "Some prose.\n\n```lackpy\nx = 1 + 1\nx\n```\n"
+    result = await svc.delegate("x", profile=Profile(execution="literate"), _program_override=doc)
+    assert result["success"], result
+    assert len(seen) == 1
+    assert seen[0].get("max_checkpoints") == svc._sessions.max_checkpoints == 32
+    assert seen[0].get("max_checkpoint_mb") == svc._sessions.max_checkpoint_mb == 1024

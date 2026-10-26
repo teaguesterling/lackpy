@@ -923,7 +923,10 @@ class LackpyService:
                 return run_in_session(*session)
             channel = runner.open_session(path_policy=policy, workspace=workspace,
                                           cell_timeout=timeout, rule_names=rule_names,
-                                          context_config=config)
+                                          context_config=config,
+                                          # Final review I1: the registry's bounds.
+                                          max_checkpoints=self._sessions.max_checkpoints,
+                                          max_checkpoint_mb=self._sessions.max_checkpoint_mb)
             try:
                 return channel.submit(program, params=param_values)
             finally:
