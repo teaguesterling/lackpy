@@ -75,6 +75,32 @@ def test_the_check_passes_on_the_syscall_path(no_bindings):
     pidfd.check()  # no raise: the kernel has pidfd
 
 
+def test_a_worker_with_no_pidfd_gets_no_program(monkeypatch, tmp_path):
+    """An OSError other than ESRCH (here EMFILE) from pidfd_open is a failed run:
+    a worker that cannot be killed never gets the program."""
+    import errno
+
+    from lackpy.run import process
+    from lackpy.run.paths import PathPolicy
+
+    def emfile(pid: int) -> int:
+        raise OSError(errno.EMFILE, "Too many open files")
+
+    runner = process.ProcessRunner()
+    try:
+        runner._start_zygote()  # the check runs with the real pidfd_open
+        monkeypatch.setattr(process, "pidfd_open", emfile)
+        marker = tmp_path / "ran"
+        result = runner.run(f"from pathlib import Path\nPath({str(marker)!r}).write_text('x')",
+                            params=None, path_policy=PathPolicy(tmp_path, []),
+                            workspace=tmp_path, timeout=5)
+    finally:
+        runner.close()
+    assert not result.success
+    assert result.error.startswith("the run process could not be watched"), result.error
+    assert not marker.exists()
+
+
 def test_the_zygote_start_fails_loud_naming_pidfd(monkeypatch):
     """With neither the bindings nor the syscalls, the runner refuses to start."""
     from lackpy.run import pidfd
