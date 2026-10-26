@@ -399,7 +399,7 @@ async def test_delegate_bounds_the_literate_checkpoints(make, monkeypatch):
     assert result["success"], result
     assert len(seen) == 1
     assert seen[0].get("max_checkpoints") == svc._sessions.max_checkpoints == 32
-    assert seen[0].get("max_checkpoint_mb") == svc._sessions.max_checkpoint_mb == 1024
+    assert seen[0].get("max_checkpoint_mb") == svc._sessions.max_checkpoint_mb == 256
 
 
 async def test_run_program_reaps_idle_sessions(make, ws):
@@ -415,3 +415,13 @@ async def test_run_program_reaps_idle_sessions(make, ws):
     now[0] += 6
     assert (await svc.run_program("1")).success
     assert idle._closed
+
+
+def test_the_session_defaults_are_tight(make):
+    """Final fix wave item 7 (Teague, 2026-10-25): until a machine-wide limit exists,
+    a server holds at most 2 sessions of 256 MiB of checkpoints each."""
+    from lackpy.run.sessions import SessionRegistry
+
+    for registry in (SessionRegistry(), make()._sessions):
+        assert (registry.max_sessions, registry.max_checkpoint_mb) == (2, 256)
+        assert (registry.max_checkpoints, registry.idle_seconds) == (32, 600)
