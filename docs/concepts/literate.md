@@ -585,8 +585,10 @@ a silent fresh run. A session belongs to one workspace and one profile.
 ### Memory
 
 Each checkpoint is a process. Python writes reference counts, so a checkpoint
-copies any value that a cell iterates over. The session keeps at most 32
-checkpoints and at most 256 MiB of measured memory (Pss) across them. When a
+copies any value that a cell iterates over. A session of `run_program` (and so
+of MCP) keeps at most 32 checkpoints and at most 256 MiB of measured memory
+(Pss) across them, and the service keeps at most 2 sessions. The one session of
+`literate_agent` has a budget of 1024 MiB. When a
 limit is passed, it drops checkpoints and keeps two: the checkpoint before the
 last cell that did not succeed, and the latest one.
 

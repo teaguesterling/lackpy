@@ -138,7 +138,7 @@ A short summary of the rules:
 - A session ends at `close_session`, after 600 s without a call (lackpy reaps it
   on the next registry call), or by eviction. The defaults are 2 sessions, 32
   checkpoints for each session, and 256 MiB (Pss) of checkpoints for each
-  session.
+  session. The one session of `literate_agent` has a budget of 1024 MiB.
 - These runs are not resumed, so they run fresh: an append-only resubmission
   after a run that completed all its cells, a resubmission that pauses at
   `@continue` in `literate_agent`, and a submission after the session failed.
