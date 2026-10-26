@@ -1,12 +1,17 @@
 # Time limits
 
-Every lackpy program and every literate cell has a time limit. lackpy enforces
-the limit by killing a process. A program cannot catch the stop, delay it or turn
+Every lackpy program and every literate cell has a time limit, with one
+exception: `scripts/literate_agent.py` runs its first document and its
+`@continue` rounds in-process, with no limit (see
+[Literate documents](#literate-documents)). lackpy enforces the limit by killing
+a process. A program cannot catch the stop, delay it or turn
 it off. This page also covers retries that resume, and the stdlib members added
 to the core vocabulary in the same change.
 
 Linux only. The limit uses `fork`, `prctl` and `setrlimit`, and the memory budget
-reads `/proc`. The limit does not exist on Windows.
+reads `/proc`. On a system without `os.fork`, such as Windows, the run fails with
+`the process runner needs os.fork (Linux)`. lackpy does not fall back to an
+in-process run.
 
 ## Terms
 
@@ -48,7 +53,7 @@ max_timeout = 5
 
 A request that is not acceptable is refused before the run starts. The result
 has `error_phase="refused"`. These refusals were measured on 2026-10-25 (run
-`python:176`):
+`python:178`):
 
 ```text
 --- timeout=30: success=False error_phase=refused
@@ -66,14 +71,14 @@ profile error.
 In a literate document, the limit applies to each cell, not to the whole
 document.
 
-The limit is not part of the program text. The python3 twin of a program has no
-limit.
+The limit is not part of the program text. Plain `python3` running the same code has
+no limit.
 
 ## What a timeout looks like
 
 A program that takes too long gets a timeout. This run used
 `re.search(r"(a+)+$", "a" * 30 + "b")` with `timeout=2`. It was measured on
-2026-10-25 (run `python:176`):
+2026-10-25 (run `python:178`):
 
 ```text
 --- regex, timeout=2: success=False error_phase=timeout
@@ -107,7 +112,7 @@ The worker process also has these limits. A program cannot change them:
   session, it comes from the profile cap.
 - `PR_SET_NO_NEW_PRIVS`.
 
-lackpy does not set `RLIMIT_NPROC`. It stops `fork` in the worker, and the
+lackpy does not set `RLIMIT_NPROC`: that limit makes `fork` fail, and the
 checkpoints need `fork`. The language stops a program from creating a process.
 
 ## Literate documents
@@ -121,8 +126,9 @@ rules.
 A short summary of the rules:
 
 - The document runs in a session worker. The worker takes one checkpoint for each
-  segment. A segment ends at any cell that can run code: a code cell, or a prose
-  cell with an interpolation.
+  segment.
+- A segment ends at any cell that can run code. Such a cell is a code cell, or a
+  prose cell with an interpolation.
 - A retry resumes at `k`, the smaller of the first changed cell and the first
   cell stopped in the last run. The cells before `k` do not run again.
 - A longer `timeout` keeps the session. The session limit on CPU time comes from
@@ -134,8 +140,8 @@ A short summary of the rules:
   checkpoints for each session, and 1024 MiB (Pss) of checkpoints for each
   session.
 - These runs are not resumed, so they run fresh: an append-only resubmission
-  after a run that completed all its cells, and a resubmission that pauses at
-  `@continue` in `literate_agent`. Rounds of `@continue` have no time limit.
+  after a run that completed all its cells, a resubmission that pauses at
+  `@continue` in `literate_agent`, and a submission after the session failed.
 
 ### What the timeout note says about writes
 
@@ -151,8 +157,14 @@ uses them directly runs the program in the caller's process, with no limit. The
 caller chooses this route, and the caller is host code. A program cannot choose
 it.
 
-Every service route goes through the process runner: `run_program`, `delegate`,
-the MCP tools, `lackpyctl render --execute` and `literate_agent`.
+These service routes go through the process runner: `run_program`, `delegate`,
+the MCP tools and `lackpyctl render --execute`.
+
+`scripts/literate_agent.py` is a script, not a service route. Its first run and
+every `@continue` round call `session.step(...)` in-process, with no time limit.
+Only a full-document resubmission runs in a `LiterateRun` session worker, with a
+limit. A resubmission that pauses at `@continue` runs once in a new in-process
+session, and the rounds after it have no limit.
 
 ## The core vocabulary
 
@@ -180,7 +192,8 @@ Four rules apply to the new members:
   first.
 - The infinite iterators `itertools.count`, `cycle` and `repeat` are not
   approved.
-- `tomllib` needs Python 3.11, and `itertools.batched` needs Python 3.12. On an
+- `tomllib` and `datetime.UTC` need Python 3.11, and `itertools.batched` needs
+  Python 3.12. On an
   older Python, the validator reports `<module>.<member> needs Python <version>`.
 - Each type that a new member returns passed the attribute-surface test.
 

@@ -511,9 +511,13 @@ resume starts at the checkpoint of the segment that holds `k`. The comparison
 of cell text is exact. It covers the cell type, the source, the annotations
 and the frontmatter.
 
-If the checkpoint for that point is gone (the session dropped it for memory,
-see [Memory](#memory)), or the submission has other params, the document runs
-fresh. So does the first submission of a session.
+The document runs fresh in these cases:
+
+- the checkpoint for that point is gone (the session dropped it for memory,
+  see [Memory](#memory));
+- the submission has other params;
+- the session failed;
+- it is the first submission of a session.
 
 A short script submitted a document with two code cells to one service, using
 `LackpyService.run_program`. The first code cell appends a line to `log.txt`
@@ -562,14 +566,16 @@ session.
 These cases are not resumed. They run fresh:
 
 - an append-only resubmission after a run that completed all its cells;
-- a resubmission that pauses at `@continue` in `literate_agent`.
+- a resubmission that pauses at `@continue` in `literate_agent`;
+- a submission after the session failed.
 
 ### Sessions over MCP
 
 `run_program` returns a `session_id` for a document on a literate profile. Pass
 it back with the full corrected document to resume. A call without a
-`session_id` starts a fresh session. `literate_agent` keeps its own session
-between rounds.
+`session_id` starts a fresh session. `literate_agent` is a script. It keeps one
+worker session for its full-document resubmissions. Its first run and its
+`@continue` rounds run in-process, with no time limit.
 
 Call `close_session(session_id)` when you are done. A session also ends after
 600 s without a call (lackpy reaps it on the next registry call), or when the
