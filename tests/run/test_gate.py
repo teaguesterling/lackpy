@@ -114,6 +114,9 @@ def test_gate_4_too_deep_is_a_safety_parse_violation():
     assert "nesting depth" in verdict.errors[0]
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Python 3.11's parser and compiler stop at "
+                    "the recursion limit (measured: 992 unary minuses validate and run, 2,991 parse); "
+                    "no program deeper than the limit is valid there")
 def test_gate_4_deep_valid_program_validates_then_runs(tmp_path, tmp_home):
     # run_in_lackpy raises Invalid if validate() rejects, so reaching the result proves both halves.
     result = run_in_lackpy("x = " + "-" * 3_000 + "1\n", tmp_path, tmp_home)
