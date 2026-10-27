@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from lackpy.interpreters.base import ExecutionContext
+from lackpy.config import load_config
 from lackpy.interpreters.literate import (
     COMPUTE_CONTINUE_MARKER,
     CONTINUE_MARKER,
@@ -28,8 +29,11 @@ from lackpy.interpreters.literate import (
     LiterateSession,
     StopScanner,
 )
+from lackpy.interpreters.literate.session import split_at_continue
 from lackpy.prompts import DEFAULT_PERSONA, PERSONAS, compose
 from lackpy.run.paths import load_policy
+from lackpy.run.process import shared_runner
+from lackpy.run.sessions import LiterateRun
 
 
 DEFAULT_MODEL = "qwen3:8b"
@@ -121,6 +125,7 @@ async def run_literate_agent(
     num_predict: int = 8192,
     generate=None,
     policy_loader=load_policy,
+    timeout: float = 120.0,
 ) -> str:
     """Run the literate agent loop.
 
@@ -133,6 +138,13 @@ async def run_literate_agent(
     the ``PathPolicy`` that ``policy_loader`` builds for the working directory:
     the same boundary the service gives a literate run. A refusal ends the
     document (D4), so the loop stops on one rather than asking for a fix.
+
+    A full-document resubmission (after a Left) runs in the agent's one
+    :class:`LiterateRun`, a session worker with ``timeout`` seconds for each
+    cell (Plan 3 D8, D10): a resubmission resumes from the checkpoint before
+    its first changed cell. A resubmitted document that pauses at
+    ``@continue`` runs as before Task 7: in a new in-process session, and the
+    rounds after it follow the pause (those rounds have no time limit).
 
     ``generate`` replaces :func:`call_ollama` (tests pass a stub); ``policy_loader``
     replaces :func:`load_policy` (tests pass one with a temporary home).
@@ -155,10 +167,27 @@ async def run_literate_agent(
         return LiterateSession(context, interpreter=interpreter, max_rounds=max_iterations)
 
     session = new_session()
+    memory_mb = load_config(work_dir).sandbox_memory_mb
+    literate_run = LiterateRun(shared_runner(memory_mb), workspace=work_dir,
+                               profile_name="literate_agent",
+                               path_policy=context.config["path_policy"], cell_timeout=timeout)
+    try:
+        return await _rounds(
+            user_prompt, generate, new_session, session, literate_run, work_dir, model,
+            system_prompt, num_predict, verbose, max_iterations, persona)
+    finally:
+        literate_run.close()
+
+
+async def _rounds(user_prompt, generate, new_session, session, literate_run, work_dir, model,
+                  system_prompt, num_predict, verbose, max_iterations, persona) -> str:
+    """The model-call loop of :func:`run_literate_agent`."""
+    resubmission = False  # the next response is a full-document resubmission
     # The raw responses of the rounds the current session accepted (Right), in
     # order: the retry prompt after a Left shows them, so the model can
     # resubmit the whole document.
     accepted: list[str] = []
+    last_run = None  # the last resubmission's result
 
     if verbose:
         print(f"Persona: {persona}", file=sys.stderr)
@@ -191,6 +220,34 @@ async def run_literate_agent(
             print(response, file=sys.stderr)
             print("--- End Response ---\n", file=sys.stderr)
 
+        if resubmission and split_at_continue(response)[1]:
+            # A resubmitted document that pauses at @continue keeps following
+            # @continue, as before Task 7 (fix round 1, I4): it runs once in a
+            # new in-process session, and the rounds after it continue there.
+            session = new_session()
+            accepted = []
+            resubmission = False
+        if resubmission:
+            # The prefix rule (D10): the resubmitted document resumes from the
+            # checkpoint before its first changed cell, so the cells before it
+            # do not run again. A changed prefix runs fresh (the first
+            # resubmission always does). The refusal check stays first: a
+            # refusal is never retried (D4).
+            run = last_run = await asyncio.to_thread(literate_run.submit, response, None)
+            if verbose:
+                print(f"\nresubmission: success={run.success} error={run.error}", file=sys.stderr)
+            if run.error_phase == "refused":
+                return f"{run.stdout}\n\n{run.error}"
+            if run.success:
+                return run.stdout
+            full_prompt = (
+                f"Your previous document failed:\n{run.error}\n\n"
+                "Here is the whole document you sent:\n" + response.rstrip() + "\n\n"
+                "Fix the problem and resubmit the FULL corrected document, from the "
+                "start. Cells before the first one you change are not run again."
+            )
+            continue
+
         result = await session.step(response)
 
         if verbose:
@@ -210,15 +267,17 @@ async def run_literate_agent(
             # model corrects its own work. The session KEPT this round's partial
             # state (its imports, its bindings), and a session's program only
             # grows, so a full resubmission could never join it ("Rebinding of
-            # imported name"). Final review I1 and the ruling after C1: the
-            # full resubmission runs ONCE in a fresh session; earlier rounds
+            # imported name"). So the full resubmission does not join this
+            # session: it runs in the agent's one LiterateRun, under the prefix
+            # rule (D10, replacing the ruling after C1's "runs ONCE in a fresh
+            # session"). The first resubmission runs fresh; a later one resumes
+            # from the checkpoint before its first changed cell, so the
+            # unchanged cells that already ran do not run again. Earlier rounds
             # are not replayed (they are part of the resubmitted document).
-            # The refusal check above stays first: a refusal is never retried
-            # in a fresh session (D4).
+            # The refusal check above stays first: a refusal is never retried (D4).
             so_far = [raw.replace(COMPUTE_CONTINUE_MARKER, "").rstrip() for raw in accepted]
             so_far.append(result.raw.rstrip())
-            session = new_session()
-            accepted = []
+            resubmission = True
             errors = "\n".join(result.errors)
             full_prompt = (
                 f"Your previous document failed:\n{errors}\n\n"
@@ -248,7 +307,7 @@ async def run_literate_agent(
             f"Continue writing the document from where @continue left off."
         )
 
-    return session.display
+    return last_run.stdout if resubmission and last_run is not None else session.display
 
 
 def main():
@@ -264,6 +323,8 @@ def main():
     )
     parser.add_argument("--num-predict", type=int, default=8192, help="Max tokens for model response (default: 8192)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show model responses on stderr")
+    parser.add_argument("--timeout", type=float, default=120.0,
+                        help="Seconds for each cell of a resubmitted document (default: 120)")
     args = parser.parse_args()
 
     output = asyncio.run(run_literate_agent(
@@ -274,6 +335,7 @@ def main():
         verbose=args.verbose,
         persona=args.persona,
         num_predict=args.num_predict,
+        timeout=args.timeout,
     ))
     print(output)
 

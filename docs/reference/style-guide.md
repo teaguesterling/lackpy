@@ -891,18 +891,27 @@ y = {1: 'a', 2: 'b'}.get(x, 'c')
 
 | Module | Members |
 | --- | --- |
+| `pathlib` | `Path` |
 | `json` | `JSONDecodeError`, `dumps`, `loads` |
 | `re` | `DOTALL`, `I`, `IGNORECASE`, `M`, `MULTILINE`, `S`, `VERBOSE`, `X`, `compile`, `error`, `escape`, `findall`, `finditer`, `fullmatch`, `match`, `search`, `split`, `sub`, `subn` |
-| `collections` | `Counter`, `OrderedDict`, `defaultdict`, `deque` |
-| `math` | `comb`, `exp`, `sqrt` |
+| `collections` | `Counter`, `defaultdict`, `deque` |
+| `math` | `ceil`, `comb`, `exp`, `floor`, `fsum`, `gcd`, `inf`, `isclose`, `isfinite`, `log`, `log10`, `nan`, `prod`, `sqrt` |
 | `statistics` | `mean`, `median`, `pstdev`, `quantiles`, `stdev` |
 | `hashlib` | `sha1`, `sha256` |
 | `datetime` | `UTC`, `date`, `datetime`, `timedelta`, `timezone` |
-| `pathlib` | `Path` |
+| `tomllib` | `TOMLDecodeError`, `loads` |
+| `csv` | `DictReader`, `Error`, `reader` |
+| `xml.etree.ElementTree` | `ParseError`, `fromstring` |
+| `textwrap` | `dedent`, `fill`, `indent` |
+| `html` | `escape`, `unescape` |
+| `unicodedata` | `normalize` |
+| `difflib` | `get_close_matches`, `unified_diff` |
+| `base64` | `b64decode`, `b64encode` |
+| `itertools` | `accumulate`, `batched`, `chain`, `combinations`, `groupby`, `islice`, `pairwise`, `product` |
 
 ### Path members
 
-`exists`, `glob`, `is_dir`, `is_file`, `iterdir`, `joinpath`, `mkdir`, `name`, `parent`, `parts`, `read_bytes`, `read_text`, `relative_to`, `rglob`, `stem`, `suffix`, `with_suffix`, `write_bytes`, `write_text`
+`as_posix`, `exists`, `glob`, `is_dir`, `is_file`, `is_symlink`, `iterdir`, `joinpath`, `match`, `mkdir`, `name`, `parent`, `parts`, `read_bytes`, `read_text`, `relative_to`, `rglob`, `stat`, `stem`, `suffix`, `with_name`, `with_suffix`, `write_bytes`, `write_text`
 
 The `/` operator joins paths, for example `Path(d) / name`.
 
@@ -919,5 +928,10 @@ The `/` operator joins paths, for example `Path(d) / name`.
 | `map` | use a comprehension |
 | `filter` | use a comprehension with if |
 | `format` | use an f-string |
+| `collections.OrderedDict` | use dict; a dict keeps insertion order |
+| `timezone.utc` | use datetime.UTC |
+| `itertools.count` | not approved: an infinite iterator; use range(n) or a list |
+| `itertools.cycle` | not approved: an infinite iterator; use range(n) or a list |
+| `itertools.repeat` | not approved: an infinite iterator; use range(n) or a list |
 
 Part 3 (intent rules) arrives with Plan 3.

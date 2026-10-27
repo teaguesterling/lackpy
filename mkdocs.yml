@@ -67,6 +67,7 @@ nav:
     - Language Spec: concepts/language-spec.md
     - File Access: concepts/paths.md
     - Profiles: concepts/profiles.md
+    - Time Limits: concepts/time-limits.md
     - Inference Pipeline: concepts/inference.md
     - Interpreter Plugins: concepts/interpreters.md
     - Policy Layer: concepts/policy-layer.md

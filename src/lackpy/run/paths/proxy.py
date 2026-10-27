@@ -31,7 +31,9 @@ members in ``dictionary.PATH_MEMBERS`` and refuse everything else.
   ``tool="Path.<member>"`` and ``args=[str(path)]`` (the path as built, plus
   the pattern for ``glob``/``rglob``). A refused or failed call is a failed
   entry, then the refusal or error goes on (design §8, gate 3). Listings record
-  no result: they are lazy.
+  no result: they are lazy. ``write_text`` and ``write_bytes`` also announce a
+  ``Path.<member>:start`` entry to the trace's listener after the policy check
+  and before the write (``trace.announce_start``; Plan 3 Task 6).
 """
 
 from __future__ import annotations
@@ -43,13 +45,18 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from ...lang import dictionary
 from ..refusal import LackpyRefusal, refuse
-from ..trace import record_call
+from ..trace import announce_start, record_call
 from .rules import PathPolicy
 
 if TYPE_CHECKING:
     from ..trace import Trace
 
 _STATE: dict[int, pathlib.Path] = {}
+
+#: Test-only: called inside a write, after its start entry and before the
+#: write. Only the session worker's ``--test-ops`` path sets it (ledger Ruling
+#: C), so a test can stop a cell in the middle of a write.
+_write_hook: Callable[[], None] | None = None
 
 _ALLOWED = frozenset(dictionary.PATH_MEMBERS)
 _CLASS_NAME = type(pathlib.Path()).__name__
@@ -58,6 +65,16 @@ _CLASS_MODULE = type(pathlib.Path()).__module__  # "pathlib._local" on 3.13+
 
 def _is_dunder(name: str) -> bool:
     return name.startswith("__") and name.endswith("__")
+
+
+class _Stat:
+    """The result of ``Path.stat()``: the two values a program may read, nothing else."""
+
+    __slots__ = ("st_size", "st_mtime")
+
+    def __init__(self, st_size: int, st_mtime: float) -> None:
+        self.st_size = st_size
+        self.st_mtime = st_mtime
 
 
 class _PathMeta(type):
@@ -140,6 +157,20 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
         def member(self: "Path", *args: Any, **kwargs: Any) -> Any:
             def call() -> Any:
                 absolute = target(self, op)
+                with as_built(self):
+                    return getattr(absolute, name)(*args, **kwargs)
+            return traced(name, self, call)
+        member.__name__ = name
+        return member
+
+    def write(name: str) -> Callable[..., Any]:
+        def member(self: "Path", *args: Any, **kwargs: Any) -> Any:
+            def call() -> Any:
+                absolute = target(self, "write")
+                if trace is not None:
+                    announce_start(trace, f"Path.{name}", [str(raw(self))])
+                if _write_hook is not None:
+                    _write_hook()
                 with as_built(self):
                     return getattr(absolute, name)(*args, **kwargs)
             return traced(name, self, call)
@@ -234,6 +265,15 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
         def with_suffix(self, suffix: str) -> "Path":
             return new(raw(self).with_suffix(suffix))
 
+        def with_name(self, name: str) -> "Path":
+            return new(raw(self).with_name(name))
+
+        def match(self, pattern: str) -> bool:
+            return raw(self).match(pattern)
+
+        def as_posix(self) -> str:
+            return raw(self).as_posix()
+
         def relative_to(self, *others: Any, **kwargs: Any) -> "Path":
             return new(raw(self).relative_to(*(unwrap(o) for o in others), **kwargs))
 
@@ -246,6 +286,15 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
         exists = io("exists", "read")
         is_file = io("is_file", "read")
         is_dir = io("is_dir", "read")
+        is_symlink = io("is_symlink", "read")
+
+        def stat(self) -> "_Stat":
+            def call() -> "_Stat":
+                absolute = target(self, "read")
+                with as_built(self):
+                    st = absolute.stat()
+                return _Stat(st.st_size, st.st_mtime)  # not os.stat_result: two names only
+            return traced("stat", self, call)
 
         def glob(self, pattern: Any, **kwargs: Any) -> Iterator["Path"]:
             def call() -> Iterator["Path"]:
@@ -274,8 +323,8 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
             return traced("iterdir", self, call, lazy=True)
 
         # Write members.
-        write_text = io("write_text", "write")
-        write_bytes = io("write_bytes", "write")
+        write_text = write("write_text")
+        write_bytes = write("write_bytes")
 
         def mkdir(self, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
             def call() -> None:

@@ -33,6 +33,21 @@ class TraceEntry:
     success: bool
     error: str | None
 
+    def to_data(self) -> dict[str, Any]:
+        """The entry as a plain dict, for the wire."""
+        return {"step": self.step, "tool": self.tool, "args": self.args,
+                "result": self.result, "duration_ms": self.duration_ms,
+                "success": self.success, "error": self.error}
+
+    @classmethod
+    def from_data(cls, d: dict[str, Any]) -> "TraceEntry":
+        """``TypeError`` when ``tool`` is not a str: the parent reads entries from a
+        worker, and every reader treats a TypeError as a bad message."""
+        if type(d["tool"]) is not str:
+            raise TypeError(f"a trace entry's tool must be str, not {type(d['tool']).__name__}")
+        return cls(step=d["step"], tool=d["tool"], args=d["args"], result=d["result"],
+                   duration_ms=d["duration_ms"], success=d["success"], error=d["error"])
+
 
 @dataclass
 class Trace:
@@ -42,11 +57,14 @@ class Trace:
         entries: Ordered list of TraceEntry records, one per tool call.
         files_read: Paths of files read during execution (populated by tools).
         files_modified: Paths of files written or modified during execution.
+        listener: Called with each entry right after ``record_call`` appends it,
+            so a worker can stream entries as they happen. Not part of equality.
     """
 
     entries: list[TraceEntry] = field(default_factory=list)
     files_read: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
+    listener: Callable[[TraceEntry], None] | None = field(default=None, repr=False, compare=False)
 
 
 def record_call(trace: Trace, tool: str,
@@ -76,6 +94,7 @@ def record_call(trace: Trace, tool: str,
             duration_ms=(time.perf_counter() - start) * 1000,
             success=False, error=error_text(e),
         ))
+        _notify(trace)
         if on_done:
             on_done(False)
         raise
@@ -85,9 +104,44 @@ def record_call(trace: Trace, tool: str,
         duration_ms=(time.perf_counter() - start) * 1000,
         success=True, error=None,
     ))
+    _notify(trace)
     if on_done:
         on_done(True)
     return result
+
+
+#: The suffix of a start entry's tool name (``"Path.write_text:start"``).
+START_SUFFIX = ":start"
+
+
+def announce_start(trace: Trace, tool: str, args: list[Any]) -> None:
+    """Tell the listener that ``tool`` is about to start (Plan 3 Task 6, Review Focus 5).
+
+    The start entry goes to the listener only, never into ``trace.entries``:
+    an in-process run is never killed, so its trace and step numbers stay as
+    they were. In a worker the entry streams to the parent before the write
+    begins, so a cell killed in the middle of a write is known to have started
+    it. The entry's ``step`` is the step its done entry will have.
+    """
+    if trace.listener is None:
+        return
+    entry = TraceEntry(step=len(trace.entries), tool=tool + START_SUFFIX, args=args,
+                       result=None, duration_ms=0.0, success=True, error=None)
+    try:
+        trace.listener(entry)
+    except Exception:
+        pass
+
+
+def _notify(trace: Trace) -> None:
+    """Call the listener with the newest entry. Its failure never changes the run:
+    the entry stays, ``on_done`` still runs, and the program's own exception propagates."""
+    if trace.listener is None:
+        return
+    try:
+        trace.listener(trace.entries[-1])
+    except Exception:
+        pass
 
 
 def error_text(e: BaseException) -> str:
@@ -95,9 +149,12 @@ def error_text(e: BaseException) -> str:
 
     ``str(KeyError(n))`` raises ``ValueError`` for an int over 4,300 digits;
     the runner must still return a result (review I1), and a trace entry too.
+    An empty message gives the class name: Python 3.11's parser raises a bare
+    ``MemoryError()`` on a 50,000-deep expression, and a failed result with
+    ``error=''`` says nothing (gate 4).
     """
     try:
-        return str(e)
+        return str(e) or type(e).__name__
     except (Exception, LackpyRefusal):
         return f"{type(e).__name__} (its message could not be converted to text)"
 

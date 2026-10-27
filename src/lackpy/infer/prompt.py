@@ -10,13 +10,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..lang.dictionary import approved_imports_line
 from ..lang.grammar import ALLOWED_BUILTINS
 from ..lang.spec import format_preprompt, format_style_guide
 from .retrieval import (Example, expand_intent_keywords,
                         format_examples_for_prompt, retrieve_examples)
 
-# The skeleton every generated program starts from. Same text as the measured
-# eval's SKELETON (scripts/eval/ste_usability/prompts.py); keep the two equal.
+# The skeleton every generated program starts from. The approved-imports line
+# is built from dictionary.MODULES. The eval's copy in
+# scripts/eval/ste_usability/prompts.py is a frozen, measured prompt with the
+# Plan 1 module list: leave it as it is.
 SKELETON = '''# /// intent
 # goal   = "<the task, one sentence>"
 # reads  = []
@@ -24,11 +27,10 @@ SKELETON = '''# /// intent
 # output = "none"          # none | printed | value
 # ///
 
-# imports. Approved: pathlib (Path), json, re, collections, math,
-#          statistics, hashlib, datetime
+# imports. Approved: {approved}
 
 # implementation
-'''
+'''.replace("{approved}", approved_imports_line())
 
 INTRO = """\
 You write lackpy programs. A lackpy program is plain Python 3 that follows the

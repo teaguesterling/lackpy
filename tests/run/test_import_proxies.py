@@ -11,6 +11,7 @@ that rejection, and runs the programs it does admit through the service.
 """
 
 import pathlib
+import sys
 
 import pytest
 
@@ -161,3 +162,29 @@ class TestValidatedPath:
         result = await service.run_program(program)
         assert result.success, result.error
         assert result.output == repr(pathlib.Path("x"))
+
+
+class TestNewModuleMembers:
+    def test_new_module_members_run(self):
+        result = _run('import xml.etree.ElementTree as ET\nET.fromstring("<a><b/></a>").find("b").tag')
+        assert result.success, result.error
+        assert result.output == "b"
+        result = _run('from xml.etree.ElementTree import fromstring\nfromstring("<a><b/></a>").find("b").tag')
+        assert result.success, result.error
+        assert result.output == "b"
+
+    @pytest.mark.skipif(sys.version_info < (3, 12), reason="itertools.batched needs Python 3.12")
+    def test_batched_runs(self):
+        result = _run("import itertools\nlist(itertools.batched([1, 2, 3], 2))")
+        assert result.success, result.error
+        assert result.output == [(1, 2), (3,)]
+
+    @pytest.mark.parametrize("program", [
+        "import xml\nxml",
+        "import xml.etree.ElementTree as ET\nET.sys",
+        "import xml.etree.ElementTree\nxml.etree.sys",
+        "import xml.etree as E\nE",
+        "import xml.etree.ElementTree\nxml.sys",
+    ])
+    def test_dotted_imports_stay_closed(self, program):
+        assert not _run(program).success

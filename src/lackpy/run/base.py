@@ -19,6 +19,8 @@ class ExecutionResult:
         error: Error message if execution failed.
         trace: Execution trace with tool call records.
         variables: Variables assigned during execution (excluding params and internals).
+        error_phase: Where a failure came from; ``"refused"`` for a ``LackpyRefusal``,
+            otherwise None.
     """
 
     success: bool
@@ -27,6 +29,10 @@ class ExecutionResult:
     error: str | None = None
     trace: Trace = field(default_factory=Trace)
     variables: dict[str, Any] = field(default_factory=dict)
+    error_phase: str | None = None
+    #: A literate run's session (Plan 3 Task 7, D10): pass it back with a
+    #: resubmitted document to resume from the first changed cell.
+    session_id: str | None = None
 
     @property
     def effective_output(self) -> Any:

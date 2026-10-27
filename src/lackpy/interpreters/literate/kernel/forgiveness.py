@@ -51,9 +51,14 @@ ERROR_REIFIED = "error_reified"
 #: executed due to @continue pause" — a different concept on a different path.
 SOURCE_UNAVAILABLE = "source_unavailable"
 
+#: Ledger entry type for a cell that ran over its time limit and was stopped
+#: (Plan 3 D7). The names it would bind are holes; the document continues. A
+#: timeout is not a refusal: the session stays open, and a retry may succeed.
+TIMED_OUT = "timed_out"
+
 #: The entry types that make a round Left under the aggregate view.
 FORGIVENESS_ENTRY_TYPES: frozenset[str] = frozenset(
-    {HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE}
+    {HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE, TIMED_OUT}
 )
 
 
@@ -236,4 +241,6 @@ def describe_failure(entry: LedgerEntry) -> str:
         if entry.name:
             return f"unavailable: '{entry.name}' — {reason}"
         return f"unavailable: {reason}"
+    if entry.entry_type == TIMED_OUT:
+        return str(entry.detail.get("note", "timeout"))
     return f"{entry.entry_type}: {entry.name or ''}".rstrip(": ")

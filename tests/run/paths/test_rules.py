@@ -352,3 +352,43 @@ class TestUnresolvableRule:
         (ws / "loop").symlink_to(ws / "loop")
         with pytest.raises(ValueError, match=r"Read\(\./loop/secret\)"):
             PathPolicy(ws, [rule("Read(./loop/secret)", anchor=ws, source="ws settings")])
+
+
+class TestPolicyAsData:
+    """``to_data``/``from_data``: the policy crosses the worker socket as plain data."""
+
+    def _probe(self, ws, tmp_path):
+        (ws / "d").mkdir(exist_ok=True)
+        (ws / "a.txt").write_text("a")
+        return [ws / "a.txt", ws / "new.txt", ws / "d" / "x.py", ws / ".env",
+                ws / ".claude" / "settings.json", ws / ".git" / "config",
+                tmp_path / "other" / "f", tmp_path / "extra" / "f", tmp_path / "home" / "k",
+                Path("/etc/passwd")]
+
+    def _same(self, a, b, paths):
+        for p in paths:
+            for op in ("read", "write"):
+                assert allowed(a, p, op) == allowed(b, p, op), (p, op)
+
+    def test_policy_round_trip(self, ws, home, tmp_path):
+        from lackpy.run.paths import read_only_policy
+        import json
+        (tmp_path / "extra").mkdir()
+        rules = [rule("Read(.env)", anchor=ws, home=home),
+                 rule("Edit(d/**)", anchor=ws, home=home),
+                 rule("Read(~/k)", "allow", anchor=ws, home=home),
+                 rule("Read(//etc/passwd)", "allow", anchor=ws)]
+        base = PathPolicy(ws, rules, [tmp_path / "extra"], protected=[tmp_path / "prot"])
+        for policy in (PathPolicy(ws, []), base, read_only_policy(base)):
+            data = json.loads(json.dumps(policy.to_data()))  # plain JSON data
+            back = PathPolicy.from_data(data)
+            assert back.rules == policy.rules
+            assert back.workspace == policy.workspace and back.extra_dirs == policy.extra_dirs
+            assert back.protected == policy.protected
+            self._same(policy, back, self._probe(ws, tmp_path))
+
+    def test_a_read_only_policy_stays_read_only(self, ws):
+        from lackpy.run.paths import read_only_policy
+        back = PathPolicy.from_data(read_only_policy(PathPolicy(ws, [])).to_data())
+        assert allowed(back, ws / "a.txt", "read")
+        assert not allowed(back, ws / "a.txt", "write")

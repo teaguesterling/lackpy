@@ -10,9 +10,10 @@ from __future__ import annotations
 import ast
 import builtins
 import importlib
+import sys
 
 from . import builtins_policy
-from .dictionary import MODULES, hint_for
+from .dictionary import MIN_PYTHON, MODULES, hint_for
 from .grammar import ALLOWED_BUILTINS, ALLOWED_NODES, DENIED_ATTRIBUTES, FORBIDDEN_NAMES
 from .registry import Context, Violation, register
 
@@ -358,9 +359,11 @@ def _import_problem(node: ast.Import | ast.ImportFrom, ctx: Context) -> tuple[bo
     bound: list[str] = []
     if isinstance(node, ast.Import):
         for a in node.names:
-            if a.name not in MODULES:  # also rejects a dotted name, ``import m.sub``
+            if a.name not in MODULES:  # a dotted name must be a dictionary module itself
                 rejected = True
                 subjects += [a.name, a.name.split(".")[0]]
+            elif "." in a.name and not a.asname:
+                rejected = True  # ``import xml.etree.ElementTree`` binds ``xml``; write ``as ET``
             bound.append(a.asname or a.name)
     else:
         module = node.module or ""
@@ -444,6 +447,48 @@ def _rebindings(tree: ast.Module) -> list[Violation]:
             for name, line in sorted(found, key=lambda f: f[1])]
 
 
+def _is_datetime_timezone(node: ast.expr, ctx: Context) -> bool:
+    """Whether ``node`` is ``datetime.timezone``, or a name bound by ``from datetime import timezone``."""
+    if isinstance(node, ast.Name):
+        return ctx.member_bindings.get(node.id) == ("datetime", "timezone")
+    return (isinstance(node, ast.Attribute) and node.attr == "timezone"
+            and isinstance(node.value, ast.Name)
+            and ctx.module_bindings.get(node.value.id) == "datetime")
+
+
+def _needs_newer_python(ctx: Context) -> list[Violation]:
+    """A module or member that this Python lacks: ``<module>.<member> needs Python <version>``."""
+    out = []
+
+    def lacks(module: str, member: str | None) -> str | None:
+        need = MIN_PYTHON.get((module, member))
+        if need and sys.version_info < need:
+            return f"{module}.{member}" if member else module
+        return None
+
+    def report(line: int, subject: str, module: str, member: str | None) -> None:
+        need = ".".join(map(str, MIN_PYTHON[(module, member)]))
+        out.append(Violation("safety.module-attr", line, f"{subject} needs Python {need}"))
+
+    for node in ast.walk(ctx.tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if (subject := lacks(a.name, None)):
+                    report(node.lineno, subject, a.name, None)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if (subject := lacks(node.module, None)):
+                report(node.lineno, subject, node.module, None)
+            for a in node.names:
+                if (subject := lacks(node.module, a.name)):
+                    report(node.lineno, subject, node.module, a.name)
+        elif (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+              and node.value.id in ctx.module_bindings):
+            module = ctx.module_bindings[node.value.id]
+            if (subject := lacks(module, node.attr)):
+                report(node.lineno, subject, module, node.attr)
+    return out
+
+
 @register(
     "safety.module-attr", "safety",
     summary="Use an imported module only as module.member, with an approved member. "
@@ -456,7 +501,7 @@ def _rebindings(tree: ast.Module) -> list[Violation]:
 )
 def check_module_attr(ctx: Context) -> list[Violation]:
     bindings = ctx.module_bindings.keys() | ctx.member_bindings.keys()
-    out = []
+    out = _needs_newer_python(ctx)
     for node in ast.walk(ctx.tree):
         # A module binding is only ever the base of an attribute (``json.loads``).
         # As a value (``s = statistics``, ``[json]``) it would carry the module
@@ -482,6 +527,13 @@ def check_module_attr(ctx: Context) -> list[Violation]:
             out.append(Violation(
                 "safety.module-attr", node.lineno,
                 f"Forbidden assignment to module member: '{ast.unparse(node)}' at line {node.lineno}",
+            ))
+            continue
+        if node.attr == "utc" and _is_datetime_timezone(node.value, ctx):
+            out.append(Violation(
+                "safety.module-attr", node.lineno,
+                f"Unknown module member: 'timezone.utc' at line {node.lineno} (not in the dictionary)",
+                hint=hint_for("timezone.utc"),
             ))
             continue
         if not (isinstance(node.value, ast.Name) and node.value.id in ctx.module_bindings):
@@ -611,7 +663,10 @@ def _exception_members() -> frozenset[tuple[str, str]]:
     """The (module, member) pairs in ``MODULES`` whose real attribute is an exception class."""
     found = set()
     for module, members in MODULES.items():
-        mod = importlib.import_module(module)
+        try:
+            mod = importlib.import_module(module)
+        except ImportError:  # e.g. tomllib below Python 3.11
+            continue
         for member in members:
             value = getattr(mod, member, None)
             if isinstance(value, type) and issubclass(value, Exception):

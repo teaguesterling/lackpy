@@ -18,7 +18,8 @@ pytest.importorskip("mcp", reason="mcp required for MCP server tests")
 
 from lackpy.mcp import server
 
-ACTIONS = {"delegate", "generate", "run_program", "validate", "create"}
+# close_session: Plan 3 Task 7 (D10) ends a literate session that run_program returned.
+ACTIONS = {"delegate", "generate", "run_program", "validate", "create", "close_session"}
 
 
 def _tools():
@@ -148,3 +149,11 @@ def test_configured_literate_profile_runs(tmp_path):
         assert result["output"] == 42
     finally:
         server._service = None
+
+
+def test_close_session_is_destructive_and_closed_world():
+    """Task 7 minor 13: close_session stops processes, and reaches nothing outside lackpy."""
+    d = {t.name: t for t in _tools()}
+    assert d["close_session"].annotations.destructiveHint is True
+    assert d["close_session"].annotations.openWorldHint is False
+    assert d["close_session"].annotations.readOnlyHint is False

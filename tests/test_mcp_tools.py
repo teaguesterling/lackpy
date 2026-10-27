@@ -168,3 +168,105 @@ def test_validate_follows_the_literate_axis(workspace):
     assert bad["valid"] is False
     assert any("document cell 2" in v["message"] for v in bad["violations"]), bad
     assert [v["message"] for v in bad["violations"]] == bad["errors"]
+
+
+# --- Plan 3 Task 5: the timeout parameter (D8) through FastMCP ---
+
+def test_mcp_timeout_param(workspace):
+    """Gate 1 and gate 7 over MCP: run_program takes `timeout`; both tools return error_phase."""
+    import time
+    regex = 'import re\nre.search(r"(a+)+$", "a" * 26 + "b")'
+    start = time.monotonic()
+    out = _call("run_program", {"program": regex, "timeout": 1})
+    assert time.monotonic() - start < 1 + 1.5
+    assert out["success"] is False
+    assert out["error_phase"] == "timeout"
+    assert out["error"] == "timeout: the run took longer than 1 s and was stopped"
+    ok = _call("run_program", {"program": "1"})
+    assert ok["success"] is True and ok["error_phase"] is None
+    refused = _call("run_program", {"program": "1", "timeout": 1000})
+    assert refused["error_phase"] == "refused"
+    assert refused["error"] == ("timeout 1000 s is over the profile's max_timeout "
+                                "(120 s, profile (none))")
+    import inspect
+    assert "timeout" in inspect.signature(server.delegate).parameters
+    assert "timeout" in inspect.signature(server.run_program).parameters
+
+
+# --- Plan 3 Task 7: a retry resumes over MCP session_id (D10) ---
+
+LOOP = 'import re\nre.search(r"(a+)+$", "a" * 40 + "b")'
+LOG = "from pathlib import Path\np = Path('log.txt')\np.write_text(p.read_text() + 'line\\n')\na = 20"
+
+
+@pytest.fixture
+def literate_ws(tmp_path):
+    """A workspace with a literate profile, and a service whose policy has a temporary home."""
+    from lackpy.run.paths import load_policy
+    from lackpy.service import LackpyService
+
+    ws = tmp_path / "ws"
+    (ws / ".lackpy").mkdir(parents=True)
+    (ws / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
+    (ws / "log.txt").write_text("")
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    server.set_workspace(ws)
+    server._service = LackpyService(
+        workspace=ws, path_policy_loader=lambda w: load_policy(w, home=home, managed=None))
+    yield ws
+    server._service.close()
+
+
+def _lit(*cells):
+    return "\n\n".join(f"```lackpy\n{c}\n```" for c in cells) + "\n\nB={b}\n"
+
+
+def test_resume_through_mcp_session_id(literate_ws):
+    first = _call("run_program", {"program": _lit(LOG, LOOP), "profile": "lit", "timeout": 1})
+    assert first["error_phase"] == "timeout", first
+    sid = first["session_id"]
+    assert isinstance(sid, str) and sid
+    second = _call("run_program", {"program": _lit(LOG, "b = a + 1"), "profile": "lit",
+                                   "timeout": 1, "session_id": sid})
+    assert second["success"], second
+    assert second["session_id"] == sid
+    assert "B=21" in second["stdout"]
+    assert (literate_ws / "log.txt").read_text().count("line") == 1
+    closed = _call("close_session", {"session_id": sid})
+    assert closed == {"session_id": sid, "closed": True}
+    gone = _call("run_program", {"program": _lit(LOG, "b = a + 1"), "profile": "lit",
+                                 "timeout": 1, "session_id": sid})
+    assert gone["success"] is False
+    assert gone["error"] == f"unknown or expired session_id {sid!r}"
+    assert (literate_ws / "log.txt").read_text().count("line") == 1  # never a silent fresh run
+
+
+def test_close_session_does_not_wait_for_a_running_run(literate_ws):
+    """Final review I2: close_session runs off the event loop and does not wait for
+    the session's running document; that run reports a failure."""
+    import asyncio
+    import inspect
+    import time
+
+    assert inspect.iscoroutinefunction(server.close_session)
+    first = _call("run_program", {"program": _lit(LOG, "b = a + 1"), "profile": "lit",
+                                  "timeout": 20})
+    sid = first["session_id"]
+
+    async def scenario():
+        running = asyncio.create_task(server.mcp.call_tool(
+            "run_program", {"program": _lit(LOG, "b = a + 1", LOOP), "profile": "lit",
+                            "timeout": 20, "session_id": sid}))
+        await asyncio.sleep(2.0)  # the resume reaches the loop cell
+        start = time.monotonic()
+        closed = await server.mcp.call_tool("close_session", {"session_id": sid})
+        took = time.monotonic() - start
+        return await asyncio.wait_for(running, 30), closed, took
+
+    ran, closed, took = asyncio.run(scenario())
+    assert took < 2.0, took  # well under the 20 s cell limit
+    closed = _strict_json((closed[0] if isinstance(closed, tuple) else closed)[0].text)
+    assert closed == {"session_id": sid, "closed": True}
+    ran = _strict_json((ran[0] if isinstance(ran, tuple) else ran)[0].text)
+    assert ran["success"] is False, ran

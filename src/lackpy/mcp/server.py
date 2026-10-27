@@ -15,6 +15,7 @@ internal toolbox views.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from pathlib import Path
 from typing import Any
@@ -37,12 +38,23 @@ _EXECUTES = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 _WRITES_FILE = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                idempotentHint=True, openWorldHint=False)
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+# `close_session` stops a session's processes (destructive) and reaches nothing
+# outside lackpy (closed world); closing twice is the same as once.
+_CLOSES = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                          idempotentHint=True, openWorldHint=False)
 
 
 def set_workspace(workspace: Path) -> None:
-    """Set the workspace directory and reset the service singleton."""
+    """Set the workspace directory and reset the service singleton.
+
+    The old service is closed: its literate sessions end. The run zygote is
+    shared by every service in the process (``shared_runner``), so it outlives
+    the service; ``close_shared_runners`` (also run at exit) stops it.
+    """
     global _workspace, _service
     _workspace = workspace
+    if _service is not None:
+        _service.close()
     _service = None
 
 
@@ -88,20 +100,27 @@ def _json_safe(value: Any) -> Any:
 @mcp.tool(annotations=_EXECUTES)
 async def delegate(intent: str, profile: str | None = None,
                    params: dict[str, Any] | None = None,
-                   rules: list[str] | None = None) -> dict:
+                   rules: list[str] | None = None,
+                   timeout: float | None = None) -> dict:
     """Generate a program from a natural-language intent and run it. Use for a
     self-contained, multi-step mechanical task. The program is plain Python that
     the lackpy validator checks; it reads and writes files only through
     pathlib.Path, under the workspace's permission rules. `profile` names a
     configured `[profiles.<name>]` entry (model, mode, rules); omit it for the
-    default. Returns a lean result (success, output, stdout, program, the traced calls); call
-    `run_program` with the program if you need the full step trace.
+    default. `timeout` is the run's limit in seconds (default: the sandbox
+    timeout, 120 s, or the profile's max_timeout when that is lower), up to the
+    profile's max_timeout. Returns a lean result
+    (success, output, stdout, program, the traced calls, error_phase:
+    "timeout" when the run was stopped at the limit, "refused" when it was
+    refused); call `run_program` with the program if you need the full step trace.
     """
-    r = await _get_service().delegate(intent, profile=profile, params=params, rules=rules)
+    r = await _get_service().delegate(intent, profile=profile, params=params, rules=rules,
+                                      timeout=timeout)
     return _json_safe({
         "success": r.get("success"),
         "output": r.get("output"),
         "error": r.get("error"),
+        "error_phase": r.get("error_phase"),
         "stdout": r.get("stdout"),
         "program": r.get("program"),
         "generation_tier": r.get("generation_tier"),
@@ -123,7 +142,9 @@ async def generate(intent: str, profile: str | None = None,
 @mcp.tool(annotations=_EXECUTES)
 async def run_program(program: str, profile: str | None = None,
                       params: dict[str, Any] | None = None,
-                      rules: list[str] | None = None) -> dict:
+                      rules: list[str] | None = None,
+                      timeout: float | None = None,
+                      session_id: str | None = None) -> dict:
     """Validate and run a program you already have (skips generation). The program
     is plain Python that the lackpy validator checks; it reads and writes files
     only through pathlib.Path, under the workspace's permission rules. With a
@@ -132,14 +153,37 @@ async def run_program(program: str, profile: str | None = None,
     `output` is the value of the last code cell's trailing expression, and
     `params` replace the defaults of the document's `params = {...}` literal.
     `rules` names extra checks: no_loops, no_nested_calls, max_depth(N),
-    max_calls(N); on the literate axis they apply to every cell. Bytes, nan and
-    infinity come back as their Python repr text."""
-    result = await _get_service().run_program(program, profile=profile, params=params, rules=rules)
-    return _json_safe({
+    max_calls(N); on the literate axis they apply to every cell. `timeout` is
+    the run's limit in seconds (default: the sandbox timeout, 120 s, or the
+    profile's max_timeout when that is lower); a value over the profile's
+    max_timeout is refused before the run. On the literate
+    axis the limit applies to each cell: a cell over it is stopped and noted,
+    and the document goes on. A literate run returns a `session_id`: to retry,
+    pass it back with the full corrected document, and the run resumes from
+    the first changed cell (the cells before it do not run again). Call
+    `close_session` when done; an idle session ends after 10 minutes.
+    `error_phase` is "timeout" when the run was stopped at the limit, "refused"
+    when it was refused, else null. Bytes, nan and infinity come back as their
+    Python repr text."""
+    result = await _get_service().run_program(program, profile=profile, params=params,
+                                              rules=rules, timeout=timeout,
+                                              session_id=session_id)
+    extra = {"session_id": result.session_id} if result.session_id is not None else {}
+    return _json_safe({**extra,
         "success": result.success, "output": result.output, "error": result.error,
-        "stdout": result.stdout,
+        "error_phase": result.error_phase, "stdout": result.stdout,
         "trace": [{"step": e.step, "tool": e.tool, "args": e.args, "result": e.result,
                    "success": e.success, "error": e.error} for e in result.trace.entries]})
+
+
+@mcp.tool(annotations=_CLOSES)
+async def close_session(session_id: str) -> dict:
+    """End a literate session that `run_program` returned, and stop its processes.
+    `closed` is false when the session was unknown or had already ended."""
+    # Final review I2: off the event loop, so a close never stalls other calls.
+    service = _get_service()
+    return {"session_id": session_id,
+            "closed": await asyncio.to_thread(service.close_session, session_id)}
 
 
 @mcp.tool(annotations=_WRITES_FILE)

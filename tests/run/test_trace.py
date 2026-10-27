@@ -251,3 +251,44 @@ def test_long_str_result_is_truncated_at_500_chars():
     trace = Trace()
     record_call(trace, "Path.read_text", ["a"], lambda: "x" * 1000)
     assert trace.entries[0].result == "x" * 500 + "... (1000 chars)"
+
+
+def test_listener_sees_each_entry():
+    seen = []
+    trace = Trace(listener=seen.append)
+    record_call(trace, "a", {"x": 1}, lambda: 1)
+    with pytest.raises(ValueError):
+        record_call(trace, "b", [], lambda: (_ for _ in ()).throw(ValueError("boom")))
+    assert seen == trace.entries
+    assert [e.tool for e in seen] == ["a", "b"] and seen[1].success is False
+    assert "listener" not in repr(trace)
+    assert Trace() == Trace(listener=seen.append)
+
+
+def test_a_raising_listener_on_success_still_records_and_runs_on_done():
+    def boom(entry):
+        raise RuntimeError("listener")
+
+    done = []
+    trace = Trace(listener=boom)
+    assert record_call(trace, "a", {}, lambda: 7, on_done=done.append) == 7
+    assert len(trace.entries) == 1 and done == [True]
+
+
+def test_a_raising_listener_on_failure_keeps_the_program_exception():
+    def boom(entry):
+        raise RuntimeError("listener")
+
+    done = []
+    trace = Trace(listener=boom)
+    with pytest.raises(ValueError, match="prog"):
+        record_call(trace, "a", {}, lambda: (_ for _ in ()).throw(ValueError("prog")),
+                    on_done=done.append)
+    assert len(trace.entries) == 1 and trace.entries[0].success is False
+    assert done == [False]
+
+
+def test_trace_entry_data_round_trip():
+    entry = TraceEntry(step=2, tool="Path.read_text", args=["a"], result="x",
+                       duration_ms=1.5, success=True, error=None)
+    assert TraceEntry.from_data(entry.to_data()) == entry

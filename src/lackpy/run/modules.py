@@ -55,10 +55,11 @@ class ModuleProxy:
 
     __slots__ = ("__weakref__",)
 
-    def __init__(self, name: str, replacements: dict[str, Any] | None = None) -> None:
+    def __init__(self, name: str, replacements: dict[str, Any] | None = None,
+                 member_names: Any = None) -> None:
         module = importlib.import_module(name)
         members: dict[str, Any] = {}
-        for member in dictionary.MODULES[name]:
+        for member in (dictionary.MODULES[name] if member_names is None else member_names):
             if replacements and member in replacements:
                 members[member] = replacements[member]
                 continue
@@ -115,6 +116,11 @@ def make_restricted_import(path_policy: PathPolicy | None = None,
             raise LackpyRefusal(f"import {name}", _PATH_PENDING_HINT)
         if name not in dictionary.MODULES:
             refuse(f"import {name}", name)
+        if "." in name and not fromlist:
+            # ``import a.b.c as X`` runs IMPORT_NAME a.b.c, then IMPORT_FROM b and c.
+            # Serve a chain of shells, each exposing only the next part, so that X
+            # is the proxy for a.b.c and no shell leads anywhere else.
+            return _dotted_chain(name, restricted_import(name, fromlist=("*",)))
         if name not in proxies:
             if name == "pathlib":
                 proxies[name] = ModuleProxy(name, {"Path": make_path_class(path_policy, trace)})
@@ -123,3 +129,12 @@ def make_restricted_import(path_policy: PathPolicy | None = None,
         return proxies[name]
 
     return restricted_import
+
+
+def _dotted_chain(name: str, leaf: ModuleProxy) -> ModuleProxy:
+    """The shell proxy for the top of ``a.b.c``: ``a`` exposes ``b``, ``b`` exposes ``c``, ``c`` is ``leaf``."""
+    parts = name.split(".")
+    node = leaf
+    for i in range(len(parts) - 1, 0, -1):
+        node = ModuleProxy(".".join(parts[:i]), {parts[i]: node}, (parts[i],))
+    return node

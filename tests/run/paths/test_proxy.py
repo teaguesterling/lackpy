@@ -13,7 +13,7 @@ import pytest
 from lackpy.lang import dictionary
 from lackpy.run.modules import ModuleProxy, make_restricted_import
 from lackpy.run.namespace import build_namespace
-from lackpy.run.paths import PathPolicy, load_policy, make_path_class
+from lackpy.run.paths import PathPolicy, load_policy, make_path_class, parse_rule
 from lackpy.run.refusal import LackpyRefusal
 from lackpy.run.runner import RestrictedRunner
 
@@ -125,7 +125,7 @@ class TestShape:
 
 class TestRefusals:
     @pytest.mark.parametrize("attr", ["unlink", "open", "parser", "resolve", "absolute",
-                                      "chmod", "rename", "touch", "with_name", "_raw"])
+                                      "chmod", "rename", "touch", "_raw"])
     def test_other_instance_attributes_refuse(self, P, attr):
         with pytest.raises(LackpyRefusal):
             getattr(P("x"), attr)
@@ -596,3 +596,39 @@ class TestHostCodeFilesAreNotWritable:
     def test_refusal_names_the_reason(self, ws, P):
         with pytest.raises(LackpyRefusal, match="runs as host code"):
             P(".git/config").write_text("x")
+
+
+class TestStatAndPureMembers:
+    def test_stat_reads_through_policy(self, ws):
+        (ws / "secret.txt").write_text("hello")
+        deny = parse_rule("Read(secret.txt)", effect="deny", anchor=ws, source="t")
+        with pytest.raises(LackpyRefusal):
+            make_path_class(PathPolicy(ws, [deny]))("secret.txt").stat()
+        assert make_path_class(PathPolicy(ws, []))("secret.txt").stat().st_size == 5
+
+    def test_stat_surface_is_two_names(self, ws):
+        (ws / "a.txt").write_text("x")
+        st = make_path_class(PathPolicy(ws, []))("a.txt").stat()
+        assert [n for n in dir(st) if not n.startswith("_")] == ["st_mtime", "st_size"]
+        assert st.st_mtime == (ws / "a.txt").stat().st_mtime
+
+    def test_stat_and_is_symlink_are_traced(self, ws):
+        from lackpy.run.trace import Trace
+        (ws / "a.txt").write_text("x")
+        (ws / "l").symlink_to("a.txt")
+        trace = Trace()
+        P = make_path_class(PathPolicy(ws, []), trace)
+        P("a.txt").stat()
+        assert P("l").is_symlink() is True and P("a.txt").is_symlink() is False
+        assert [(e.tool, e.args, e.success) for e in trace.entries] == [
+            ("Path.stat", ["a.txt"], True), ("Path.is_symlink", ["l"], True), ("Path.is_symlink", ["a.txt"], True)]
+
+    def test_is_symlink_reads_through_policy(self, ws):
+        deny = parse_rule("Read(secret.txt)", effect="deny", anchor=ws, source="t")
+        with pytest.raises(LackpyRefusal):
+            make_path_class(PathPolicy(ws, [deny]))("secret.txt").is_symlink()
+
+    def test_pure_members(self, P):
+        assert P("a/b.txt").with_name("c.txt").as_posix() == "a/c.txt"
+        assert P("a/b.py").match("*.py") is True
+        assert isinstance(P("a/b.txt").with_name("c.txt"), P)

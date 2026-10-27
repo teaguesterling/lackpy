@@ -45,6 +45,7 @@ from lackpy.interpreters.literate.kernel.forgiveness import (
     FORGIVENESS_ENTRY_TYPES,
     HOLE_OPENED,
     SOURCE_UNAVAILABLE,
+    TIMED_OUT,
     ErrorValue,
     Hole,
     Unavailable,
@@ -438,12 +439,14 @@ class TestTwoLayerComposition:
     @pytest.mark.asyncio
     async def test_left_is_exactly_the_reified_failure_types(self, context):
         """The aggregate view's trigger set is pinned: hole_opened /
-        error_reified / source_unavailable make a round Left; superseded,
-        dirty, executed, and continue_requested never do."""
+        error_reified / source_unavailable / timed_out make a round Left
+        (timed_out: Plan 3 D7, a cell stopped at its limit binds holes);
+        superseded, dirty, executed, and continue_requested never do."""
         assert FORGIVENESS_ENTRY_TYPES == {
             HOLE_OPENED,
             ERROR_REIFIED,
             SOURCE_UNAVAILABLE,
+            TIMED_OUT,
         }
         for benign in (SUPERSEDED, DIRTY, "executed", "continue_requested"):
             assert benign not in FORGIVENESS_ENTRY_TYPES
