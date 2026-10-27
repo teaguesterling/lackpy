@@ -149,9 +149,12 @@ def error_text(e: BaseException) -> str:
 
     ``str(KeyError(n))`` raises ``ValueError`` for an int over 4,300 digits;
     the runner must still return a result (review I1), and a trace entry too.
+    An empty message gives the class name: Python 3.11's parser raises a bare
+    ``MemoryError()`` on a 50,000-deep expression, and a failed result with
+    ``error=''`` says nothing (gate 4).
     """
     try:
-        return str(e)
+        return str(e) or type(e).__name__
     except (Exception, LackpyRefusal):
         return f"{type(e).__name__} (its message could not be converted to text)"
 
