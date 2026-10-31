@@ -596,7 +596,12 @@ class SessionChannel:
             poller = select.poll()
             poller.register(self._ctl.fileno(), select.POLLIN)
             poller.register(cur.sock.fileno(), select.POLLIN)
-            ready = {fd for fd, _ in poller.poll(math.ceil(remaining * 1000))}
+            if cur.reader.has_line():
+                # A line read with the cell_end (often the last cell's done) is in
+                # the Reader's buffer, where the poll cannot see it.
+                ready = {fd for fd, _ in poller.poll(0)} | {cur.sock.fileno()}
+            else:
+                ready = {fd for fd, _ in poller.poll(math.ceil(remaining * 1000))}
             if not ready:
                 raise _HandoffStall
             if self._ctl.fileno() not in ready:

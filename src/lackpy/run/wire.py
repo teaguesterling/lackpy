@@ -98,6 +98,13 @@ class Reader:
         self._max = max_line
         self._buf = bytearray()
 
+    def has_line(self) -> bool:
+        """True when a whole line is already buffered: ``recv`` returns it without the socket.
+
+        A poll on the socket cannot see this buffer.
+        """
+        return b"\n" in self._buf
+
     def recv(self, timeout: float | None) -> dict[str, Any] | None:
         """The next message; None at EOF; ``TimeoutError`` at ``timeout`` seconds."""
         old = self._sock.gettimeout()
