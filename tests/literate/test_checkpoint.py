@@ -135,7 +135,7 @@ def _gone(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat") as f:
             return f.read().rsplit(")", 1)[1].split()[0] == "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):  # reaped between open and read
         return True
 
 
@@ -523,6 +523,38 @@ def test_stalled_handoff_ends_the_run(env, runner, monkeypatch):
     assert r.success is False
     assert r.error_phase is None
     assert "did not reach its next cell within 0.5 s" in (r.error or ""), r
+
+
+def test_a_done_read_with_the_cell_end_is_not_a_stall(env, runner, monkeypatch):
+    """A ``done`` that arrived in the same chunk as the last ``cell_end`` is read, not polled for.
+
+    The host's Reader keeps whole lines in its buffer; polling the socket cannot
+    see them. Measured on CI Python 3.11 (PR #63 and #65): the cell's process
+    had sent ``done`` and waited for the next request while the host polled an
+    empty socket until ``HANDOFF_SECONDS``. The slow read here puts both lines
+    in one chunk every time.
+    """
+    from lackpy.run import wire
+    from lackpy.run.process import SessionChannel
+    monkeypatch.setattr(SessionChannel, "HANDOFF_SECONDS", 1.0, raising=False)
+    recv = wire.Reader.recv
+
+    def slow_recv(self, timeout):
+        if b"\n" not in self._buf:
+            time.sleep(0.3)  # let the process send everything it has before the host reads
+        return recv(self, timeout)
+
+    monkeypatch.setattr(wire.Reader, "recv", slow_recv)
+    doc = _doc("a = 1")
+    policy = env["loader"](env["ws"])
+    chan = runner.open_session(path_policy=policy, workspace=env["ws"], cell_timeout=5.0,
+                               rule_names=None, context_config={})
+    try:
+        r = chan.submit(doc, params=None)
+    finally:
+        chan.close()
+    assert r.success, r
+    assert r.variables == {"a": 1}
 
 
 def test_cell_path_after_the_hook_never_awaits():
