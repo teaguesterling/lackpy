@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lackpy"
-version = "0.15.1"
+version = "0.16.0"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 # halves version together.
 dependencies = [
     "markdown-it-py>=3.0",
-    "lackpy-lang==0.13.0",   # the pure-language leaf (its own dist, also on PyPI)
+    "lackpy-lang==0.14.0",   # the pure-language leaf (its own dist, also on PyPI)
     # woollama's model-management core (provides the `woollama.core` namespace):
     # provider/model routing, transport, recipe orchestration. Self-contained wheel,
     # no extra deps. lackpy uses only `woollama.core`, not the full woollama router.
