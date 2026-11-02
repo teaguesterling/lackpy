@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lackpy"
-version = "0.16.0"
+version = "0.16.1"
 description = "Python that lacks most of Python. Restricted program generation and execution for tool composition."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -35,7 +35,12 @@ dependencies = [
 # nsjail-python has no <3.12 wheel; marker keeps the project installable on 3.11
 # (CI tests 3.11) while the sandbox extra is available on 3.12.
 sandbox = ["nsjail-python ; python_version >= '3.12'"]
-mcp = ["mcp[cli]"]
+# Upper bound for the same reason as woollama-core above, and MEASURED the same way:
+# mcp 2.x renamed FastMCP to MCPServer and removed mcp.server.fastmcp, which
+# lackpy/mcp/server.py imports. One venv, one variable: `lackpyctl mcp serve` boots
+# exit 0 under mcp 1.30.0 and exits 1 under 2.3.0 with ModuleNotFoundError.
+# A STOPGAP until that import is migrated; mcp 1.x will not be supported forever.
+mcp = ["mcp[cli]>=1.0,<2"]
 fledgling = ["fledgling"]
 blq = ["blq-cli"]
 kibitzer = ["kibitzer>=0.3"]
