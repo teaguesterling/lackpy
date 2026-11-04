@@ -42,7 +42,10 @@ sandbox = ["nsjail-python ; python_version >= '3.12'"]
 # A STOPGAP until that import is migrated; mcp 1.x will not be supported forever.
 mcp = ["mcp[cli]>=1.0,<2"]
 fledgling = ["fledgling"]
-blq = ["blq-cli"]
+# blq 2.0 made the MCP tools refuse a call that names no workspace. This extra
+# uses blq.storage.BlqStorage directly, which that release did not touch, so
+# both 1.2.x and 2.x work. The bound keeps a future major from arriving silently.
+blq = ["blq-cli>=1.2,<3"]
 kibitzer = ["kibitzer>=0.3"]
 full = ["lackpy[sandbox,mcp,fledgling,blq,kibitzer]"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "duckdb>=1.1"]
