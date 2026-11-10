@@ -8,12 +8,26 @@ Classification comes from the AST plus the violation rule_ids, not from message 
 rule reports "Forbidden AST node: Import" and never names the module, so message parsing silently
 lumped 1,841 programs into one bucket on the first pass.
 """
-import ast, collections, json, sys, warnings
+import ast, collections, inspect, json, sys, warnings
 from pathlib import Path
 import duckdb
 
-sys.path.insert(0, str(Path("~/Projects/lackpy/src").expanduser()))
+# `lackpy` is a namespace package in two halves: the core runtime in src/ and the lang leaf in
+# packages/lackpy-lang/src/. Put both on the path from THIS tree, anchored to __file__ rather than
+# ~, so the numbers cannot come from a different checkout on a machine where ~/Projects differs.
+ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(ROOT / "src"), str(ROOT / "packages/lackpy-lang/src")]
 from lackpy.lang import validate
+
+# Prepending is not proof on its own: which `lackpy` wins depends on the editable installs the
+# running interpreter has registered, and those differ per machine. This reads back where the
+# validator really came from, so a mismatch stops the run instead of measuring another tree.
+_vsrc = inspect.getsourcefile(validate)
+if _vsrc is None or not Path(_vsrc).resolve().is_relative_to(ROOT):
+    raise SystemExit(
+        f"refusing to measure: lackpy.lang came from outside this tree\n"
+        f"  resolved: {_vsrc}\n  expected under: {ROOT}"
+    )
 
 SNAP = Path("~/.local/share/lackpy/corpus/heredocs-2026-10-18.parquet").expanduser()
 KIT = {"read_file", "find_files", "write_file", "edit_file"}
