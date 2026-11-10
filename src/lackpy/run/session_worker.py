@@ -55,7 +55,6 @@ than one.
 from __future__ import annotations
 
 import asyncio
-import faulthandler
 import os
 import select
 import signal
@@ -191,8 +190,8 @@ class _Hook:
         # next cell_start reaches the shared channel.
         _diag("sending cell_end")
         self.channel.send({"event": "cell_end", "index": index})
-        _diag("cell_end sent; arming faulthandler for 6 s")
-        faulthandler.dump_traceback_later(6.0, exit=False)
+        _diag("cell_end sent (no watchdog thread is armed here: it would be "
+              "inherited-as-missing across the fork below)")
         if index == self.exit_at:
             os._exit(EXIT_ERROR)  # test-only (--test-ops): a death before cell_start
         if self.handoff_delay:
@@ -200,12 +199,10 @@ class _Hook:
         pid = self._fork(index)
         _diag(f"first fork -> pid={pid}")
         if pid is None:
-            # No faulthandler here: its watchdog is a THREAD, and this process
-            # must stay thread-free or the guard above kills the next cell.
-            faulthandler.cancel_dump_traceback_later()
-            _diag("in the child after fork; arming a thread-free SIGALRM dump (8 s)")
-            _diag_alarm(8.0, "child-after-fork")
+            _diag_alarm(8.0, "child-after-fork")   # first, and thread-free
+            _diag("in the child after fork; SIGALRM armed")
             return None
+        _diag_alarm(6.0, "parent-checkpoint")   # thread-free; armed AFTER the fork
         while True:
             _diag(f"_wait({pid}) entering")
             self._wait(pid)
