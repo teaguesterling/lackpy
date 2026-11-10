@@ -181,8 +181,10 @@ class _Hook:
         pid = self._fork(index)
         _diag(f"first fork -> pid={pid}")
         if pid is None:
-            faulthandler.cancel_dump_traceback_later()
-            _diag("in the child after fork; returning to run the next cell")
+            # Re-arm, do NOT cancel: the first run cancelled here and so missed
+            # the child's own stall, which is the thing we are hunting.
+            _diag("in the child after fork; re-arming faulthandler (8 s)")
+            faulthandler.dump_traceback_later(8.0, exit=False)
             return None
         while True:
             _diag(f"_wait({pid}) entering")
@@ -212,9 +214,12 @@ class _Hook:
                 self.channel.sock.close()  # the checkpoint's socket is its own
                 self.channel.sock = theirs
                 if self.epfd is not None and self.epfd >= 0:
+                    _diag(f"child swapping the loop's epoll fd {self.epfd} "
+                          f"for a fresh empty one")
                     private = select.epoll()
                     os.dup2(private.fileno(), self.epfd)
                     private.close()
+                    _diag("child epoll swap done")
             except BaseException:
                 os._exit(EXIT_ERROR)
             return None
