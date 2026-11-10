@@ -55,6 +55,7 @@ than one.
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import os
 import select
 import signal
@@ -68,6 +69,25 @@ from . import wire
 from .limits import PR_SET_PDEATHSIG, _prctl
 from .pidfd import pidfd_open
 from .trace import TraceEntry
+
+
+# --- issue #64 diagnostics (diag branch only; do not merge) ------------------
+def _diag(msg: str) -> None:
+    import sys as _s
+    try:
+        print(f"[diag64 pid={os.getpid()} t={time.monotonic():.3f}] {msg}",
+              file=_s.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def _diag_env() -> None:
+    import sys as _s
+    _diag(f"python={_s.version.split()[0]} threads={threading.active_count()} "
+          f"names={[t.name for t in threading.enumerate()]} "
+          f"pidfd_binding={hasattr(os, 'pidfd_open')} "
+          f"sigchld={signal.getsignal(signal.SIGCHLD)!r}")
+# ----------------------------------------------------------------------------
 
 #: Exit statuses, as the zygote's.
 EXIT_CHANNEL = 3
@@ -136,7 +156,10 @@ class _Hook:
         if self.resumed:
             self.resumed = False  # the parent already has this process's cell_start
             return None
+        _diag(f"__call__ index={index} resumed={self.resumed}")
+        _diag_env()
         if threading.active_count() != 1:
+            _diag("THREAD GUARD TRIPPED -> os._exit(EXIT_ERROR)")
             os._exit(EXIT_ERROR)  # a fork with threads is unsafe; never run on
         if self.epfd is None:  # the first call, in the root: its loop is running
             selector = getattr(asyncio.get_running_loop(), "_selector", None)
@@ -147,18 +170,28 @@ class _Hook:
                 os._exit(EXIT_ERROR)
         # Everything this process sent for its cell is on its socket before the
         # next cell_start reaches the shared channel.
+        _diag("sending cell_end")
         self.channel.send({"event": "cell_end", "index": index})
+        _diag("cell_end sent; arming faulthandler for 6 s")
+        faulthandler.dump_traceback_later(6.0, exit=False)
         if index == self.exit_at:
             os._exit(EXIT_ERROR)  # test-only (--test-ops): a death before cell_start
         if self.handoff_delay:
             time.sleep(self.handoff_delay)  # test-only (--test-ops): a slow handoff
         pid = self._fork(index)
+        _diag(f"first fork -> pid={pid}")
         if pid is None:
+            faulthandler.cancel_dump_traceback_later()
+            _diag("in the child after fork; returning to run the next cell")
             return None
         while True:
+            _diag(f"_wait({pid}) entering")
             self._wait(pid)
+            _diag(f"_wait({pid}) returned; reading instruction")
             resume = self._instruction()
+            _diag(f"instruction={resume!r}")
             pid = self._fork(index)
+            _diag(f"re-fork -> pid={pid}")
             if pid is None:
                 self.resumed = resume.kind == "resume"
                 return resume
@@ -211,8 +244,11 @@ class _Hook:
             poller.register(sock.fileno(), select.POLLIN)
             if self.zygote is not None:
                 poller.register(self.zygote, select.POLLIN)
+            _diag(f"_wait poll registered child={child} sock={sock.fileno()} "
+                  f"zygote={self.zygote}")
             while True:
                 ready = {fd for fd, _ in poller.poll()}
+                _diag(f"_wait poll woke on {sorted(ready)}")
                 if child in ready:
                     break
                 if self.zygote in ready:
