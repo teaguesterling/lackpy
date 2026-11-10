@@ -89,6 +89,25 @@ def _diag_env() -> None:
           f"sigchld={signal.getsignal(signal.SIGCHLD)!r}")
 # ----------------------------------------------------------------------------
 
+
+def _diag_alarm(seconds: float, tag: str) -> None:
+    """Thread-free stuck-process dump: SIGALRM + traceback, so the worker's
+    `threading.active_count() != 1` invariant is not perturbed (faulthandler's
+    dump_traceback_later spawns a watchdog thread, which does perturb it)."""
+    import traceback as _tb, sys as _s
+
+    def _fire(signum, frame):  # noqa: ARG001
+        _diag(f"ALARM {tag}: still here after {seconds:g}s -- stack follows")
+        _tb.print_stack(frame, file=_s.stderr)
+        _s.stderr.flush()
+
+    try:
+        signal.signal(signal.SIGALRM, _fire)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+    except Exception as e:
+        _diag(f"could not arm the alarm: {e!r}")
+
+
 #: Exit statuses, as the zygote's.
 EXIT_CHANNEL = 3
 EXIT_ERROR = 4
@@ -181,10 +200,11 @@ class _Hook:
         pid = self._fork(index)
         _diag(f"first fork -> pid={pid}")
         if pid is None:
-            # Re-arm, do NOT cancel: the first run cancelled here and so missed
-            # the child's own stall, which is the thing we are hunting.
-            _diag("in the child after fork; re-arming faulthandler (8 s)")
-            faulthandler.dump_traceback_later(8.0, exit=False)
+            # No faulthandler here: its watchdog is a THREAD, and this process
+            # must stay thread-free or the guard above kills the next cell.
+            faulthandler.cancel_dump_traceback_later()
+            _diag("in the child after fork; arming a thread-free SIGALRM dump (8 s)")
+            _diag_alarm(8.0, "child-after-fork")
             return None
         while True:
             _diag(f"_wait({pid}) entering")
