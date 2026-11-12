@@ -226,8 +226,10 @@ def test_refused_literate_document_is_refused(where, src, tmp_path):
     (ws / "notes.md").write_text("# Notes\n")
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
-    service = LackpyService(workspace=ws)
-    service._load_path_policy = lambda read_only=False: load_policy(ws, home=home, managed=None)
+    # The loader seam, not a stub of the private _load_path_policy (its
+    # signature grew declared_writes in spec E7, Task 7).
+    service = LackpyService(workspace=ws,
+                            path_policy_loader=lambda w: load_policy(w, home=home, managed=None))
     result = asyncio.run(service.run_program(src, profile=Profile(execution="literate")))
     assert not result.success, f"{where}: marked Refused, but it ran"
     assert "is not allowed in lackpy" in (result.error or ""), f"{where}: failed, not refused: {result.error}"

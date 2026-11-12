@@ -44,6 +44,10 @@ Semantics:
 6. Matching is case-sensitive. Upstream does not document case sensitivity;
    case-sensitive is the stricter choice on a case-insensitive filesystem for
    allows, and is how Linux paths compare.
+8. Declared writes (spec E7, ``with_write_globs``): under ``stepy`` a write
+   must also match a declared glob, in the allow pattern semantics, on both
+   the lexical and the resolved form. This is checked last; it never allows
+   a write that items 1-7 refuse.
 
 Stricter readings where the brief is silent: a bare ``Read`` or ``Edit`` (no
 parentheses) deny matches every path, and a bare allow is ignored. A
@@ -65,7 +69,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PureWindowsPath
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Sequence
 
 from ..refusal import LackpyRefusal
 
@@ -248,12 +252,17 @@ class PathPolicy:
 
     def __init__(self, workspace: Path, rules: list[PathRule],
                  extra_dirs: list[Path] = [],  # noqa: B006 (never mutated)
-                 *, protected: Iterable[Path] = ()) -> None:
+                 *, protected: Iterable[Path] = (),
+                 write_globs: Iterable[str] | None = None) -> None:
         """``protected`` adds write-protected paths to the built-in ones.
 
         Built in: ``<workspace>/.claude``, ``<workspace>/.lackpy``,
         ``Path.home()/.claude``, ``MANAGED_SETTINGS`` and its
         ``managed-settings.d``. ``load_policy`` adds its own home and managed path.
+
+        ``write_globs`` are the declared writes (spec E7; see ``with_write_globs``).
+        None leaves writes to the rules alone. A glob whose fixed prefix is not
+        under the workspace or an extra directory raises ``LackpyRefusal``.
         """
         self.workspace = Path(_norm(workspace))
         self.rules = list(rules)
@@ -270,6 +279,27 @@ class PathPolicy:
         self.protected = list(dict.fromkeys(
             Path(_norm(self.workspace / p)) for p in (*builtin, *protected)))
         self._protected = {b.casefold() for p in self.protected for b in _bases(p)}
+        self.write_globs = None if write_globs is None else tuple(write_globs)
+        # Not rules: a declared glob never allows a write, it only narrows one.
+        self._write_compiled = [self._compile_write_glob(g) for g in self.write_globs or ()]
+
+    def _compile_write_glob(self, glob: str) -> list[tuple[str, ...]]:
+        """``glob`` as absolute segment patterns; refuse one whose fixed prefix leaves the roots."""
+        if not glob.strip():
+            raise LackpyRefusal("an empty declared writes glob")
+        rule = PathRule(kind="edit", effect="allow", pattern=glob, anchor=self.workspace,
+                        source="the declared writes")
+        patterns = _compile(rule, self.workspace)
+        roots = self._roots_lexical | self._roots_real
+        for segs in patterns:
+            cut = next((i for i, seg in enumerate(segs) if _GLOB_CHARS & set(seg)), len(segs))
+            prefix = "/" + "/".join(segs[:cut])
+            if not self._under(prefix, roots):
+                # Review Focus 3: a parameter value such as ``../x`` cannot move a glob out.
+                raise LackpyRefusal(
+                    f"the declared writes glob {glob!r} (it is /{'/'.join(segs)}, "
+                    f"outside the workspace and the extra directories)")
+        return patterns
 
     def to_data(self) -> dict:
         """The policy as plain data (str and list), for the worker socket."""
@@ -281,6 +311,8 @@ class PathPolicy:
                       for r in self.rules],
             "extra_dirs": [str(d) for d in self.extra_dirs],
             "protected": [str(p) for p in self.protected],
+            # None and [] differ: None is no narrowing, [] is no writes.
+            "write_globs": None if self.write_globs is None else list(self.write_globs),
         }
 
     @classmethod
@@ -291,7 +323,8 @@ class PathPolicy:
                           home=None if r["home"] is None else Path(r["home"]))
                  for r in d["rules"]]
         return cls(Path(d["workspace"]), rules, [Path(p) for p in d["extra_dirs"]],
-                   protected=[Path(p) for p in d["protected"]])
+                   protected=[Path(p) for p in d["protected"]],
+                   write_globs=d.get("write_globs"))
 
     def absolute(self, path: Path | str) -> Path:
         """``path`` joined to the workspace when relative, not normalized."""
@@ -340,8 +373,40 @@ class PathPolicy:
                         f"add {tool}(/{form}) to permissions.allow in .claude/settings.json")
         return None
 
-    def check(self, path: Path, op: Literal["read", "write"]) -> None:
-        """Raise ``LackpyRefusal`` unless ``op`` on ``path`` is allowed."""
+    def _undeclared(self, raw: Path, directory: bool) -> str | None:
+        """The refusal reason when a write to ``raw`` matches no declared writes glob (spec E7).
+
+        Both forms must match, as an allow must (item 5). With ``directory``
+        (a ``mkdir``), the path must instead be an ancestor of a path some glob
+        can match: a leading run of the glob's segments matches it, and a
+        segment is left over or that run ends in ``**``. So ``out/r.txt``
+        allows ``mkdir("out")`` but not ``mkdir("out/r.txt")``.
+        """
+        lexical, real = _norm(raw), _real(raw)
+        for form in (lexical, real):
+            parts = _segments(form)
+            if not directory and any(_match(pat, parts, prefix=False)
+                                     for patterns in self._write_compiled for pat in patterns):
+                continue
+            if directory and any(
+                    _match(pat[:k], parts, prefix=False) and (k < len(pat) or pat[k - 1] == "**")
+                    for patterns in self._write_compiled for pat in patterns
+                    for k in range(1, len(pat) + 1)):
+                continue
+            where = "it" if form == lexical else f"its target {form}"
+            if not self.write_globs:
+                return (f"there are no declared writes; to allow {where}, add a glob that "
+                        f"matches it to writes in the intent block")
+            return (f"{where} matches no declared writes glob ({', '.join(self.write_globs)}); "
+                    f"to allow it, add a glob that matches it to writes in the intent block")
+        return None
+
+    def check(self, path: Path, op: Literal["read", "write"], *, directory: bool = False) -> None:
+        """Raise ``LackpyRefusal`` unless ``op`` on ``path`` is allowed.
+
+        ``directory`` marks a write that makes a directory (``mkdir``): with
+        declared writes, an ancestor of a declared path is then allowed.
+        """
         if op not in ("read", "write"):
             raise ValueError(f"op must be 'read' or 'write', not {op!r}")
         raw = self.absolute(path)
@@ -356,6 +421,9 @@ class PathPolicy:
                     if ancestor.is_symlink() and self._decide(Path(_real(ancestor)), "write"):
                         reason = f"directory {ancestor} is a symlink to a place that is not writable"
                         break
+        if reason is None and op == "write" and self.write_globs is not None:
+            # Last, so a protected location or a settings deny gives its own reason.
+            reason = self._undeclared(raw, directory)
         if reason is not None:
             verb = "reading" if op == "read" else "writing"
             raise LackpyRefusal(f"{verb} {_norm(raw)} ({reason})")
@@ -371,6 +439,9 @@ class PathPolicy:
                 ops = "read, write"
             shown = " | ".join("/" + "/".join(p) for p in sorted(set(patterns)))
             lines.append(f"{rule.effect} {ops}: {rule.text()} -> {shown} (from {rule.source})")
+        if self.write_globs is not None:
+            lines.append("write only: the declared writes "
+                         f"({', '.join(self.write_globs) or 'none: no write is allowed'})")
         return lines
 
 
@@ -384,4 +455,22 @@ def read_only_policy(policy: PathPolicy) -> PathPolicy:
     deny = PathRule(kind="edit", effect="deny", pattern="//**", anchor=policy.workspace,
                     source="the read-only profile")
     return PathPolicy(policy.workspace, [*policy.rules, deny], policy.extra_dirs,
-                      protected=policy.protected)
+                      protected=policy.protected, write_globs=policy.write_globs)
+
+
+def with_write_globs(policy: PathPolicy, globs: Sequence[str]) -> PathPolicy:
+    """A new policy: ``policy`` plus the declared writes ``globs`` (spec E7).
+
+    A write must then also match one of ``globs``: the ``PathRule`` pattern
+    semantics, relative to the workspace. The rules, roots, denies and
+    protected locations of ``policy`` still apply first; ``()`` allows no
+    write. The caller fills in each ``{name}`` before the call. A glob that,
+    made absolute and normalized, is not under the workspace or an extra
+    directory raises ``LackpyRefusal``. ``policy`` itself is not changed.
+    """
+    if isinstance(globs, str):
+        raise TypeError("globs must be a sequence of glob strings, not one string")
+    if policy.write_globs is not None:
+        raise ValueError("the policy already has declared writes; they cannot be replaced")
+    return PathPolicy(policy.workspace, policy.rules, policy.extra_dirs,
+                      protected=policy.protected, write_globs=tuple(globs))

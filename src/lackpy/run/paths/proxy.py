@@ -328,12 +328,14 @@ def make_path_class(policy: PathPolicy, trace: "Trace | None" = None) -> type:
 
         def mkdir(self, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
             def call() -> None:
-                absolute = target(self, "write")
+                # ``directory``: with declared writes, an ancestor of a declared path is allowed (E7).
+                absolute = policy.absolute(raw(self))
+                policy.check(absolute, "write", directory=True)
                 if parents:
                     for ancestor in absolute.parents:
                         if ancestor.exists():
                             break
-                        policy.check(ancestor, "write")
+                        policy.check(ancestor, "write", directory=True)
                 with as_built(self):
                     absolute.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
             return traced("mkdir", self, call)

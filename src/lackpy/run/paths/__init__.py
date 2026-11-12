@@ -7,8 +7,8 @@ stand-in a program gets from ``pathlib``.
 """
 
 from .proxy import make_path_class
-from .rules import PathPolicy, PathRule, parse_rule, read_only_policy
+from .rules import PathPolicy, PathRule, parse_rule, read_only_policy, with_write_globs
 from .sources import MANAGED_SETTINGS, load_policy
 
 __all__ = ["MANAGED_SETTINGS", "PathPolicy", "PathRule", "load_policy", "make_path_class", "parse_rule",
-           "read_only_policy"]
+           "read_only_policy", "with_write_globs"]

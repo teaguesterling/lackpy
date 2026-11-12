@@ -8,7 +8,7 @@ import math
 import re
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .config import LackpyConfig, load_config
 from .infer.dispatch import InferenceDispatcher, GenerationResult
@@ -25,7 +25,7 @@ from .policy.layer import PolicyLayer
 from .policy.sources.tools import ToolsPolicySource
 from .lang.validator import ValidationResult, validate
 from .run.base import ExecutionResult
-from .run.paths import PathPolicy, load_policy, read_only_policy
+from .run.paths import PathPolicy, load_policy, read_only_policy, with_write_globs
 from .run.process import ProcessRunner, shared_runner
 from .run.sessions import SessionError, SessionRegistry
 from .run.runner import _binds_params
@@ -760,7 +760,8 @@ class LackpyService:
 
     async def _execute(self, program: str, param_values: dict[str, Any], *,
                        timeout: float, read_only: bool = False,
-                       rules: list[str] | None = None) -> ExecutionResult:
+                       rules: list[str] | None = None,
+                       declared_writes: Sequence[str] | None = None) -> ExecutionResult:
         """Run an (already validated) program in a worker, under ``timeout`` seconds.
 
         The single execution path shared by ``run_program`` and ``delegate``
@@ -773,7 +774,7 @@ class LackpyService:
         separate process, so the service's threads do not reach it.
         """
         try:
-            policy = self._load_path_policy(read_only=read_only)
+            policy = self._load_path_policy(read_only=read_only, declared_writes=declared_writes)
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
         if self._process_runner is None:
@@ -786,12 +787,18 @@ class LackpyService:
         except RuntimeError as e:  # no os.fork: loud, and never an in-process run
             return ExecutionResult(success=False, error=str(e))
 
-    def _load_path_policy(self, *, read_only: bool) -> PathPolicy:
+    def _load_path_policy(self, *, read_only: bool,
+                          declared_writes: Sequence[str] | None = None) -> PathPolicy:
         """The workspace ``PathPolicy`` through the service's policy seam, loaded
         for this run; with ``read_only`` it also denies every write
-        (``read_only_policy``, design D7, Ruling F). Raises what the loader raises."""
+        (``read_only_policy``, design D7, Ruling F). With ``declared_writes``
+        (not None), a write must also match one of them (``with_write_globs``,
+        spec E7). Raises what the loader raises, and the refusal of a glob
+        that leaves the workspace."""
         loader = self._path_policy_loader or load_policy
         policy = loader(self._workspace)
+        if declared_writes is not None:
+            policy = with_write_globs(policy, declared_writes)
         return read_only_policy(policy) if read_only else policy
 
     async def _execute_program(
@@ -799,6 +806,7 @@ class LackpyService:
         *, timeout: float | None = None, rules: list | None = None,
         rule_names: list[str] | None = None,
         session: tuple[str | None, str, float] | None = None,
+        declared_writes: Sequence[str] | None = None,
     ) -> ExecutionResult:
         """Route a program to the execution model named by the profile's ``execution``
         axis -- the shared seam for ``run_program`` and ``delegate``.
@@ -821,6 +829,7 @@ class LackpyService:
         ``session`` is ``(session_id, profile_name, timeout cap)`` from ``run_program`` (Plan 3
         Task 7, D10): a literate run then stays open in the registry, and a
         given ``session_id`` resumes it. None runs and closes, as before.
+        ``declared_writes`` (not None) narrows the writes on either axis (spec E7).
         """
         read_only = _read_only(rp.policy)
         if timeout is None:  # an internal caller: the same capped default (review Minor 3)
@@ -834,7 +843,7 @@ class LackpyService:
                     error="the process runner takes rule names, not callables")
             return await self._execute_literate(program, param_values, timeout=timeout,
                                                 read_only=read_only, rule_names=rule_names,
-                                                session=session)
+                                                session=session, declared_writes=declared_writes)
         if session is not None and session[0] is not None:
             return ExecutionResult(success=False,
                                    error="session_id applies only to a literate profile")
@@ -843,12 +852,14 @@ class LackpyService:
         if not validation.valid:
             return ExecutionResult(success=False, error=validation_error(validation))
         return await self._execute(program, param_values, timeout=timeout,
-                                   read_only=read_only, rules=rule_names)
+                                   read_only=read_only, rules=rule_names,
+                                   declared_writes=declared_writes)
 
     async def _execute_literate(
         self, program: str, param_values: dict[str, Any], *, timeout: float,
         read_only: bool = False, rule_names: list[str] | None = None,
         session: tuple[str | None, str, float] | None = None,
+        declared_writes: Sequence[str] | None = None,
     ) -> ExecutionResult:
         """Run a literate document in a session worker (Plan 3 D6, Ruling D) and adapt the result.
 
@@ -877,7 +888,7 @@ class LackpyService:
         ``params`` literal (final review I4, D15).
         """
         try:
-            policy = self._load_path_policy(read_only=read_only)
+            policy = self._load_path_policy(read_only=read_only, declared_writes=declared_writes)
         except (Exception, LackpyRefusal) as e:  # host code; never raises (review M4, I4)
             return ExecutionResult(success=False, error=_policy_error(e))
         config: dict[str, Any] = {}
@@ -1042,7 +1053,8 @@ class LackpyService:
                           params: dict[str, Any] | None = None, sandbox: Any = None,
                           rules: list | None = None,
                           timeout: float | None = None,
-                          session_id: str | None = None) -> ExecutionResult:
+                          session_id: str | None = None,
+                          declared_writes: Sequence[str] | None = None) -> ExecutionResult:
         """Validate and execute a lackpy program.
 
         The program runs in the runtime namespace (builtins, approved modules,
@@ -1070,6 +1082,12 @@ class LackpyService:
                 checkpoint before the first changed cell. An unknown or expired
                 id, or one from another profile or workspace, is a failed
                 result, never a fresh run.
+            declared_writes: The declared writes globs (spec E7), with each
+                ``{name}`` already filled in; ``stepy`` passes them. A write
+                must then also match one of them; ``[]`` allows no write. A
+                glob that leaves the workspace gives a failed result and
+                nothing runs. None (the default, for ``lackpy``,
+                ``lackpyctl`` and the MCP tools) keeps today's behaviour.
 
         Returns:
             An ExecutionResult with output, trace, and success status.
@@ -1092,7 +1110,8 @@ class LackpyService:
         return await self._execute_program(program, rp, param_values, timeout=seconds,
                                            rules=rules, rule_names=names,
                                            session=(session_id, self._profile_name(profile),
-                                                    self._timeout_cap(rp)))
+                                                    self._timeout_cap(rp)),
+                                           declared_writes=declared_writes)
 
     async def delegate(self, intent: str, profile: Profile | str | None = None,
                        params: dict[str, Any] | None = None, sandbox: Any = None,
