@@ -60,15 +60,36 @@ _COMPUTE_OPEN_RE = re.compile(r"^[ \t]*<compute([^>]*)>[ \t]*$", re.MULTILINE)
 _COMPUTE_CLOSE = "</compute>"
 
 
+_ATTR = r"""(\w+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+)))?"""
+_ATTR_RE = re.compile(_ATTR)
+_ATTRS_RE = re.compile(rf"(?:\s*{_ATTR})*\s*")
+
+
 def _attrs_to_info(attrs: str) -> str:
-    """``hidden`` -> ``lackpy @hidden``; ``write="p"`` -> ``lackpy @write(p)``."""
+    """``hidden`` -> ``lackpy @hidden``; ``write="p"`` -> ``lackpy @write(p)``.
+
+    Any other ``key="value"`` is a fence option (final review 2), so
+    ``<compute hidden rerun="no">`` is ``lackpy @hidden rerun=no``. The
+    annotations come first, as on a fence line. Text the tag cannot hold
+    (two annotations, a stray character) gives an info string that the
+    fence-line check refuses.
+    """
     attrs = attrs.strip()
     if not attrs:
         return "lackpy"
-    m = re.match(r'(\w+)\s*=\s*["\']?([^"\']*)["\']?\s*$', attrs)
-    if m:
-        return f"lackpy @{m.group(1)}({m.group(2)})"
-    return f"lackpy @{attrs.split()[0]}"
+    if not _ATTRS_RE.fullmatch(attrs):
+        return f"lackpy {attrs}"
+    annotations, options = [], []
+    for m in _ATTR_RE.finditer(attrs):
+        name = m.group(1)
+        value = next((v for v in m.group(2, 3, 4) if v is not None), None)
+        if value is None:
+            annotations.append(f"@{name}")
+        elif name in _PATH_ANNOTATIONS:
+            annotations.append(f"@{name}({value})")
+        else:
+            options.append(f"{name}={value}")
+    return " ".join(["lackpy", *annotations, *options])
 
 
 def _pick_fence(body: str) -> str:
@@ -345,17 +366,16 @@ _FENCE_OPEN_RE = re.compile(r"^(`{3,})lackpy(.*)$")
 
 
 def _info_to_attrs(info: str) -> str:
-    """``@hidden`` -> ``hidden``; ``@write(p)`` -> ``write="p"``."""
-    info = info.strip()
-    if not info:
-        return ""
-    m = re.match(r"@(\w+)(?:\(([^)]*)\))?\s*$", info)
+    """``@hidden`` -> ``hidden``; ``@write(p)`` -> ``write="p"``; ``rerun=no`` -> ``rerun="no"``."""
+    m = _ANNOTATION_RE.match("lackpy" + info)
     if not m:
         return ""
-    name, arg = m.group(1), m.group(2)
-    if name in _PATH_ANNOTATIONS and arg:
-        return f' {name}="{arg}"'
-    return f" {name}"
+    name, arg, options = m.group(1), m.group(2), m.group(3) or ""
+    attrs = []
+    if name:
+        attrs.append(f'{name}="{arg}"' if name in _PATH_ANNOTATIONS and arg else name)
+    attrs += [f'{k}="{v}"' for k, _, v in (pair.partition("=") for pair in options.split())]
+    return "".join(f" {a}" for a in attrs)
 
 
 def to_compute_tags(document: str) -> str:

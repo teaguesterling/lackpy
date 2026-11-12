@@ -317,6 +317,41 @@ class TestComputeTags:
         cells = [c for c in result.cells if c.cell_type != "prose"]
         assert cells[0].cell_type == "hidden"
 
+    # Final review 2: a key=value attribute that is not a path annotation is a
+    # fence option, so the tag form gives rerun=no as the fence form does.
+
+    def test_an_option_attribute_after_an_annotation(self):
+        result = parse('<compute hidden rerun="no">\nx = 1\n</compute>')
+        assert result.errors == []
+        assert result.cells[0].cell_type == "hidden"
+        assert result.cells[0].options == {"rerun": "no"}
+
+    def test_an_option_attribute_alone(self):
+        result = parse('<compute rerun="no">\nx = 1\n</compute>')
+        assert result.errors == []
+        assert result.cells[0].cell_type == "code"
+        assert result.cells[0].options == {"rerun": "no"}
+
+    def test_a_path_attribute_and_an_option(self):
+        result = parse('<compute write="notes.md" rerun="no">\nhello\n</compute>')
+        assert result.errors == []
+        assert result.cells[0].cell_type == "write"
+        assert result.cells[0].annotation_args["path"] == "notes.md"
+        assert result.cells[0].options == {"rerun": "no"}
+
+    def test_a_bad_rerun_attribute_is_an_error(self):
+        errors = parse('<compute rerun="maybe">\nx = 1\n</compute>').errors
+        assert len(errors) == 1 and "rerun='maybe' is not valid" in errors[0], errors
+
+    def test_options_survive_the_round_trip_to_tags(self):
+        from lackpy.interpreters.literate.parser import to_compute_tags
+
+        doc = "```lackpy @hidden rerun=no\nx = 1\n```"
+        tags = to_compute_tags(doc)
+        assert tags == '<compute hidden rerun="no">\nx = 1\n</compute>', tags
+        assert parse(tags).cells[0].options == {"rerun": "no"}
+        assert to_compute_tags("```lackpy rerun=no\nx = 1\n```").startswith('<compute rerun="no">')
+
 
 class TestToMarkdown:
     def test_compute_tags_become_fences(self):
