@@ -161,7 +161,7 @@ class LightweightKernel:
             return CellResult(success=False, output=outcome.stdout or None,
                               error=self._hinted(outcome.error), error_phase=outcome.phase,
                               namespace_delta={}, cell_index=cell_index,
-                              cell_id=outcome.cell_id)
+                              cell_id=outcome.cell_id, printed=outcome.stdout)
 
         output = outcome.stdout
         if cell.cell_type == "scratch":
@@ -170,7 +170,8 @@ class LightweightKernel:
             output += f"[scratch: {', '.join(parts)}]\n"
         return CellResult(success=True, output=output, error=None, error_phase=None,
                           namespace_delta=delta, cell_index=cell_index,
-                          cell_id=outcome.cell_id, value=outcome.value)
+                          cell_id=outcome.cell_id, value=outcome.value,
+                          printed=outcome.stdout)
 
     def _hinted(self, error: str | None) -> str | None:
         # Ruling: a repeated Path import after an annotation imported it says why.

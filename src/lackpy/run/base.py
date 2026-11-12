@@ -33,6 +33,10 @@ class ExecutionResult:
     #: A literate run's session (Plan 3 Task 7, D10): pass it back with a
     #: resubmitted document to resume from the first changed cell.
     session_id: str | None = None
+    #: Spec E11: only what the program's ``print()`` calls wrote (a document: its
+    #: cells', in cell order, with what a failed cell printed before it failed).
+    #: A program's equals ``stdout``; a document's ``stdout`` is its rendered output.
+    printed: str = ""
 
     @property
     def effective_output(self) -> Any:

@@ -216,6 +216,8 @@ class LiterateInterpreter:
         # stops the document (spec E1) and is ledgered; a file the cells wrote
         # before it stays.
         output_parts: list[str] = []
+        # Spec E11: what the cells printed, in cell order (not the prose).
+        printed_parts: list[str] = []
         continue_requested = False
         assigned_names: set[str] = set()
 
@@ -320,6 +322,7 @@ class LiterateInterpreter:
             )
             _keep_value(values, index, outcome)
             output_parts.append(outcome.rendered)
+            printed_parts.append(outcome.printed)
             if outcome.continue_requested:
                 continue_requested = True
             if outcome.refusal is not None:
@@ -401,6 +404,7 @@ class LiterateInterpreter:
                 # worker sends so the next resume starts no later than it.
                 "failed_cell": failure[0] if failure is not None else None,
                 "variables": variables,
+                "printed": "".join(printed_parts),
                 "continue_requested": continue_requested,
                 "cell_count": len(parsed.cells),
                 "completed": True,
@@ -479,6 +483,7 @@ class LiterateInterpreter:
             parts.append(kernel_note(f"refused: {error}") + "\n")
             return _CellOutcome(
                 rendered="".join(parts), continue_requested=False, refusal=error,
+                printed=result.printed,
             )
 
         if not result.success:
@@ -496,6 +501,7 @@ class LiterateInterpreter:
             parts.append(kernel_note(f"error: {error}") + "\n")
             return _CellOutcome(
                 rendered="".join(parts), continue_requested=False, failure=error,
+                printed=result.printed,
             )
 
         parts = []
@@ -528,7 +534,7 @@ class LiterateInterpreter:
         )
         return _CellOutcome(
             rendered="".join(parts), continue_requested=cont,
-            ok=True, value=result.value,
+            ok=True, value=result.value, printed=result.printed,
         )
 
 
@@ -548,6 +554,8 @@ class _CellOutcome:
     #: expression's value (``CellResult.value``), else None.
     ok: bool = False
     value: Any = None
+    #: What the cell's ``print()`` calls wrote (spec E11); a failed cell's too.
+    printed: str = ""
 
 
 def _keep_value(values: dict[int, Any], index: int, outcome: _CellOutcome) -> None:

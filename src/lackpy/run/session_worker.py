@@ -315,6 +315,8 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
         # succeeded (review I1); the interpreter made it data-safe.
         "output": meta.get("value") if result.success else None,
         "stdout": str(result.output) if result.output else "",
+        # Spec E11: what the cells printed, apart from the rendered output.
+        "printed": meta.get("printed", ""),
         "error": result.error,
         "variables": {k: v for k, v in variables.items() if _is_data(v)},
         "error_phase": meta.get("error_phase"),

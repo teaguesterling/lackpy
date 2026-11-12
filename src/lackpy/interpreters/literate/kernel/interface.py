@@ -31,6 +31,9 @@ class CellResult:
     #: The value of the cell's trailing expression statement (``CellOutcome.value``:
     #: data, or its repr text); ``None`` otherwise.
     value: Any = None
+    #: What the cell's ``print()`` calls wrote (``CellOutcome.stdout``; spec E11),
+    #: apart from ``output``, which also holds a scratch note.
+    printed: str = ""
 
 
 class KernelInterface(IncrementalInterpreter, Protocol):

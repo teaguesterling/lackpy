@@ -76,6 +76,7 @@ class RestrictedRunner:
             # Exception covers RecursionError and MemoryError (design §8, gate 4).
             return ExecutionResult(success=False, error=error_text(e),
                                    trace=trace, stdout="".join(captured),
+                                   printed="".join(captured),
                                    error_phase="refused" if isinstance(e, LackpyRefusal) else None)
 
     def _run(self, program: str, params: dict[str, Any],
@@ -128,12 +129,14 @@ class RestrictedRunner:
             except RUNTIME_FAILURES:
                 return ExecutionResult(
                     success=False, trace=trace, stdout="".join(captured),
+                    printed="".join(captured),
                     error=f"the last expression's value ({type(output).__name__}) "
                           f"cannot be converted to text")
         variables = data_variables(exec_globals, lambda k: k not in bound)
 
         return ExecutionResult(success=True, output=output, trace=trace,
-                               variables=variables, stdout="".join(captured))
+                               variables=variables, stdout="".join(captured),
+                               printed="".join(captured))
 
 
 # What a program can raise that the host turns into a failed result (design §8, gate 4).

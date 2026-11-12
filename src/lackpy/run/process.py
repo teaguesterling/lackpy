@@ -134,7 +134,8 @@ class _Run:
 
     def failed(self, error: str, error_phase: str | None = None) -> ExecutionResult:
         return ExecutionResult(success=False, error=error, error_phase=error_phase,
-                               trace=self.trace(), stdout=self.stdout_text())
+                               trace=self.trace(), stdout=self.stdout_text(),
+                               printed=self.stdout_text())
 
 
 class ProcessRunner:
@@ -341,7 +342,8 @@ class ProcessRunner:
             return run.failed("the run process sent a result that is not valid")
         return ExecutionResult(success=r["success"], output=r.get("output"),
                                stdout=run.stdout_text(), error=error, trace=run.trace(),
-                               variables=variables, error_phase=phase)
+                               variables=variables, error_phase=phase,
+                               printed=run.stdout_text())
 
     # --- a literate session (Task 6) --------------------------------------
 
@@ -862,7 +864,8 @@ class SessionChannel:
                 or not (error is None or type(error) is str)
                 or not (phase is None or type(phase) is str)
                 or not (failed is None or type(failed) is int)
-                or type(r.get("stdout")) is not str):
+                or type(r.get("stdout")) is not str
+                or type(r.get("printed", "")) is not str):
             return self._failed("the session process sent a result that is not valid", entries)
         if failed is not None:
             # Spec E2: the failed cell joins ``stopped``, as a timed-out cell
@@ -876,7 +879,7 @@ class SessionChannel:
             self._protect = self._stack[-1].parent
         return ExecutionResult(success=r["success"], output=r.get("output"), stdout=r["stdout"],
                                error=error, trace=_trace(entries), variables=variables,
-                               error_phase=phase)
+                               error_phase=phase, printed=r.get("printed", ""))
 
     def kill_all(self) -> None:
         """SIGKILL every process of the session and close nothing (final review I2).
