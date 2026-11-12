@@ -1,5 +1,7 @@
 """Tests for the persona + interpreter prompt composition system."""
 
+import re
+
 import pytest
 
 from lackpy.lang.spec import format_preprompt
@@ -72,32 +74,38 @@ class TestCompose:
             )
 
 
-class TestL5ForgivenessConventions:
-    """L5: surface conventions ship WITH the kernel and advertise forgiveness.
+class TestL5KernelConventions:
+    """L5: surface conventions ship WITH the kernel.
 
-    The assertions anchor on STABLE tokens (``hole``, ``⟨…⟩``, ``forward``,
-    ``@continue``, ``manifest``/``budget``, ``[kernel]``), never on the exact
-    provisional sentence of the bind-through-holes clause — that wording is a
-    PARKED open question (L5 decay flag) Teague will swap after his taught-arm
-    ablation. Anchoring on tokens keeps the wording tunable and keeps these
-    tests from encoding (i.e. resolving) the parked question.
+    The cells-in-order clause is approved wording (spec "Decided: unbound
+    names", Teague 2026-11-11), so its key sentences are pinned. The retired
+    hole contract (spec E3) is pinned by absence: none of its words reach the
+    model. A plain ``"hole" in hint`` check is not used: "whole" contains it.
     """
 
     def _hint(self) -> str:
         return LiterateInterpreter().system_prompt_hint()
 
-    def test_conventions_teach_bind_through_holes(self):
-        """The shipped conventions teach bind-through-the-unknown: an unknown
-        name binds a hole and forward references are legal."""
-        hint = self._hint()
-        assert "hole" in hint
-        assert "⟨name: unbound⟩" in hint  # the merged Hole repr
-        assert "forward" in hint  # forward references are now legal
+    def test_conventions_teach_cells_in_order(self):
+        """The shipped conventions teach spec E1: cells run in order, the first
+        failure stops the document, and a resubmission in a session starts at
+        the first changed cell."""
+        flat = " ".join(self._hint().split())
+        assert "Cells run in order" in flat
+        assert "The first failure stops the document" in flat
+        assert "later cells do not run" in flat
+        assert "cells before your first change do not run again" in flat
 
-    def test_old_define_before_using_hint_removed(self):
-        """The REVERSAL: the old 'define before using / no forward references'
-        guidance (and the streaming-path 'patch-forward' framing) is GONE."""
+    def test_retired_hole_contract_removed(self):
+        """The hole contract is retired (spec E3): no hole repr, no chained hole,
+        no forward-reference licence and no 'forgives' heading reaches the
+        model. The older streaming-era wording stays gone too."""
         hint = self._hint()
+        assert "⟨" not in hint
+        assert "blocked by" not in hint
+        assert not re.search(r"\bholes?\b", hint)
+        assert "forward references are legal" not in hint
+        assert "How the Kernel Forgives" not in hint
         assert "No forward references" not in hint
         assert "define variables BEFORE" not in hint
         assert "patch-forward" not in hint
@@ -106,8 +114,8 @@ class TestL5ForgivenessConventions:
     def test_conventions_cover_four_affordances(self):
         """All four L5 affordances are present in the shipped conventions."""
         hint = self._hint()
-        # 1. bind-through-the-unknown
-        assert "hole" in hint
+        # 1. cells run in order and stop at the first failure
+        assert "Cells run in order" in hint
         # 2. kernel arithmetic authority (kernel computes/evaluates; the
         #    reserved [kernel] channel is the kernel's, not the writer's)
         assert "kernel computes and evaluates" in hint
@@ -124,12 +132,12 @@ class TestL5ForgivenessConventions:
         standalone doc file."""
         # Reachable from the interpreter (the kernel deliverable's surface).
         hint = self._hint()
-        assert "⟨name: unbound⟩" in hint
+        assert "Cells run in order" in hint
         # And they ship through the composition surface every persona uses.
         interp = LiterateInterpreter()
         for name in list_personas():
             composed = compose(name, interp)
-            assert "hole" in composed
+            assert "Cells run in order" in composed
             assert "<compute continue>" in composed
             assert "manifest" in composed
 
@@ -227,6 +235,6 @@ def test_literate_prompt_says_write_is_literal_and_a_refusal_ends_the_document()
 
     flat = " ".join(LITERATE_HINT.split())
     assert "literal file content only" in flat
-    assert "A refusal ends the document" in flat
+    assert "A refusal ends the document and the session" in flat
     assert "line that the full style guide follows: it does not" in flat
     assert "key=scores.get" not in flat

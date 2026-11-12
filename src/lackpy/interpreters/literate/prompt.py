@@ -13,15 +13,15 @@ worked document. It names no tool and no ``os`` or process access: a cell is a
 lackpy program, and file I/O is ``pathlib.Path`` (the annotations compile to it).
 
 The hint is the model's only view of the execution pipeline. If the
-model doesn't know about a feature (holes, the pause protocol, the
-budget manifest, etc.), it can't use it effectively. Keep this in sync
-with the actual behavior.
+model doesn't know about a feature (the stop at the first failure, the
+pause protocol, the budget manifest, etc.), it can't use it effectively.
+Keep this in sync with the actual behavior.
 
-L5 — surface conventions ship WITH the kernel. The four forgiveness
-affordances below are part of the kernel deliverable, not external docs.
+L5 — surface conventions ship WITH the kernel. The four kernel
+conventions below are part of the kernel deliverable, not external docs.
 Each is a separately delimited clause constant so the exact wording is
 easy to tune without touching the surrounding hint. The clauses are
-assembled into ``_FORGIVENESS_CONVENTIONS`` and spliced into
+assembled into ``_KERNEL_CONVENTIONS`` and spliced into
 LITERATE_HINT between ``_HINT_HEAD`` and ``_HINT_TAIL``.
 """
 
@@ -30,43 +30,38 @@ from __future__ import annotations
 from lackpy.lang.spec import format_preprompt
 
 # ---------------------------------------------------------------------------
-# L5 forgiveness affordances (ship WITH the kernel)
+# L5 kernel conventions (ship WITH the kernel)
 #
 # Four delimited clause constants. Assemble order is fixed; wording is meant
 # to be swapped in place. Each clause is written to match MERGED behavior:
-#   * bind-through-holes  -> kernel/forgiveness.py (Hole ⟨name: unbound⟩,
-#                            batch/session path) + L1.3 supersede + L1.4
-#                            dirty-subgraph re-exec ("fill the hole")
-#   * kernel authority    -> forgiveness reprs are non-round-tripping display
-#                            artifacts; the [kernel]…[/kernel] channel
+#   * cells in order      -> _run_document stops at the first failure (spec E1);
+#                            a resume starts no later than the failed cell (E2)
+#   * kernel authority    -> display artifacts (display.truncated_display) do
+#                            not round-trip; the [kernel]…[/kernel] channel
 #                            (annotations.py) is stripped on feedback
 #   * pause protocol       -> compiler.CONTINUE_SENTINEL + driver/session splice
 #   * visible budget       -> annotations.session_manifest (opens each splice)
 # ---------------------------------------------------------------------------
 
-# PROVISIONAL WORDING — L5 DECAY FLAG. The exact phrasing of this
-# bind-through-the-unknown clause is a PARKED open question, pending Teague's
-# taught-arm ablation result. The STRUCTURE (a delimited clause), the REVERSAL
-# (forward references are now legal), and the FOUR affordances are final; the
-# prose in this one constant is a good-faith placeholder to be swapped once the
-# experiment lands. Do NOT treat this sentence as canonical, and do NOT resolve
-# the "best wording" question here.
-_BIND_THROUGH_HOLES = (
-    "- **Bind through the unknown.** Using a name before it is bound does NOT "
-    "abort the run. The kernel binds a typed hole — rendered `⟨name: "
-    "unbound⟩` — and keeps going; a cell that reads a hole becomes a "
-    "chained hole (`⟨name: blocked by …⟩`) instead of crashing. "
-    "So you may reference results before you define them. When you later "
-    "assert the name, the kernel supersedes the hole with the real value (a "
-    "new version) and re-runs the dependent cells it can safely replay — you "
-    "close the gap by asserting the name, not by re-typing earlier cells."
+# Spec "Decided: unbound names" (Teague, 2026-11-10: "Retire holes"): a name
+# that no earlier cell binds is a failure, and the document stops there. This
+# wording was approved by Teague on 2026-11-11.
+_CELLS_IN_ORDER = (
+    "- **Cells run in order.** Put each cell after the cells that bind the names "
+    "it reads. An exception, a timeout, a name that no earlier cell binds, or a "
+    "cell that needs more access than allowed is a failure. The first failure "
+    "stops the document, later cells do not run, and the error names the cell: "
+    "`cell 2 (total = sum(rows)): …`. Correct that cell or an earlier one, then "
+    "submit the full document again; in a session, cells before your first "
+    "change do not run again."
 )
 
 _KERNEL_AUTHORITY = (
     "- **The kernel owns the values.** The kernel computes and evaluates; you "
-    "never fabricate a value it would produce. Holes and error values "
-    "(`⟨…⟩`) are the kernel's own display artifacts — not valid input and "
-    "never round-tripping as a binding — so never copy or hand-write one. The "
+    "never fabricate a value it would produce. A shortened value "
+    "(`[0, 1, 2, … n=500 … 497, 498, 499]`) is the kernel's own display "
+    "artifact — not valid input and never round-tripping as a binding — so "
+    "never copy or hand-write one. The "
     "kernel's notes likewise travel in a reserved `[kernel] … [/kernel]` "
     "channel that the parser strips when your document is fed back; do not "
     "author `[kernel]` lines yourself."
@@ -90,9 +85,9 @@ _VISIBLE_BUDGET = (
 
 #: The four L5 affordances, assembled in fixed order. Swap any clause constant
 #: above to tune wording; this assembly and the hint stay untouched.
-_FORGIVENESS_CONVENTIONS = "\n".join(
+_KERNEL_CONVENTIONS = "\n".join(
     [
-        _BIND_THROUGH_HOLES,
+        _CELLS_IN_ORDER,
         _KERNEL_AUTHORITY,
         _PAUSE_PROTOCOL,
         _VISIBLE_BUDGET,
@@ -116,7 +111,7 @@ You respond ONLY with a literate document: markdown with <compute> code blocks. 
 - Prose lines print verbatim. Use {expression} to interpolate a value into prose. Use {{double braces}} for literal braces.
 - Code blocks run as lackpy Python. Names carry forward across all blocks.
 - A document cannot run commands or reach anything outside the workspace. Files are read and written with `Path`, as in the lesson above.
-- A refusal ends the document. A cell that the sandbox refuses stops the run; later cells do not run.
+- A refusal ends the document and the session. A cell that the sandbox refuses stops the run; later cells do not run.
 
 ## Syntax
 
@@ -152,7 +147,7 @@ A diff is applied by lackpy, not by your program. It has no python3 twin: the ce
 
 A document's output is its prose, and the printed output of its code. Its value is the trailing expression of the last code cell, when that cell ends in an expression: a bare name, a call, or `len(x)`. Any other cell ends without a value.
 
-## How the Kernel Forgives
+## How the Kernel Runs Your Document
 
 """
 
@@ -202,7 +197,7 @@ Path("best.txt").read_text()
 ## Key Rules
 
 1. Your response IS the document — prose renders as output, code runs.
-2. Cells run top-to-bottom, but forward references are legal — an unknown name binds a hole and is filled when you assert it (see "How the Kernel Forgives").
+2. Cells run top-to-bottom, and the first failure stops the document. Bind each name in an earlier cell than the cells that read it (see "Cells run in order").
 3. Use {expression} interpolation to weave results into prose.
 4. Use <compute hidden> for setup code the reader doesn't need to see.
 5. Use <compute gather> + <compute continue> for batched exploration before narration.
@@ -213,7 +208,7 @@ Path("best.txt").read_text()
 """
 
 
-LITERATE_HINT = format_preprompt() + "\n\n" + _HINT_HEAD + _FORGIVENESS_CONVENTIONS + _HINT_TAIL
+LITERATE_HINT = format_preprompt() + "\n\n" + _HINT_HEAD + _KERNEL_CONVENTIONS + _HINT_TAIL
 
 
 LITERATE_SYSTEM_PROMPT = (
