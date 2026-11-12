@@ -129,6 +129,9 @@ class CellSession:
         # "cell <id>" when an error names an earlier cell's line (final review M4).
         self._labels: dict[int, str] = {}
         self._refusal: str | None = None  # the first refusal's text: the session is closed
+        #: Called with no arguments just before a cell's code (or a host-side
+        #: edit) begins to run, after its validation (spec E4, final review 3).
+        self.code_listener: Callable[[], None] | None = None
 
     def bound_names(self) -> set[str]:
         """The names the cells have bound so far (the runtime's own names left out)."""
@@ -261,6 +264,8 @@ class CellSession:
         if self._refusal is not None:
             return CellOutcome(ok=False, phase="refused", error=self._closed_text())
         self._captured.clear()
+        if self.code_listener is not None:
+            self.code_listener()
         try:
             path_class = self._namespace["__builtins__"]["__import__"]("pathlib").Path
             target = path_class(path)
@@ -300,6 +305,8 @@ class CellSession:
                     and (k not in before or before[k] is not self._namespace[k]))
 
         value = None
+        if self.code_listener is not None:
+            self.code_listener()
         try:
             _run_validated_code(code, self._namespace)
             if tail is not None:

@@ -37,6 +37,7 @@ reads its instruction from its own socket. So:
 
 Messages, worker to parent, on a process's own socket: ``start`` (the root
 only), ``trace`` (each entry as it happens, start entries included),
+``code_start`` (``index``: the cell's code begins to run, spec E4),
 ``cell_end`` (this process's output for its cell is complete; the
 ``cell_start`` for the next cell follows on the shared channel, or ``done`` on
 this socket), ``done``. The parent stops the cell's deadline at ``cell_end``;
@@ -297,6 +298,8 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
     # The end of a cell's run when no hook follows it (the last cell, a re-run):
     # what comes after is host code, not that cell's time (fix round 1).
     config["cell_done"] = lambda: channel.send({"event": "cell_end", "index": None})
+    # Spec E4 (final review 3): the cell's code begins to run now.
+    config["code_start"] = lambda index: channel.send({"event": "code_start", "index": index})
     document = msg["document"]
     ctx = ExecutionContext(base_dir=str(msg["workspace"]), params=msg.get("params") or {},
                            config=config)

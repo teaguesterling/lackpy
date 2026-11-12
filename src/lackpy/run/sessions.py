@@ -220,16 +220,18 @@ class LiterateRun:
                    f"in this session; start a new session to run it again"))
 
     def _record_no_rerun(self, shape: tuple[Any, list[tuple[Any, ...]]] | None) -> None:
-        """Spec E4: record the ``rerun=no`` cells of ``shape`` whose segment began to run.
+        """Spec E4: record the ``rerun=no`` cells of ``shape`` whose code began to run.
 
-        A segment's ``cell_start`` comes before any of its cells runs, so a cell
-        that failed, or was stopped at the limit, is recorded too.
+        The worker says so just before a cell's code runs (``code_start``), so a
+        cell that then failed, or was stopped at the limit, is recorded too. A
+        cell that an unbound name, the gate or validation stopped ran no code,
+        and is not recorded (final review 3).
         """
         if shape is None or self._channel is None:
             return
         cells = shape[1]
         for i, cell in enumerate(cells):
-            if dict(cell[3]).get("rerun") == "no" and _segment_start(cells, i) in self._channel.started:
+            if dict(cell[3]).get("rerun") == "no" and i in self._channel.code_started:
                 self._ran_no_rerun.add(i)
                 self._no_rerun_lines[i] = first_line(Cell(cell[0], cell[1]))
 

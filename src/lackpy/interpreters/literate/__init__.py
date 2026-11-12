@@ -256,6 +256,7 @@ class LiterateInterpreter:
         # plain text before it renders as usual.
         checkpoint = (context.config or {}).get("checkpoint")
         cell_done = (context.config or {}).get("cell_done")
+        code_start = (context.config or {}).get("code_start")
         timed_out = False
         pending_timeout: Any = None
         index = 0
@@ -317,6 +318,11 @@ class LiterateInterpreter:
                 failure = (index, reason)
                 break
 
+            # Spec E4 (final review 3): the session worker tells the parent
+            # when this cell's code begins to run, so a ``rerun=no`` cell that
+            # an unbound name, the gate or validation stopped has not run.
+            if code_start is not None:
+                kernel.session.code_listener = lambda i=index: code_start(i)
             outcome = self._run_resolved_cell(
                 cell, index, kernel, ledger, versions, assigned_names
             )

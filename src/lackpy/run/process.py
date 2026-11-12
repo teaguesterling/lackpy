@@ -516,9 +516,10 @@ class SessionChannel:
         #: holds now: cleared by ``submit``, and by ``resume(index)`` for those
         #: at ``index`` or later (fix round 1, ruling A).
         self.stopped: set[int] = set()
-        #: The ``cell_start`` indices (segment starts) of the last submit or
-        #: resume: the segments that began to run (spec E4).
-        self.started: set[int] = set()
+        #: The document indices of the cells whose code began to run in the
+        #: last submit or resume (``code_start``; spec E4, final review 3). A
+        #: cell that an unbound name, the gate or validation stopped is not here.
+        self.code_started: set[int] = set()
         self._protect: int | None = None  # the checkpoint before the last stopped or failed cell
         #: True after a submit or resume that ended with the document's result:
         #: then every process but the deepest is a checkpoint waiting in its hook.
@@ -711,7 +712,7 @@ class SessionChannel:
         """
         self.finished = False
         self.stopped.clear()
-        self.started.clear()
+        self.code_started.clear()
         self._protect = None
         try:
             self.send({"op": "submit", "document": document, "params": params,
@@ -757,7 +758,7 @@ class SessionChannel:
             raise ValueError(f"no checkpoint can resume cell {index}")
         self.finished = False
         self.stopped = {i for i in self.stopped if i < index}
-        self.started.clear()
+        self.code_started.clear()
         while len(self._stack) > j + 1:
             self._stack.pop().close()
         checkpoint = self._stack[j]
@@ -783,8 +784,9 @@ class SessionChannel:
                     cell.append(entry)
                     if not entry.tool.endswith(START_SUFFIX):
                         entries.append(entry)
+                elif event == "code_start":
+                    self._code_start(msg)
                 elif event == "cell_start":
-                    self.started.add(msg["index"])
                     deadline = time.monotonic() + self.cell_timeout
                     cell = []
                 elif event == "done":
@@ -831,7 +833,9 @@ class SessionChannel:
                     cell.append(entry)
                     if not entry.tool.endswith(START_SUFFIX):
                         entries.append(entry)
-        except (TimeoutError, wire.WireError, OSError, KeyError, TypeError):
+                elif msg.get("event") == "code_start":
+                    self._code_start(msg)
+        except (TimeoutError, wire.WireError, OSError, KeyError, TypeError, _BadMessage):
             pass
         dead.close()
         if not self._stack:
@@ -850,6 +854,11 @@ class SessionChannel:
         except (wire.WireError, OSError):
             return False
         return True
+
+    def _code_start(self, msg: dict[str, Any]) -> None:
+        if type(msg.get("index")) is not int:
+            raise _BadMessage("a code_start without a cell index")
+        self.code_started.add(msg["index"])
 
     def _failed(self, error: str, entries: list[TraceEntry],
                 error_phase: str | None = None) -> ExecutionResult:

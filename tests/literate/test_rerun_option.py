@@ -167,6 +167,47 @@ def test_a_refused_submit_keeps_the_session(env, runner):
     assert _lines(env) == 1
 
 
+def test_rerun_no_is_not_recorded_when_an_unbound_name_stopped_it(env, runner):
+    """Final review 3: an unbound name stops the cell before any of its code runs,
+    so it has not run. The fix (a binding cell before it) runs it, once."""
+    run = _literate_run(env, runner)
+    try:
+        first = run.submit(_doc("a = 1", "no: " + WRITE + "\nprint(b)"), None)
+        assert first.error.startswith("cell 1 (from pathlib import Path): "), first
+        assert "'b'" in first.error, first
+        second = run.submit(_doc("a = 1", "b = 2", "no: " + WRITE + "\nprint(b)"), None)
+    finally:
+        run.close()
+    assert second.success, second
+    assert _lines(env) == 1
+
+
+def test_rerun_no_is_recorded_when_its_code_timed_out(env, runner):
+    """A cell stopped at the limit had begun to run: its fix is refused."""
+    run = _literate_run(env, runner, cell_timeout=2.0)
+    try:
+        first = run.submit(_doc("a = 1", "no: " + WRITE + "\nfor i in iter(int, 1): pass"), None)
+        assert first.error_phase == "timeout", first
+        second = run.submit(_doc("a = 1", "no: " + WRITE), None)
+    finally:
+        run.close()
+    assert second.error_phase == "refused", second
+    assert _lines(env) == 1
+
+
+def test_rerun_no_is_not_recorded_when_validation_stopped_it(env, runner):
+    """Final review 3: a cell the validator refuses ran no code."""
+    run = _literate_run(env, runner)
+    try:
+        first = run.submit(_doc("a = 1", "no: " + WRITE + "\nopen('x')"), None)
+        assert not first.success and first.error_phase != "refused", first
+        second = run.submit(_doc("a = 1", "no: " + WRITE), None)
+    finally:
+        run.close()
+    assert second.success, second
+    assert _lines(env) == 1
+
+
 def test_rerun_yes_is_the_default(env, runner):
     """With no option, a resume from before the cell runs it again."""
     run = _literate_run(env, runner)
