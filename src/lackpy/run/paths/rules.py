@@ -291,7 +291,8 @@ class PathPolicy:
             raise LackpyRefusal("an empty declared writes glob")
         # Teague, 2026-11-11 ("Anchor at workspace"): a glob with no slash is a
         # path at the workspace root, not a PathRule bare filename at any depth.
-        pattern = glob if "/" in glob or glob == "~" else "./" + glob
+        # A trailing slash alone (``out/``) does not count as a slash.
+        pattern = glob if "/" in glob.rstrip("/") or glob == "~" else "./" + glob
         rule = PathRule(kind="edit", effect="allow", pattern=pattern, anchor=self.workspace,
                         source="the declared writes")
         patterns = _compile(rule, self.workspace)

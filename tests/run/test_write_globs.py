@@ -120,6 +120,13 @@ def test_a_glob_with_no_slash_and_a_wildcard_is_anchored_too(ws):
     _refused(p, ws / "deep" / "r.txt", match="declared writes")
 
 
+def test_a_glob_with_only_a_trailing_slash_is_anchored_too(ws):
+    # ``out/`` has no slash before its name: it must not float to any depth.
+    p = _policy(ws, ["out/"])
+    p.check(ws / "out", "write")
+    _refused(p, ws / "deep" / "out", match="declared writes")
+
+
 def test_a_double_star_glob_matches_at_any_depth(ws):
     p = _policy(ws, ["**/report.txt"])
     p.check(ws / "report.txt", "write")
