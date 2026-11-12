@@ -717,3 +717,71 @@ def test_literate_agent_main_takes_a_timeout(agent, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["literate_agent.py", "x"])
     agent.main()
     assert seen.get("timeout") == 120.0  # run_literate_agent's own default
+
+
+# --- spec E2: a resume after a failure starts at the failed cell -----------------
+
+# Cell 0: one more line in log.txt, and ``a = 1``.
+LOG_A1 = LOG.replace("a = 20", "a = 1")
+
+
+def test_a_resume_after_a_failure_starts_at_the_failed_cell(env, runner):
+    """Spec E2: the failed cell joins ``stopped``, so the next resume starts no later
+    than it (ruling A). A change after the failed cell runs the failed cell again, from
+    the checkpoint before it: it fails again, and cell 0 does not run again."""
+    run = _literate_run(env, runner)
+    try:
+        first = run.submit(_doc(LOG_A1, "b = a / 0", "c = 3", prose=""), None)
+        assert first.error.startswith("cell 1 (b = a / 0): "), first
+        assert run._channel.stopped == {1}
+        assert run._channel.can_resume(1)
+        second = run.submit(_doc(LOG_A1, "b = a / 0", "c = 4", prose=""), None)
+    finally:
+        run.close()
+    assert not second.success, second
+    assert second.error.startswith("cell 1 (b = a / 0): "), second
+    assert _lines(env) == 1  # cell 0 did not run again
+
+
+def test_a_fixed_failed_cell_resumes_from_its_checkpoint(env, runner):
+    """Spec E2: the fixed cell runs from the checkpoint before it; cell 0 does not run again."""
+    run = _literate_run(env, runner)
+    try:
+        first = run.submit(_doc(LOG_A1, "b = a / 0", "c = 3", prose=""), None)
+        assert not first.success, first
+        second = run.submit(_doc(LOG_A1, "b = a / 1", "c = 3", prose=""), None)
+    finally:
+        run.close()
+    assert second.success, second
+    assert second.variables["b"] == 1.0, second
+    assert _lines(env) == 1  # cell 0 did not run again
+
+
+def test_a_failure_with_a_large_value_still_names_its_cell(env, runner):
+    """A failed document whose variables are too large to send still sends its
+    cell-named error and its failed cell; the variables are left out."""
+    run = _literate_run(env, runner, cell_timeout=10.0)
+    try:
+        r = run.submit(_doc(BIG, "b = 1 / 0", prose=""), None)
+        stopped = set(run._channel.stopped)
+    finally:
+        run.close()
+    assert not r.success, r
+    assert r.error.startswith("cell 1 (b = 1 / 0): "), r.error
+    assert "big" not in r.variables
+    assert stopped == {1}
+
+
+def test_a_resume_after_a_failure_has_the_state_before_the_failed_cell(env, runner):
+    """Spec E2: the failed cell bound ``x`` before it raised; the checkpoint before it
+    holds no ``x``, so the resumed cell that reads ``x`` fails on an unbound name."""
+    run = _literate_run(env, runner)
+    try:
+        assert not run.submit(_doc(LOG_A1, "x = 2\n1 / 0", prose=""), None).success
+        second = run.submit(_doc(LOG_A1, "y = x", prose=""), None)
+    finally:
+        run.close()
+    assert not second.success, second
+    assert second.error.startswith("cell 1 (y = x): "), second.error
+    assert "x" in second.error.split(": ", 1)[1], second.error
+    assert _lines(env) == 1  # cell 0 did not run again

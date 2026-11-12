@@ -509,11 +509,12 @@ class SessionChannel:
         self.cell_timeout = cell_timeout
         self.cpu_timeout = max(cell_timeout, cpu_timeout or 0.0)
         self.max_checkpoints = max_checkpoints
-        #: The cells (``cell_start`` index) stopped at the limit, in the state the
-        #: session holds now: cleared by ``submit``, and by ``resume(index)`` for
-        #: those at ``index`` or later (fix round 1, ruling A).
+        #: The cells stopped at the limit (``cell_start`` index) and the failed
+        #: cell (spec E2, its index in the document), in the state the session
+        #: holds now: cleared by ``submit``, and by ``resume(index)`` for those
+        #: at ``index`` or later (fix round 1, ruling A).
         self.stopped: set[int] = set()
-        self._protect: int | None = None  # the checkpoint before the last stopped cell
+        self._protect: int | None = None  # the checkpoint before the last stopped or failed cell
         #: True after a submit or resume that ended with the document's result:
         #: then every process but the deepest is a checkpoint waiting in its hook.
         self.finished = False
@@ -850,11 +851,19 @@ class SessionChannel:
         if not isinstance(r, dict):
             return self._failed("the session process sent a result that is not valid", entries)
         error, phase, variables = r.get("error"), r.get("error_phase"), r.get("variables")
+        failed = r.get("failed_cell")
         if (type(r.get("success")) is not bool or not isinstance(variables, dict)
                 or not (error is None or type(error) is str)
                 or not (phase is None or type(phase) is str)
+                or not (failed is None or type(failed) is int)
                 or type(r.get("stdout")) is not str):
             return self._failed("the session process sent a result that is not valid", entries)
+        if failed is not None:
+            # Spec E2: the failed cell joins ``stopped``, as a timed-out cell
+            # does. It ran in the deepest process, so that process's parent
+            # is the checkpoint before it: keep it, as ``_timeout`` does.
+            self.stopped.add(failed)
+            self._protect = self._stack[-1].parent
         return ExecutionResult(success=r["success"], output=r.get("output"), stdout=r["stdout"],
                                error=error, trace=_trace(entries), variables=variables,
                                error_phase=phase)

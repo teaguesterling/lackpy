@@ -96,7 +96,7 @@ class Resume:
 
 def _failed(error: str) -> dict[str, Any]:
     return {"success": False, "output": None, "stdout": "", "error": error,
-            "variables": {}, "error_phase": None}
+            "variables": {}, "error_phase": None, "failed_cell": None}
 
 
 class _Hook:
@@ -318,17 +318,36 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
         "error": result.error,
         "variables": {k: v for k, v in variables.items() if _is_data(v)},
         "error_phase": meta.get("error_phase"),
+        # Spec E2: the parent adds it to ``stopped``.
+        "failed_cell": meta.get("failed_cell"),
     }
+
+
+def _done_line(result: dict[str, Any]) -> str:
+    """The ``done`` line for ``result``; ``WireError`` when it cannot be sent."""
+    line = wire.encode({"event": "done", "result": result})
+    if len(line) >= wire.DEFAULT_MAX_LINE:
+        raise wire.WireError(f"the result is larger than {wire.DEFAULT_MAX_LINE} bytes")
+    return line
 
 
 def _send_done(channel: Any, result: dict[str, Any]) -> None:
     try:
-        line = wire.encode({"event": "done", "result": result})
-        if len(line) >= wire.DEFAULT_MAX_LINE:
-            raise wire.WireError(f"the result is larger than {wire.DEFAULT_MAX_LINE} bytes")
+        line = _done_line(result)
     except wire.WireError as e:
-        line = wire.encode({"event": "done", "result": _failed(
-            f"the document's result could not be sent: {e}")})
+        line = None
+        if not result.get("success") and result.get("error"):
+            # A failure keeps its cell-named error and its failed cell (spec
+            # E2) when its values are too large: it leaves out its variables.
+            try:
+                line = _done_line({**result, "output": None, "variables": {},
+                                   "error": f"{result['error']}; the result leaves out "
+                                            f"its variables: they are too large to send"})
+            except wire.WireError:
+                pass
+        if line is None:
+            line = wire.encode({"event": "done", "result": _failed(
+                f"the document's result could not be sent: {e}")})
     try:
         channel.sock.sendall((line + "\n").encode("ascii"))
     except BaseException:

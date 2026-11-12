@@ -397,6 +397,9 @@ class LiterateInterpreter:
                 # session; a timeout does not).
                 "error_phase": ("refused" if refusal is not None
                                 else "timeout" if timed_out else None),
+                # Spec E2: the index of the failed cell, which the session
+                # worker sends so the next resume starts no later than it.
+                "failed_cell": failure[0] if failure is not None else None,
                 "variables": variables,
                 "continue_requested": continue_requested,
                 "cell_count": len(parsed.cells),

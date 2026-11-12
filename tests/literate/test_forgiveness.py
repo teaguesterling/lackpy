@@ -154,8 +154,10 @@ class TestErrorAsValue:
 
     @pytest.mark.asyncio
     async def test_partial_bindings_keep_their_real_values(self, context):
-        # `x = 2` completed before the raise: completed work is kept as its
-        # real value — the failure itself is what gets ledgered.
+        # `x = 2` completed before the raise. The in-process fold keeps no
+        # checkpoint, so its live kernel keeps x == 2 (spec E1: E2 applies only
+        # through LiterateRun). The result's variables leave x out (E2), and
+        # the failure itself is what gets ledgered.
         session = LiterateSession(context)
         result = await session.step(
             "```lackpy\nx = 2\nfail = {}['boom']\n```"
