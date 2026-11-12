@@ -69,6 +69,7 @@ lackpy-lang = { path = "packages/lackpy-lang", editable = true }
 lackpy = "lackpy.cli:main"
 lackpyctl = "lackpy.ctl:main"
 lackpy-mcp = "lackpy.mcp.cli:mcp_main"
+stepy = "lackpy.stepy:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lackpy"]
