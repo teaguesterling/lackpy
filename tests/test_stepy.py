@@ -469,8 +469,8 @@ def test_document_validation_error_exits_2_and_runs_nothing(ws, capsys):
     assert main([_doc(ws, "print('hi')\n", "import os\n")]) == 2
     out = capsys.readouterr()
     assert out.out == ""
-    # The validator's own text: "document cell 4 (line 11): Forbidden AST node: Import".
-    assert "import" in out.err.lower() and "line 11" in out.err
+    # Final review 6: the run errors' form, "cell {i} ({first line})", index from 0.
+    assert "cell 3 (import os): " in out.err, out.err
 
 
 def test_document_help_says_the_timeout_is_per_cell(ws, capsys):

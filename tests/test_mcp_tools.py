@@ -166,7 +166,7 @@ def test_validate_follows_the_literate_axis(workspace):
     bad = _call("validate", {"program": "```lackpy\nx = 1\n```\n\n```lackpy\nfor i in []:\n    pass\n```\n",
                              "profile": "lit", "rules": ["no_loops"]})
     assert bad["valid"] is False
-    assert any("document cell 2" in v["message"] for v in bad["violations"]), bad
+    assert any(v["message"].startswith("cell 1 (for i in []:): ") for v in bad["violations"]), bad
     assert [v["message"] for v in bad["violations"]] == bad["errors"]
 
 

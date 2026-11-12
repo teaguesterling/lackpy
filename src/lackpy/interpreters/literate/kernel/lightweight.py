@@ -36,7 +36,7 @@ from lackpy.run.cells import CellOutcome, CellSession
 
 from ..compiler import _COMPILERS, _IMPORT_PATH, binds_path, prose_segments, without_path_import
 from ..display import DEFAULT_DISPLAY_THRESHOLD, make_display
-from ..parser import Cell
+from ..parser import Cell, first_line
 from ..patch import apply_patch
 from .interface import CellResult
 from .static_analysis import StaticAnalysisError, check_cell
@@ -267,10 +267,10 @@ class LightweightKernel:
 
 
 def cell_label(cell: Cell, cell_index: int) -> str:
-    """How an error names a document cell (final review M4): its number in the
-    document (prose cells count, as ``parse()`` numbers them, from 1) and the
-    document line of its fence."""
-    return f"document cell {cell_index + 1} (line {cell.line_number})"
+    """How an error names a document cell: ``cell {i} ({first line})``, the form
+    of the run's errors (final review 6). ``i`` is the index in the document,
+    from 0, with prose cells counted, as ``parse()`` numbers them."""
+    return f"cell {cell_index} ({first_line(cell)})"
 
 
 def _failed(cell_index: int, error: str, phase: str, output: str | None = None) -> CellResult:

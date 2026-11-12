@@ -1149,14 +1149,16 @@ class TestLiterateFinalFixWave:
                "```lackpy\nfor i in [1]:\n    x = i\n```\n")
         result = service.validate(doc, profile=_LIT, rules=["no_loops"])
         assert result.valid is False
-        assert any("document cell 3" in e and "For-loop forbidden" in e for e in result.errors), result.errors
+        assert any(e.startswith("cell 2 (for i in [1]:): ") and "For-loop forbidden" in e
+                   for e in result.errors), result.errors
         assert result.errors == [v.message for v in result.violations]
 
     def test_m1_a_prose_expression_is_validated(self, service):
         doc = "```lackpy\nx = 1\n```\n\nShown: {open('a')}\n"
         result = service.validate(doc, profile=_LIT)
         assert result.valid is False
-        assert any("document cell 2" in e and "open" in e for e in result.errors), result.errors
+        assert any(e.startswith("cell 1 (Shown: {open('a')}): ") and "open" in e
+                   for e in result.errors), result.errors
 
     def test_m1_a_parse_error_is_invalid(self, service):
         result = service.validate("```lackpy @read\n```", profile=_LIT)
@@ -1173,7 +1175,7 @@ class TestLiterateFinalFixWave:
     async def test_m1_validate_and_run_agree_on_the_failing_cell(self, service):
         doc = "```lackpy\nx = 1\n```\n\n```lackpy\nfor i in [1]:\n    x = i\n```\n"
         verdict = service.validate(doc, profile=_LIT, rules=["no_loops"])
-        assert [e for e in verdict.errors if "document cell 2" in e]
+        assert [e for e in verdict.errors if e.startswith("cell 1 (for i in [1]:): ")]
         result = await service.run_program(doc, profile=_LIT, rules=["no_loops"])
         assert result.success is False
         assert "For-loop forbidden" in result.error
@@ -1183,10 +1185,10 @@ class TestLiterateFinalFixWave:
         doc = "Intro.\n\n```lackpy\nimport json\n```\n\n```lackpy\nimport json\n```\n"
         result = await service.run_program(doc, profile=_LIT)
         assert result.success is False
-        # Cell 2 of the document (the first code cell), fenced at document line 3.
-        assert "document cell 2 (line 3)" in result.error, result.error
+        # Final review 6: cell 1 of the document (the first code cell), as the run names it.
+        assert "line 1 of cell 1 (import json)" in result.error, result.error
         verdict = service.validate(doc, profile=_LIT)
-        assert any("document cell 2 (line 3)" in e for e in verdict.errors), verdict.errors
+        assert any("line 1 of cell 1 (import json)" in e for e in verdict.errors), verdict.errors
 
     @pytest.mark.asyncio
     async def test_m5_a_read_only_refusal_says_the_profile_is_read_only(self, service):
