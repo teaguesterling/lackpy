@@ -2,7 +2,6 @@
 
 import pytest
 
-from lackpy.interpreters.literate.kernel.forgiveness import ErrorValue, Hole
 from lackpy.interpreters.literate.kernel.lightweight import LightweightKernel
 from lackpy.interpreters.literate.parser import Cell
 from lackpy.run.cells import CellSession
@@ -197,24 +196,6 @@ class TestScope:
         assert "str" in scope["y"]
 
 
-class TestReifiedValues:
-    def test_bind_accepts_only_forgiving_values(self, kernel):
-        kernel.bind("h", Hole("h"))
-        assert isinstance(kernel.lookup("h"), Hole)
-        assert "h" in kernel.known_names()
-        with pytest.raises(TypeError):
-            kernel.bind("f", print)  # no host object enters the kernel's view
-
-    def test_a_reified_value_never_enters_the_session(self, kernel):
-        kernel.bind("e", ErrorValue(name="e", error="boom", error_phase="runtime"))
-        assert "e" not in kernel.session.bound_names()
-
-    def test_a_cell_that_rebinds_a_reified_name_clears_it(self, kernel):
-        kernel.bind("x", Hole("x"))
-        kernel.execute_cell(Cell(cell_type="code", content="x = 5"), 0)
-        assert kernel.lookup("x") == 5
-
-
 class TestTheLatchAtEveryEntryPoint:
     """Review I1: after a refusal every cell type and inspect refuse, also the
     ones that never call the session (prose text, @continue)."""
@@ -238,10 +219,6 @@ class TestTheLatchAtEveryEntryPoint:
         result = refused.execute_cell(cell, 1)
         assert not result.success and result.error_phase == "refused"
         assert "earlier refusal" in result.error and "pathlib" in result.error
-
-    def test_rerun_refuses_after_a_refusal(self, refused):
-        result = refused.rerun_cell(Cell(cell_type="prose", content="T"), 1, None)
-        assert result.error_phase == "refused"
 
     def test_inspect_reports_the_latch(self, refused):
         assert "earlier refusal" in refused.inspect("1 + 1")

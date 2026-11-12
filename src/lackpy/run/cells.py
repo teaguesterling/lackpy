@@ -10,7 +10,7 @@ violation of its own: every violation of the extended program is one the cell
 caused.
 
 A refusal ends the session (D4, ruling "after any refusal the CellSession is
-closed"). After the first ``LackpyRefusal``, from a cell, a re-run or an
+closed"). After the first ``LackpyRefusal``, from a cell or an
 expression, every later call gives ``phase="refused"`` without validating or
 executing. No ``LackpyRefusal`` leaves the session. The validator rejects every
 handler and ``finally`` that could catch one (``safety.except-base``,
@@ -41,7 +41,7 @@ Phase = Literal["validate", "runtime", "refused"]
 
 @dataclass
 class CellOutcome:
-    """The result of one cell, or of one re-run.
+    """The result of one cell.
 
     Attributes:
         ok: Whether the cell validated and ran without error.
@@ -50,10 +50,9 @@ class CellOutcome:
         phase: Where the cell stopped: ``"validate"`` (nothing ran), ``"runtime"``
             (an ``Exception``), ``"refused"`` (a ``LackpyRefusal``, now or earlier), or None.
         delta: The names this cell bound or rebound whose values are data.
-        cell_id: The cell's identity, for :meth:`CellSession.rerun_cell`.
+        cell_id: The cell's identity in the session.
         line: For a ``"runtime"`` failure, the cell's top-level line that was
-            running when it raised (the literate kernel uses it to tell which
-            top-level statements completed); else None.
+            running when it raised; else None.
         rebound: Every name the run bound or rebound (by identity, any value),
             with the name of its value's type. Also for a run that failed part
             way. The values themselves are not given (ruling N1).
@@ -91,13 +90,6 @@ class ExprOutcome:
     stdout: str = ""
 
 
-@dataclass
-class _Cell:
-    code: CodeType | None  # None: the cell failed validation and is not in the program
-    # The trailing expression statement, compiled apart so its value is kept.
-    tail: CodeType | None = None
-
-
 # A validator line reference is ``line N`` outside quoted program text. Rules quote
 # program text as '<text>' just before " at line N" (``ast.unparse`` output can hold
 # quotes of its own), so that span is matched first and kept as it is (review M4).
@@ -125,7 +117,6 @@ class CellSession:
         self._namespace = build_namespace(program_file=program_file, path_policy=path_policy,
                                           print_fn=print_fn, trace=self.trace)
         self._runtime_names = frozenset(self._namespace)
-        self._cells: dict[int, _Cell] = {}
         self._next_id = 1
         # The program: the cells that passed validation, including the ones that
         # then failed at runtime (part of them ran, so the validator must see
@@ -200,44 +191,19 @@ class CellSession:
         except RUNTIME_FAILURES as e:  # never let a refusal (or a host fault) escape
             return self._failure(cell_id, e)
 
-    def rerun_cell(self, cell_id: int) -> CellOutcome:
-        """Exec the stored code of a cell in the program, again.
-
-        A cell is in the program when it passed validation: its first run was ok
-        or failed at runtime (the forgiveness case: re-run once a dependency
-        changes). The code is not validated again and not added to the program
-        again: the program text does not change. An unknown cell, or one that
-        failed validation, gives a failed outcome with ``phase="validate"``
-        (nothing ran). After a refusal the session is closed, so a refused cell
-        gives ``phase="refused"``.
-        """
-        if self._refusal is not None:
-            return self._closed(cell_id)
-        cell = self._cells.get(cell_id)
-        if cell is None or cell.code is None:
-            reason = "is not a cell of this session" if cell is None else "failed validation"
-            return CellOutcome(ok=False, phase="validate", cell_id=cell_id,
-                               error=f"cell {cell_id} cannot be re-run: it {reason}")
-        self._captured.clear()
-        try:
-            return self._exec(cell_id, cell.code, cell.tail)
-        except RUNTIME_FAILURES as e:
-            return self._failure(cell_id, e)
-
     def check_cell(self, source: str, *, label: str | None = None) -> list[Violation]:
         """Validate ``source`` as an extension of the program, without running it.
 
         For validation without execution (``LackpyService.validate`` on a literate
         document, final review M1). The violations are the ones :meth:`run_cell`
         would report, with the same line naming. A cell with none joins the
-        program (it is never executed and cannot be re-run); a cell with any
+        program (it is never executed); a cell with any
         does not, as in :meth:`run_cell`.
         """
         cell_id = self._next_id
         self._next_id += 1
         if label is not None:
             self._labels[cell_id] = label
-        self._cells[cell_id] = _Cell(code=None)
         try:
             ast.parse(source)
         except SyntaxError as e:
@@ -306,7 +272,6 @@ class CellSession:
     # -- internals -------------------------------------------------------------
 
     def _run_cell(self, cell_id: int, source: str) -> CellOutcome:
-        self._cells[cell_id] = _Cell(code=None)
         # Each cell must parse alone: joined, ``else:`` or an indented line could
         # continue an earlier cell's block, and exec runs this cell alone.
         try:
@@ -323,7 +288,6 @@ class CellSession:
         if tree.body and isinstance(tree.body[-1], ast.Expr):
             tail = compile(ast.Expression(tree.body.pop().value), "<lackpy>", "eval")
         code = compile(tree, "<lackpy>", "exec")
-        self._cells[cell_id] = _Cell(code=code, tail=tail)
         self._join(cell_id, source)
         return self._exec(cell_id, code, tail)
 

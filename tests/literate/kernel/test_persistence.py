@@ -2,13 +2,10 @@
 
 Three pinned contracts (design: pages/private/design-optionB-kernel-aidr.md):
 
-1. SERIALIZATION: Hole / ErrorValue / Unavailable round-trip EXACTLY through
-   to_dict/from_dict (all-string fields + a ``__kind__`` discriminator).
-   BindingVersion serializes with the DECISION-1 best-effort value strategy,
-   wrapped in the self-describing ``{"v": tag, "data": ...}`` envelope:
-   forgiveness values exactly (``"fjson"``), JSON-able values verbatim
-   (``"json"`` — a user dict containing ``__kind__`` is NEVER sniffed as a
-   forgiveness value), anything else as an inspectable
+1. SERIALIZATION: BindingVersion serializes with the DECISION-1 best-effort
+   value strategy, wrapped in the self-describing ``{"v": tag, "data": ...}``
+   envelope: JSON-able values verbatim (``"json"`` — a user dict containing
+   ``__kind__`` is NEVER sniffed), anything else as an inspectable
    ``__nonserializable__`` repr marker (``"marker"``) — never raising.
 2. IDENTITY: session_id/document_id thread from LiterateSession into the
    ledger AND the binding history; every asserted BindingVersion is stamped
@@ -34,18 +31,14 @@ from lackpy.interpreters.literate.kernel import (
     AIDR_BINDING_COLUMNS,
     BindingVersion,
     BindingVersions,
-    ErrorValue,
-    Hole,
     Ledger,
     PersistenceBackend,
     PersistentBindingVersions,
     PersistentLedger,
-    Unavailable,
     deserialize_value,
     ledger_entry_to_dict,
     serialize_value,
 )
-from lackpy.interpreters.literate.kernel.forgiveness import forgiveness_from_dict
 from lackpy.interpreters.literate.kernel.persistence import MAX_MARKER_REPR
 
 
@@ -80,37 +73,6 @@ class DictBackend:
         return table
 
 
-class TestForgivenessRoundTrip:
-    """Contract 1a: forgiveness kinds round-trip EXACTLY."""
-
-    @pytest.mark.parametrize(
-        "value",
-        [
-            Hole("x"),
-            Hole("y", blocked_by=("a", "b")),
-            ErrorValue("z", "ZeroDivisionError: division by zero"),
-            ErrorValue("w", "SyntaxError: bad", error_phase="compile"),
-            Unavailable("q", "effect ceiling exceeded: net"),
-        ],
-        ids=["hole", "chained-hole", "error", "error-phase", "unavailable"],
-    )
-    def test_round_trip_exact(self, value):
-        data = value.to_dict()
-        json.dumps(data)  # the serialized form must be JSON-safe
-        restored = forgiveness_from_dict(data)
-        assert restored == value
-        assert type(restored) is type(value)
-
-    def test_discriminators(self):
-        assert Hole("x").to_dict()["__kind__"] == "hole"
-        assert ErrorValue("x", "E: m").to_dict()["__kind__"] == "error"
-        assert Unavailable("x", "r").to_dict()["__kind__"] == "unavailable"
-
-    def test_unknown_kind_raises(self):
-        with pytest.raises(ValueError):
-            forgiveness_from_dict({"__kind__": "gremlin"})
-
-
 class TestSerializeValue:
     """Contract 1b: DECISION 1 (option a) — best-effort value_json."""
 
@@ -122,12 +84,6 @@ class TestSerializeValue:
         stored = serialize_value(value)
         json.dumps(stored)
         assert deserialize_value(stored) == value
-
-    def test_forgiveness_round_trips_exactly(self):
-        hole = Hole("x", blocked_by=("up",))
-        stored = serialize_value(hole)
-        assert stored == {"v": "fjson", "data": hole.to_dict()}
-        assert deserialize_value(stored) == hole
 
     @pytest.mark.parametrize(
         "value",
@@ -192,24 +148,21 @@ class TestSerializeValue:
 
 class TestEnvelopeCollisionProof:
     """F1 regression: a USER dict carrying a ``__kind__`` key must round-trip
-    verbatim — never crash, never silently become a forgiveness value.  These
-    fail on the pre-envelope format (KeyError crash / silent Hole corruption)
-    and pass with the envelope."""
+    verbatim — never crash, never silently become another value."""
 
     def test_user_dict_with_error_kind_round_trips_verbatim(self):
-        # Pre-envelope: KeyError('name') crash inside ErrorValue.from_dict.
+        # Pre-envelope: a KeyError crash.
         value = {"__kind__": "error", "code": 42}
         restored = deserialize_value(serialize_value(value))
         assert restored == value
         assert type(restored) is dict
 
     def test_user_dict_with_hole_kind_round_trips_verbatim(self):
-        # Pre-envelope: silently deserialized into a Hole (corruption).
+        # Pre-envelope: silently deserialized into another value (corruption).
         value = {"__kind__": "hole", "name": "realname", "blocked_by": ["a"]}
         restored = deserialize_value(serialize_value(value))
         assert restored == value
         assert type(restored) is dict
-        assert not isinstance(restored, Hole)
 
     def test_user_dict_with_unavailable_kind_round_trips_verbatim(self):
         value = {"__kind__": "unavailable", "name": "n", "reason": "r"}
@@ -221,41 +174,18 @@ class TestEnvelopeCollisionProof:
         value = {"a": {"b": [1, {"c": None, "__kind__": "error"}]}, "v": "x"}
         assert deserialize_value(serialize_value(value)) == value
 
-    @pytest.mark.parametrize(
-        "value",
-        [
-            Hole("x"),
-            Hole("y", blocked_by=("a", "b")),
-            ErrorValue("z", "ZeroDivisionError: division by zero"),
-            Unavailable("q", "effect ceiling exceeded: net"),
-        ],
-        ids=["hole", "chained-hole", "error", "unavailable"],
-    )
-    def test_forgiveness_kinds_still_round_trip_through_envelope(self, value):
-        restored = deserialize_value(serialize_value(value))
-        assert restored == value
-        assert type(restored) is type(value)
-
     def test_binding_with_kind_dict_value_round_trips(self):
         """The end-to-end form of the bug: a BindingVersion whose VALUE is a
         ``__kind__``-bearing dict must reconstruct to the exact dict."""
         versions = BindingVersions(session_id="S", clock=lambda: 1.0)
         value = {"__kind__": "error", "code": 42}
         new, _ = versions.assert_binding("cfg", value)
-        assert new.kind == "value"  # a plain dict, NOT a forgiveness value
+        assert new.kind == "value"  # a plain dict
         data = versions.serialize(new)
         json.dumps(data)
         restored = BindingVersion.from_dict(data)
         assert restored == new
         assert restored.value == value
-
-    def test_malformed_forgiveness_dict_raises_valueerror_not_keyerror(self):
-        # Defense-in-depth for direct callers: clean ValueError, no KeyError.
-        with pytest.raises(ValueError, match="malformed"):
-            forgiveness_from_dict({"__kind__": "error", "code": 42})
-        with pytest.raises(ValueError, match="malformed"):
-            forgiveness_from_dict({"__kind__": "unavailable", "name": "n"})
-
 
 class TestBindingVersionSerialization:
     """Contract 1c: the serialized BindingVersion carries the AIDR columns."""
@@ -280,21 +210,12 @@ class TestBindingVersionSerialization:
         assert tuple(data) == AIDR_BINDING_COLUMNS
         json.dumps(data)
 
-    @pytest.mark.parametrize(
-        "value,kind",
-        [
-            (41, "value"),
-            (Hole("x"), "hole"),
-            (ErrorValue("x", "E: m"), "error"),
-            (Unavailable("x", "r"), "unavailable"),
-        ],
-    )
-    def test_kind_accessor_and_round_trip(self, value, kind):
+    def test_kind_accessor_and_round_trip(self):
         versions = BindingVersions(clock=lambda: 1.5)
-        new, _ = versions.assert_binding("x", value)
-        assert new.kind == kind
+        new, _ = versions.assert_binding("x", 41)
+        assert new.kind == "value"
         data = versions.serialize(new)
-        assert data["kind"] == kind
+        assert data["kind"] == "value"
         assert BindingVersion.from_dict(data) == new  # exact round-trip
 
     def test_superseded_is_lifecycle_not_kind(self):

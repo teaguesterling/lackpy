@@ -261,35 +261,6 @@ def test_each_cell_gets_its_own_cell_id(session):
     assert a.cell_id is not None and b.cell_id is not None and a.cell_id != b.cell_id
 
 
-def test_rerun_cell_re_executes_the_stored_code(session):
-    _ok(session.run_cell("n = 0"))
-    bump = _ok(session.run_cell("n = n + 1\nprint(n)"))
-    again = _ok(session.rerun_cell(bump.cell_id))
-    assert again.cell_id == bump.cell_id
-    assert again.stdout == "2\n" and again.delta == {"n": 2}
-
-
-def test_rerun_of_a_def_cell_does_not_append_it_again(session):
-    cell = _ok(session.run_cell("def f():\n    return 1"))
-    _ok(session.rerun_cell(cell.cell_id))
-    # Appended twice, style.def-shadow would now reject the next cell.
-    _ok(session.run_cell("x = f()"))
-
-
-def test_rerun_of_an_unknown_or_failed_cell_fails(session):
-    assert not session.rerun_cell(999).ok
-    rejected = session.run_cell("import os")
-    out = session.rerun_cell(rejected.cell_id)
-    assert not out.ok and out.error
-
-
-def test_rerun_in_a_latched_session_is_refused(session):
-    cell = _ok(session.run_cell("from pathlib import Path"))
-    assert session.run_cell('Path("/etc/hostname").read_text()').phase == "refused"
-    out = session.rerun_cell(cell.cell_id)
-    assert not out.ok and out.phase == "refused"
-
-
 # -- stdout and delta -------------------------------------------------------------
 
 def test_stdout_is_captured_per_cell(session):
@@ -351,16 +322,6 @@ def test_quoted_program_text_is_not_renumbered(session):
     assert "'p['line 9'].y' at line 1" in out.error
 
 
-def test_rerun_of_a_cell_that_failed_at_runtime_runs_it_again(session):
-    # Forgiveness: a cell that failed on missing data is re-run once a later cell fixes it.
-    _ok(session.run_cell("d = {}"))
-    failed = session.run_cell("v = d['k']")
-    assert failed.phase == "runtime"
-    _ok(session.run_cell("d = {'k': 1}"))
-    again = _ok(session.rerun_cell(failed.cell_id))
-    assert again.delta == {"v": 1}
-
-
 # -- N1: eval_expr gives data or repr text, never a live object ---------------------
 
 LAZY_SETUP = ("from pathlib import Path\n"
@@ -408,19 +369,6 @@ def test_eval_expr_value_whose_repr_fails_gives_phase_runtime(session):
     out = session.eval_expr("x")
     assert not out.ok and out.phase == "runtime" and out.value is None
     _ok(session.run_cell("y = 1"))
-
-
-def test_a_refusal_raised_by_rerun_cell_latches_the_session(session, workspace):
-    # N2: the cell ran ok; a dependency changed, so its re-run refuses.
-    (workspace / "in.txt").write_text("ok")
-    _ok(session.run_cell("from pathlib import Path"))
-    _ok(session.run_cell(f"d = {{'p': {str(workspace / 'in.txt')!r}}}"))
-    cell = _ok(session.run_cell("t = Path(d['p']).read_text()"))
-    _ok(session.run_cell("d = {'p': '/etc/hostname'}"))
-    again = session.rerun_cell(cell.cell_id)
-    assert not again.ok and again.phase == "refused" and "/etc/hostname" in again.error
-    after = session.run_cell("y = 1")
-    assert after.phase == "refused" and "/etc/hostname" in after.error
 
 
 # -- Task 2 additions: what the literate kernel reads back ----------------------
@@ -530,13 +478,6 @@ def test_the_trailing_expression_runs_once(session):
     out = _ok(session.run_cell("n = []\nn.append(1)\nprint('once')"))
     assert out.stdout == "once\n"
     assert _ok(session.run_cell("len(n)")).value == 1
-
-
-def test_a_rerun_gives_the_value_again(session):
-    _ok(session.run_cell("n = [1]"))
-    first = _ok(session.run_cell("len(n)"))
-    _ok(session.run_cell("n.append(2)"))
-    assert _ok(session.rerun_cell(first.cell_id)).value == 2
 
 
 def test_a_failed_cell_has_no_value(session):

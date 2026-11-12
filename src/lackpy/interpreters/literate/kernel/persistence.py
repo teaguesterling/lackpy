@@ -28,20 +28,16 @@ A binding's value is an arbitrary Python object.  :func:`serialize_value`
 wraps EVERY value in a self-describing envelope so the deserializer never has
 to sniff user data for reserved keys::
 
-    {"v": "fjson",  "data": <forgiveness to_dict>}   # Hole/ErrorValue/Unavailable
     {"v": "json",   "data": <JSON-normalized value>} # any JSON-able value, verbatim
     {"v": "marker", "data": {"__repr__": ..., "__nonserializable__": True,
                              "type": ...}}           # everything else
 
-Forgiveness values (:class:`~.forgiveness.Hole` /
-:class:`~.forgiveness.ErrorValue` / :class:`~.forgiveness.Unavailable`)
-serialize exactly via their ``to_dict`` and round-trip.  JSON-able values are
+JSON-able values are
 stored in their JSON-normalized form (``json.loads(json.dumps(v))`` — tuples
 become lists, non-string dict keys become strings — so what is stored is
 exactly what survives a real JSON boundary) and round-trip VERBATIM: a user
 dict that happens to contain ``__kind__`` (or any other reserved-looking key)
-is just ``data`` under ``"v": "json"`` and is never interpreted as a
-forgiveness value.  Everything else becomes an *inspectable marker* (repr
+is just ``data`` under ``"v": "json"`` and is never interpreted.  Everything else becomes an *inspectable marker* (repr
 bounded at :data:`MAX_MARKER_REPR` chars) which deserializes to the marker
 dict — legible, honest, never reconstructed to the real object.
 :func:`serialize_value` NEVER raises (a persistence layer must not crash the
@@ -55,7 +51,6 @@ import json
 from dataclasses import asdict
 from typing import Any, Protocol, runtime_checkable
 
-from .forgiveness import forgiveness_from_dict, is_forgiving
 from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
 from .versions import BindingVersion, BindingVersions
 
@@ -79,8 +74,6 @@ def serialize_value(value: Any) -> dict[str, Any]:
     """Best-effort serialization of a binding value (DECISION 1, option (a)),
     wrapped in a self-describing envelope ``{"v": <tag>, "data": ...}``.
 
-    * Forgiveness value → ``{"v": "fjson", "data": <its exact to_dict>}``
-      (round-trips).
     * JSON-able value → ``{"v": "json", "data": <JSON-normalized form>}``
       (round-trips verbatim; tuples/dict-key coercion normalized up front so
       the stored form IS the JSON form).
@@ -92,8 +85,6 @@ def serialize_value(value: Any) -> dict[str, Any]:
     discriminator — no reserved-key sniffing on user data, by construction.
     Never raises.
     """
-    if is_forgiving(value):
-        return {"v": "fjson", "data": value.to_dict()}
     try:
         return {"v": "json", "data": json.loads(json.dumps(value))}
     except (TypeError, ValueError, RecursionError):
@@ -121,21 +112,18 @@ def deserialize_value(value: Any) -> Any:
     """Inverse of :func:`serialize_value`, to the extent honesty allows.
 
     Dispatches ONLY on the envelope's ``"v"`` tag — never on the shape of the
-    nested ``data``.  ``"fjson"`` reconstructs the real
-    Hole/ErrorValue/Unavailable; ``"json"`` returns ``data`` verbatim (even
+    nested ``data``.  ``"json"`` returns ``data`` verbatim (even
     if it is a dict containing ``__kind__`` — user data is never sniffed);
     ``"marker"`` returns the ``__nonserializable__`` marker dict (inspectable
     — deliberately NOT reconstructed).  Anything that is not a
     :func:`serialize_value` envelope raises ``ValueError``."""
     if isinstance(value, dict) and "v" in value and "data" in value:
         tag = value["v"]
-        if tag == "fjson":
-            return forgiveness_from_dict(value["data"])
         if tag in ("json", "marker"):
             return value["data"]
     raise ValueError(
         f"not a serialize_value envelope: {type(value).__name__} "
-        f"(expected {{'v': 'fjson'|'json'|'marker', 'data': ...}})"
+        f"(expected {{'v': 'json'|'marker', 'data': ...}})"
     )
 
 

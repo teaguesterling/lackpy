@@ -16,10 +16,9 @@ through the REAL surface (nothing reimplemented):
   and is ledgered, rather than crashing or silently succeeding.
 * ``error`` — a runtime error is a failure (spec E1): the cell binds nothing
   and is ledgered, rather than escaping as a traceback.
-* ``unavailable`` — a gate-refused source reifies an
-  :class:`~.kernel.forgiveness.Unavailable` (L1.5) and is ledgered.  The probe
-  drives the reification surface with a synthetic gate reason: the ceiling
-  gate's *classification* is policy, the semantic class is the reified value.
+* ``unavailable`` — the effect ceiling gate (L1.5) refuses a cell over the
+  ceiling before it runs; the document stops there (spec E1).  The probe checks
+  the gate's verdict for a write cell under a ceiling that grants no write.
 * ``round_trip`` — a rendered probe document (prose + code + a
   ``[kernel]``-channel note) reparses cleanly (the L2 round-trip law): source
   preserved, channel note inert.
@@ -53,12 +52,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from .annotations import KERNEL_OPEN
-from .kernel.forgiveness import (
-    ERROR_REIFIED,
-    HOLE_OPENED,
-    SOURCE_UNAVAILABLE,
-    Unavailable,
-)
+from .kernel.forgiveness import ERROR_REIFIED, HOLE_OPENED
 from .kernel.formats import render_markdown_from_cells
 from .kernel.ledger import Ledger
 from .kernel.lightweight import LightweightKernel
@@ -147,7 +141,7 @@ class SelfTestReport:
 #
 # Each probe returns (ok, expected, got).  ``interpreter`` is the
 # LiterateInterpreter whose _run_resolved_cell IS the real per-cell pipeline
-# (forgiveness pre-pass -> execute -> error reification -> versioning) — the
+# (unbound-name check -> execute -> versioning) — the
 # probes invoke it rather than reimplementing any semantics.
 
 _ProbeFn = Callable[[LightweightKernel, Any, Ledger, BindingVersions],
@@ -228,25 +222,26 @@ def _probe_unavailable(
     ledger: Ledger, versions: BindingVersions,
 ) -> tuple[bool, str, str]:
     expected = (
-        "a gate-refused source reifies an Unavailable "
-        "and is ledgered (source_unavailable)"
+        "a cell over the effect ceiling is refused by the gate before it runs "
+        "(the document stops there and ledgers source_unavailable)"
     )
-    # The reification surface is the semantic class; the ceiling gate's
-    # classification (policy) is exercised by its own tests.  Lazy import:
-    # the reifier lives in the package __init__, which imports lazily itself.
-    from . import _reify_unavailable_for_cell
+    # The gate's verdict is the semantic class. The document loop that stops at
+    # the verdict is async, and a probe is not, so the probe checks the verdict
+    # on a write cell under a ceiling that grants no write. Lazy imports: the
+    # gate lives in the package __init__, which imports this module lazily too.
+    from ...lang.grader import Grade
+    from . import _gate_violations
+    from .parser import parse as parse_document
+    from ..base import ExecutionContext
 
-    cell = Cell(cell_type="code", content="lackpy_selftest_gated = 1")
-    _reify_unavailable_for_cell(
-        cell, 0, "effect ceiling exceeded: selftest probe (synthetic)",
-        kernel, ledger, versions, set(),
+    parsed = parse_document("```lackpy @write(lackpy_selftest_gated.txt)\nx\n```")
+    verdicts = _gate_violations(
+        parsed, ExecutionContext(config={"grade_ceiling": Grade(1, 1)}),
     )
-    bound = kernel.lookup("lackpy_selftest_gated", default="<unbound>")
-    if not isinstance(bound, Unavailable):
-        return False, expected, f"'lackpy_selftest_gated' bound {bound!r}"
-    if not ledger.query(entry_type=SOURCE_UNAVAILABLE):
-        return False, expected, "value bound but no source_unavailable ledger entry"
-    return True, expected, f"{bound!r}"
+    reason = verdicts.get(0, "")
+    if "effect ceiling exceeded" not in reason:
+        return False, expected, f"the gate's verdict for the write cell was {verdicts!r}"
+    return True, expected, f"unavailable: {reason}"
 
 
 def _probe_round_trip(
@@ -291,7 +286,7 @@ _PROBES: tuple[tuple[str, str, _ProbeFn], ...] = (
     ("value", "known evaluation computes the right value", _probe_value),
     ("hole", "unknown name is a ledgered failure (E1)", _probe_hole),
     ("error", "runtime error is a ledgered failure (E1)", _probe_error),
-    ("unavailable", "refused source reifies an Unavailable (L1.5)",
+    ("unavailable", "over-ceiling cell is refused by the gate (L1.5)",
      _probe_unavailable),
     ("round_trip", "rendered document reparses cleanly (L2)", _probe_round_trip),
 )
@@ -302,8 +297,8 @@ def run_selftest(kernel: LightweightKernel, interpreter: Any) -> SelfTestReport:
 
     The probes run on a throwaway kernel over a fresh ``CellSession`` with
     ``kernel``'s path policy (see the module text). What they prove: the
-    shared runtime evaluates, reifies and round-trips under that policy. What
-    they do not prove: anything about ``kernel``'s own session state, which
+    shared runtime evaluates, stops at a failure and round-trips under that
+    policy. What they do not prove: anything about ``kernel``'s own session state, which
     the probes never touch (review M6). Returns the report; on any failure ``kernel`` is
     DISABLED (fail-closed) so even a caller that ignores the report cannot
     execute through it.  Never raises: a probe that raises is a failed probe.

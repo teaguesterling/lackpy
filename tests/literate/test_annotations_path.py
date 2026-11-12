@@ -11,7 +11,6 @@
   same stand-in. The policy checks both; a refusal ends the document (D4).
   No patch function is ever in a cell's namespace.
 * A read-only profile is a policy deny (``read_only_policy``): ``@write`` refuses.
-* Strict reactive mode withholds a dependent whose trace shows a ``Path`` write.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ import pytest
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter
 from lackpy.interpreters.literate.compiler import compile_cell, compile_document
-from lackpy.interpreters.literate.kernel.reactive import DIRTY
 from lackpy.interpreters.literate.parser import Cell
 from lackpy.lang import validate
 from lackpy.run.paths import load_policy, read_only_policy
@@ -316,76 +314,6 @@ class TestReadOnlyPolicy:
         assert "Hello World" in result.output
 
 
-# --- strict reactive mode reads the trace -------------------------------------------------
-
-WRITES = {
-    "write_text": "n = Path(name).write_text('hi')",
-    "write_bytes": "n = Path(name).write_bytes(b'hi')",
-    "mkdir": "n = Path(name).mkdir()",
-}
-
-
-# Teague's C1 decision: only a heal re-runs a cell, and only a cell whose linear run
-# did not succeed. So each dependent below writes and then fails (``boom``), and the
-# trigger is a heal: ``name`` becomes an ErrorValue, then a value again.
-HEAL = "```lackpy\nname = 1 // 0\n```\n\n```lackpy\nname = 'b.out'\n```\n"
-
-
-class TestStrictModeReadsTheTrace:
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.parametrize("member", sorted(WRITES))
-    @pytest.mark.asyncio
-    async def test_a_dependent_that_wrote_is_withheld(self, ws, policy, member):
-        doc = ("```lackpy\nfrom pathlib import Path\nname = 'a.out'\n```\n\n"
-               f"```lackpy\n{WRITES[member]}\nboom = 1 // 0\n```\n\n" + HEAL)
-        result = await _run(_ctx(ws, policy), doc)
-        dirty = result.metadata["ledger"].query(entry_type=DIRTY)
-        assert [e.detail["cell_index"] for e in dirty] == [1]
-        assert dirty[0].detail["reexecuted"] is False
-        assert dirty[0].detail["observed_effects"] == [f"Path.{member}"]
-        assert "observed to perform a world effect" in dirty[0].detail["reason"]
-        assert (ws / "a.out").exists()
-        assert not (ws / "b.out").exists()  # never replayed
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_permissive_mode_replays_the_write(self, ws, policy):
-        doc = ("```lackpy\nfrom pathlib import Path\nname = 'a.out'\n```\n\n"
-               f"```lackpy\n{WRITES['write_text']}\nboom = 1 // 0\n```\n\n" + HEAL)
-        result = await _run(_ctx(ws, policy, reactive_mode="permissive"), doc)
-        dirty = result.metadata["ledger"].query(entry_type=DIRTY)
-        assert dirty[0].detail["reexecuted"] is True
-        assert dirty[0].detail["observed_effects"] == ["Path.write_text"]
-        assert (ws / "b.out").read_text() == "hi"
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_a_dependent_that_only_read_is_rerun(self, ws, policy):
-        (ws / "b.txt").write_text("B")
-        doc = ("```lackpy\nfrom pathlib import Path\nname = 'hello.txt'\n```\n\n"
-               "```lackpy\nt = Path(name).read_text()\nboom = 1 // 0\n```\n\n"
-               "```lackpy\nname = 1 // 0\n```\n\n```lackpy\nname = 'b.txt'\n```\n")
-        result = await _run(_ctx(ws, policy), doc)
-        dirty = result.metadata["ledger"].query(entry_type=DIRTY)
-        assert dirty[0].detail["reexecuted"] is True
-        assert result.metadata["variables"]["t"] == "B"
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_a_write_through_a_helper_is_seen(self, ws, policy):
-        # No static classifier sees this write; the trace does.
-        doc = ("```lackpy\nfrom pathlib import Path\n"
-               "def save(v):\n    return Path('h.out').write_text(v)\n```\n\n"
-               "```lackpy\nseed = 'one'\n```\n\n"
-               "```lackpy\nres = save(seed)\nboom = 1 // 0\n```\n\n"
-               "```lackpy\nseed = 1 // 0\n```\n\n```lackpy\nseed = 'two'\n```\n")
-        result = await _run(_ctx(ws, policy), doc)
-        dirty = {e.detail["cell_index"]: e
-                 for e in result.metadata["ledger"].query(entry_type=DIRTY)}
-        assert dirty[2].detail["reexecuted"] is False
-        assert (ws / "h.out").read_text() == "one"
-
-
 # --- fix round 1 ------------------------------------------------------------------------
 
 from lackpy.interpreters.literate.parser import parse  # noqa: E402
@@ -414,14 +342,13 @@ class TestDiffBindsNothing:
         assert validate(compile_document(doc), allowed_names=set()).valid
 
     @pytest.mark.asyncio
-    async def test_c_a_failed_diff_reifies_no_path_and_dirties_nothing(self, ws, policy):
+    async def test_c_a_failed_diff_binds_no_path(self, ws, policy):
         (ws / "hello.txt").unlink()
         (ws / "a.txt").write_text("A")
         doc = DIFF + "\n```lackpy @read(a.txt)\n```\n"
         result = await _run(_ctx(ws, policy), doc)
         assert "Path" not in result.metadata["variables"]
         ledger = result.metadata["ledger"]
-        assert ledger.query(entry_type=DIRTY) == []
         errors = ledger.query(entry_type="error_reified")
         assert [e.name for e in errors] == [None]
         assert "A\n" not in result.output  # spec E1: the @read after it did not run

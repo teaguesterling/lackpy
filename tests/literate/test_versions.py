@@ -9,8 +9,7 @@ latest-wins surface Python ``exec`` reads; immutability is a property of the
 RECORDED binding layer (:class:`BindingVersions` / the ledger), which is what
 these tests pin.
 
-Both re-assertion and write-once-reactive styles are legitimate: a
-``superseded`` entry is a visible transition, NOT a reified failure — it does
+A ``superseded`` entry is a visible transition, NOT a failure — it does
 not make a round Left.
 
 These tests cover the batch/session execution path
@@ -25,10 +24,8 @@ from lackpy.interpreters.literate import LiterateInterpreter, LiterateSession
 from lackpy.interpreters.literate.kernel import (
     SUPERSEDED,
     BindingVersions,
-    ErrorValue,
-    Hole,
 )
-from lackpy.interpreters.literate.kernel.forgiveness import round_is_left
+from lackpy.interpreters.literate.kernel.forgiveness import reified_failures
 
 
 @pytest.fixture
@@ -86,35 +83,7 @@ class TestReassertionVersioning:
 
         # Re-assertion is LEGITIMATE: visible in the ledger, not a failure.
         assert result.ok
-        assert not round_is_left(session.ledger.entries())
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_hole_then_definition_is_versioned_supersede(self, context):
-        # L1.1 composition: "redefinition fills a hole" is a versioned
-        # transition — the hole is v1 (superseded), the real value v2.
-        session = LiterateSession(context)
-        assert not (await session.step("```lackpy\ny = x + 1\n```")).ok
-        fixed = await session.step("```lackpy\nx = 41\ny = x + 1\n```")
-        assert fixed.ok, fixed.errors
-
-        x_history = session.versions.history("x")
-        assert len(x_history) == 2
-        assert isinstance(x_history[0].value, Hole)      # v1: the hole
-        assert x_history[0].superseded_by == 2
-        assert x_history[1].value == 41                  # v2: the real value
-
-        entries = session.ledger.query(entry_type=SUPERSEDED, name="x")
-        assert len(entries) == 1
-        assert entries[0].detail["from_version"] == 1
-        assert entries[0].detail["to_version"] == 2
-        assert entries[0].detail["prior"] == "hole"
-
-        # The chained hole on y is filled the same way (v1 hole -> v2 value).
-        y_history = session.versions.history("y")
-        assert isinstance(y_history[0].value, Hole)
-        assert y_history[-1].value == 42
-        assert session.ledger.query(entry_type=SUPERSEDED, name="y")
+        assert not reified_failures(session.ledger.entries())
 
     @pytest.mark.asyncio
     async def test_version_history_queryable(self, context):
@@ -133,46 +102,6 @@ class TestReassertionVersioning:
         assert [
             (e.detail["from_version"], e.detail["to_version"]) for e in entries
         ] == [(1, 2)]
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_chained_hole_supersedes_real_value(self, context):
-        # A blocked cell re-binding an existing REAL name to a chained hole is
-        # a re-assertion too — versioned + ledgered, never a silent overwrite.
-        session = LiterateSession(context)
-        assert (await session.step("```lackpy\nx = 1\n```")).ok
-        await session.step("```lackpy\nx = missing + 1\n```")
-
-        history = session.versions.history("x")
-        assert history[0].value == 1 and history[0].superseded_by == 2
-        assert isinstance(history[1].value, Hole)
-        entries = session.ledger.query(entry_type=SUPERSEDED, name="x")
-        assert len(entries) == 1 and entries[0].detail["prior"] == "value"
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_error_value_reassertion_and_partial_binding_versioned(
-        self, context
-    ):
-        # L1.2 composition: (a) a partial binding completed before the raise
-        # is a real re-assertion (the failed cell reports no delta, so the
-        # runner observes it directly); (b) a name reified as an ErrorValue
-        # then later defined supersedes with prior == "error".
-        session = LiterateSession(context)
-        assert (await session.step("```lackpy\nx = 1\n```")).ok
-        await session.step(
-            "```lackpy\nx = 2\nboom = 1 / 0\n```"
-        )
-        history = session.versions.history("x")
-        assert [v.value for v in history] == [1, 2]
-        assert session.ledger.query(entry_type=SUPERSEDED, name="x")
-        assert isinstance(session.versions.current("boom").value, ErrorValue)
-
-        fixed = await session.step("```lackpy\nboom = 'defused'\n```")
-        assert fixed.ok
-        entries = session.ledger.query(entry_type=SUPERSEDED, name="boom")
-        assert len(entries) == 1 and entries[0].detail["prior"] == "error"
-        assert session.versions.current("boom").value == "defused"
 
     @pytest.mark.asyncio
     async def test_batch_path_versions_and_ledgers(self, context):

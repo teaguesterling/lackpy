@@ -1,29 +1,20 @@
-"""L1 CONFORMANCE SUITE — the forgiveness semantics as a formal contract.
+"""L1 CONFORMANCE SUITE — the ledger semantics as a formal contract.
 
-This module is the L1 acceptance artifact (design-lackpy-L1: "Acceptance:
-conformance suite (one test per semantic) + chained-hole").  The five
-forgiveness semantics are implemented across L1.0–L1.5; this suite proves
-they hold TOGETHER, as one contract, in one place:
+This module is the L1 acceptance artifact. Under spec E1 and E3 a failure
+stops the document at its cell, binds nothing, and is ledgered; the suite
+proves the ledger side holds as one contract, in one place:
 
-  1. typed hole        — unknown name → ``Hole`` bound,   ``hole_opened``
-  2. error-as-value    — runtime error → ``ErrorValue``,  ``error_reified``
+  1. unbound name      — ``hole_opened``
+  2. runtime error     — ``error_reified``
   3. re-assertion      — re-bind      → new version,      ``superseded``
-  4. unavailable       — over ceiling → ``Unavailable``,  ``source_unavailable``
-  5. dirty-subgraph    — upstream re-assert → dependents re-run, ``dirty``
+  4. over the ceiling  — ``source_unavailable``
 
-Every semantic is a FIRST-CLASS VALUE **plus** a LEDGER ENTRY — never a
-control-flow abort — so each conformance test asserts BOTH sides: the reified
-value in the namespace/version history AND the queryable ledger row.
+Every semantic is a LEDGER ENTRY — never a control-flow abort — and each
+conformance test also asserts what the failure did not bind.
 
-The two-layer contract (design conflict #2, DECIDED option (c), Teague
-2026-07-17) binds the suite together:
-
-* **Binding layer (default mechanism):** failures reify as bound values,
-  ledgered; execution continues; nothing rolls back.
-* **Aggregate layer (preserved signal):** the per-round Either/Left survives
-  as a VIEW DERIVED FROM THE LEDGER (``round_is_left`` /
-  ``FORGIVENESS_ENTRY_TYPES``) — a round containing any reified failure still
-  reports Left while all its bindings stand.
+The per-round Either/Left is a VIEW DERIVED FROM THE LEDGER
+(``reified_failures`` / ``FORGIVENESS_ENTRY_TYPES``): a round containing a
+failure reports Left while the bindings from before the failure stand.
 
 Execution path: batch/session ONLY — ``LiterateSession.step`` and
 ``LiterateInterpreter.execute`` both funnel into
@@ -31,9 +22,6 @@ Execution path: batch/session ONLY — ``LiterateSession.step`` and
 streaming driver (and its pause-``pending`` status, and its model-driven
 recovery) is a different layer, deliberately untouched by L1.
 
-The headline acceptance is :class:`TestChainedHoleAcceptance` — a hole in
-cell A blocks dependent cell B, B becomes a blocked value too, and BOTH are
-ledgered.
 """
 
 import pytest
@@ -46,11 +34,8 @@ from lackpy.interpreters.literate.kernel.forgiveness import (
     HOLE_OPENED,
     SOURCE_UNAVAILABLE,
     TIMED_OUT,
-    ErrorValue,
-    Hole,
-    round_is_left,
+    reified_failures,
 )
-from lackpy.interpreters.literate.kernel.reactive import DIRTY
 from lackpy.interpreters.literate.kernel.versions import SUPERSEDED
 from lackpy.lang.grader import Grade
 from lackpy.run.paths import load_policy
@@ -74,13 +59,12 @@ async def run_batch(context, doc):
     return await LiterateInterpreter().execute(doc, context)
 
 
-class TestSemantic1TypedHole:
-    """Semantic 1 — typed hole: an unknown name BINDS ⟨name: unbound⟩.
+class TestSemantic1UnboundName:
+    """Semantic 1 — an unbound name is a failure of its cell.
 
-    Contract: referencing an undefined name does not raise and does not
-    block the round; the name binds a ``Hole``, one ``hole_opened`` ledger
-    entry records it, and the round reports Left through the aggregate view
-    only.
+    Contract: referencing an undefined name does not raise; one
+    ``hole_opened`` ledger entry records it, nothing is bound for the cell,
+    and the round reports Left through the aggregate view.
     """
 
     @pytest.mark.asyncio
@@ -100,19 +84,18 @@ class TestSemantic1TypedHole:
         assert entries[0].detail["reason"] == "unbound"
 
         # Aggregate layer: the round is Left — derived from the ledger, not
-        # thrown; the errors name the hole for the caller.
+        # thrown; the errors name the name for the caller.
         assert result.ok is False
-        assert round_is_left(session.ledger.entries())
+        assert reified_failures(session.ledger.entries())
         assert any("x" in err for err in result.errors)
 
 
-class TestSemantic2ErrorAsValue:
-    """Semantic 2 — error-as-value: a runtime error BINDS an ``ErrorValue``.
+class TestSemantic2RuntimeError:
+    """Semantic 2 — a runtime error is a failure of its cell.
 
-    Contract: a raising cell does not abort the run and nothing rolls back —
-    bindings made BEFORE the error stand, cells AFTER the error still run,
-    the failed cell's unreached names bind ``ErrorValue``s carrying the
-    exception, and one ``error_reified`` ledger entry records each.
+    Contract: a raising cell stops the run and nothing rolls back — bindings
+    made BEFORE the error stand, cells AFTER the error do not run, the failed
+    cell binds nothing, and one ``error_reified`` ledger entry records it.
     """
 
     @pytest.mark.asyncio
@@ -143,7 +126,7 @@ class TestSemantic2ErrorAsValue:
 
         # Aggregate layer: Left, derived — the state above all stands.
         assert result.ok is False
-        assert round_is_left(session.ledger.entries())
+        assert reified_failures(session.ledger.entries())
 
 
 class TestSemantic3ReassertionVersioning:
@@ -153,7 +136,7 @@ class TestSemantic3ReassertionVersioning:
     NEW immutable version, marks the prior version ``superseded_by`` it, and
     writes one ``superseded`` ledger entry carrying the transition.  The
     namespace remains the latest-wins view (current == latest).  A
-    supersession is a legitimate transition, NOT a reified failure: the
+    supersession is a legitimate transition, NOT a failure: the
     round stays Right.
     """
 
@@ -183,18 +166,17 @@ class TestSemantic3ReassertionVersioning:
 
         # A supersession is not a failure: the round is Right.
         assert result.ok is True
-        assert not round_is_left(session.ledger.entries())
+        assert not reified_failures(session.ledger.entries())
 
 
-class TestSemantic4UnavailableSource:
-    """Semantic 4 — unavailable source: an over-ceiling cell BINDS ``Unavailable``.
+class TestSemantic4OverTheCeiling:
+    """Semantic 4 — an over-ceiling cell is a failure of its cell.
 
     Contract: a cell whose statically-classified effects exceed the effect
     ceiling is NEVER executed (refuse-before-running, kept per cell — the
-    effect does not happen), the names it would have bound bind
-    ``Unavailable`` values carrying the gate's reason, one
-    ``source_unavailable`` ledger entry records each, and the rest of the
-    document still runs.  Deliberately DISTINCT from the streaming driver's
+    effect does not happen), it binds nothing, one ``source_unavailable``
+    ledger entry records it with the gate's reason, and the document stops
+    there.  Deliberately DISTINCT from the streaming driver's
     pause-``pending`` (design conflict #4): the L1.5 vocabulary never uses
     the word "pending", and a ``@continue`` pause on this same path ledgers
     ``continue_requested`` — the two can never be confused in ledger queries.
@@ -228,7 +210,7 @@ class TestSemantic4UnavailableSource:
         assert "ok" not in result.metadata["variables"]
         assert result.metadata["completed"] is True
 
-        # Aggregate layer: unavailable is a reified failure → Left.
+        # Aggregate layer: unavailable is a failure → Left.
         assert result.success is False
 
     @pytest.mark.asyncio
@@ -238,7 +220,7 @@ class TestSemantic4UnavailableSource:
         assert all("pending" not in t for t in FORGIVENESS_ENTRY_TYPES)
 
         # ... and a @continue pause on this same path is a DIFFERENT ledger
-        # concept (continue_requested), a Right round, and no reified value.
+        # concept (continue_requested), a Right round, and no failure.
         session = LiterateSession(context)
         result = await session.step("```lackpy @continue\n```")
         assert result.ok is True and result.continue_requested is True
@@ -246,141 +228,17 @@ class TestSemantic4UnavailableSource:
         assert not session.ledger.query(entry_type=SOURCE_UNAVAILABLE)
 
 
-class TestSemantic5DirtySubgraph:
-    """Semantic 5 — dirty-subgraph: re-asserting upstream re-runs ONLY dependents.
-
-    Contract: a re-assertion (an L1.3 ``superseded`` entry) marks the
-    transitive dependents of the old value stale; each is ledgered with a
-    ``dirty`` entry (nothing silent).  In strict mode (the default) a
-    dependent whose first run was OBSERVED effect-free (no ``Path`` write in
-    its slice of the session trace, ``effects.path_writes``) is re-executed
-    against the updated namespace (``reexecuted=True``, new version); a dependent
-    OBSERVED performing a world effect is withheld (``reexecuted=False`` +
-    the reason + the observed events) so the observed effect is not
-    replayed; an INDEPENDENT cell is untouched — never dirtied, never
-    re-run.  ``dirty`` is bookkeeping, not a failure: it does not make the
-    run Left.
-    """
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_reassert_reexecutes_pure_withholds_effectful(
-        self, context, tmp_path
-    ):
-        result = await run_batch(
-            context,
-            # Teague's C1 decision: only a heal re-runs, and only cells whose
-            # linear run did not succeed. The effectful dependent writes, then
-            # fails; a becomes an ErrorValue (cell 2), blocking the pure
-            # dependent; cell 5 heals a.
-            lackpy_doc(
-                "from pathlib import Path\na = 1",        # 0: upstream
-                "w = Path('log.txt').write_text(str(a))\nboom = 1 // 0",  # 1: effectful, failed
-                "a = 1 // 0",                             # 2: a -> ErrorValue
-                "b = a + 1",                              # 3: pure dependent, blocked
-                "c = 99",                                 # 4: independent
-                "a = 2",                                  # 5: heal
-            ),
-        )
-        ledger = result.metadata["ledger"]
-        versions = result.metadata["versions"]
-
-        # The re-assertion itself was versioned (semantic 3 feeds semantic 5).
-        assert ledger.query(entry_type=SUPERSEDED, name="a")
-
-        # Ledger: both dependents dirtied, in dependency order — and ONLY them.
-        dirty = ledger.query(entry_type=DIRTY)
-        by_cell = {e.detail["cell_index"]: e for e in dirty}
-        assert sorted(by_cell) == [1, 3]
-
-        # Pure dependent re-executed: b healed from its chained hole to 3.
-        assert by_cell[3].detail["reexecuted"] is True
-        assert by_cell[3].detail["triggered_by"] == ["a"]
-        assert result.metadata["variables"]["b"] == 3
-        assert versions.history("b")[-1].value == 3
-
-        # Effectful dependent withheld: ledgered but NOT re-run, with reason —
-        # the file was written exactly once, with the ORIGINAL upstream value.
-        assert by_cell[1].detail["reexecuted"] is False
-        assert "effect" in by_cell[1].detail["reason"]
-        assert (tmp_path / "log.txt").read_text() == "1"
-
-        # Independent cell untouched: never dirtied, single version stands.
-        assert result.metadata["variables"]["c"] == 99
-        assert len(versions.history("c")) == 1
-
-        # dirty/superseded are bookkeeping, not failures. (Since C1 this
-        # document must fail on purpose to reach a heal, so the run is Left;
-        # the dirty and superseded entries are still not among its failures.)
-        from lackpy.interpreters.literate.kernel.forgiveness import reified_failures
-        kinds = {e.entry_type for e in reified_failures(ledger.entries())}
-        assert DIRTY not in kinds and SUPERSEDED not in kinds
-
-
-class TestChainedHoleAcceptance:
-    """THE L1 acceptance (design-lackpy-L1): the chained hole.
-
-    A hole in cell A must BLOCK dependent cell B — B's binding becomes a
-    blocked (chained) hole rather than a crash or a bogus real value — and
-    BOTH A and B must be ledgered.  This is the composite that proves the
-    binding layer propagates forgiveness through the document instead of
-    merely tolerating one failure.
-    """
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_hole_in_a_blocks_dependent_b_both_ledgered(self, context):
-        session = LiterateSession(context)
-        result = await session.step(
-            lackpy_doc(
-                "a = missing + 1",   # cell A: 'missing' is an origin hole
-                "b = a * 2",         # cell B: depends on A → chained hole
-            )
-        )
-        ns = session._kernel.get_namespace()
-        ledger = session.ledger
-
-        # The origin: 'missing' is a typed hole, ledgered.
-        assert ns["missing"] == Hole("missing")
-        assert ledger.query(entry_type=HOLE_OPENED, name="missing")
-
-        # Cell A's binding is a CHAINED hole naming its upstream cause ...
-        assert isinstance(ns["a"], Hole)
-        assert ns["a"].blocked_by == ("missing",)
-        a_rows = ledger.query(entry_type=HOLE_OPENED, name="a")
-        assert len(a_rows) == 1
-        assert a_rows[0].detail["blocked_by"] == ["missing"]
-
-        # ... and cell B chains in turn: blocked by a, never executed —
-        # a hole was statically skipped, it never reached `*`.
-        assert isinstance(ns["b"], Hole)
-        assert ns["b"].blocked_by == ("a",)
-        b_rows = ledger.query(entry_type=HOLE_OPENED, name="b")
-        assert len(b_rows) == 1
-        assert b_rows[0].detail["blocked_by"] == ["a"]
-
-        # BOTH cells are in the ledger (distinct cell indices), nothing silent.
-        assert a_rows[0].detail["cell_index"] == 0
-        assert b_rows[0].detail["cell_index"] == 1
-
-        # No crash; the round reports Left through the aggregate view.
-        assert result.ok is False
-        assert round_is_left(ledger.entries())
-
-
 class TestTwoLayerComposition:
-    """Cross-semantic checks: the two-layer contract holds as a WHOLE.
+    """Cross-semantic checks: the contract holds as a WHOLE.
 
-    Conflict #2 option (c) in one sentence: forgiveness is the default
-    mechanism (state kept, failures reified + ledgered) and Left is a
-    derived aggregate signal — these tests pin the seams between semantics.
+    State from before a failure is kept, the failure is ledgered, and Left is
+    a derived aggregate signal — these tests pin the seams between semantics.
     """
 
     @pytest.mark.asyncio
     async def test_left_round_keeps_real_bindings(self, context):
-        """A round mixing a real binding and a hole reports Left AND keeps
-        the real binding — state kept, not rolled back (the two layers are
-        independent: the signal does not undo the mechanism)."""
+        """A round mixing a real binding and an unbound name reports Left AND
+        keeps the real binding — state kept, not rolled back."""
         session = LiterateSession(context)
         result = await session.step(
             lackpy_doc("real = 42", "h = missing_thing")
@@ -388,7 +246,7 @@ class TestTwoLayerComposition:
 
         # Aggregate layer says Left ...
         assert result.ok is False
-        assert round_is_left(session.ledger.entries())
+        assert reified_failures(session.ledger.entries())
 
         # ... while the real value stands, versioned. The failed cell binds
         # nothing (spec E1).
@@ -397,415 +255,17 @@ class TestTwoLayerComposition:
         assert session.versions.current("real").value == 42
         assert "h" not in ns
 
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
-    async def test_hole_filled_later_is_versioned_supersede(self, context):
-        """L1.1 × L1.3: filling a hole is a versioned transition — the hole
-        is version 1, the real value version 2, the prior kind is recorded
-        as "hole" in the superseded entry, and the filling round is Right."""
-        session = LiterateSession(context)
-
-        left = await session.step(lackpy_doc("y = x + 1"))  # x: origin hole
-        assert left.ok is False
-
-        mark = len(session.ledger)
-        right = await session.step(lackpy_doc("x = 5"))     # fill the hole
-
-        # The filling round itself is clean: Right, per-round slice not Left.
-        assert right.ok is True
-        assert not round_is_left(session.ledger.entries()[mark:])
-
-        # Version history shows hole → value as an immutable supersession.
-        history = session.versions.history("x")
-        assert isinstance(history[0].value, Hole)
-        assert history[1].value == 5
-        assert history[0].superseded_by == 2
-
-        # The superseded ledger entry names the transition and the prior kind.
-        rows = session.ledger.query(entry_type=SUPERSEDED, name="x")
-        assert len(rows) == 1
-        assert rows[0].detail["prior"] == "hole"
-        assert rows[0].detail["from_version"] == 1
-        assert rows[0].detail["to_version"] == 2
-
-        # Current = the real value, in both the history and the namespace.
-        assert session.versions.current("x").value == 5
-        assert session._kernel.get_namespace()["x"] == 5
-
-    @pytest.mark.asyncio
-    async def test_left_is_exactly_the_reified_failure_types(self, context):
+    async def test_left_is_exactly_the_failure_types(self, context):
         """The aggregate view's trigger set is pinned: hole_opened /
         error_reified / source_unavailable / timed_out make a round Left
-        (timed_out: Plan 3 D7, a cell stopped at its limit binds holes);
-        superseded, dirty, executed, and continue_requested never do."""
+        (timed_out: Plan 3 D7, a cell stopped at its limit);
+        superseded, executed, and continue_requested never do."""
         assert FORGIVENESS_ENTRY_TYPES == {
             HOLE_OPENED,
             ERROR_REIFIED,
             SOURCE_UNAVAILABLE,
             TIMED_OUT,
         }
-        for benign in (SUPERSEDED, DIRTY, "executed", "continue_requested"):
+        for benign in (SUPERSEDED, "executed", "continue_requested"):
             assert benign not in FORGIVENESS_ENTRY_TYPES
-
-
-class TestReassertionFailureConformance:
-    """Failure on RE-assertion + failing/withheld re-exec (review findings 1–3).
-
-    Adversarial-review coverage (2026-07 review): the green suite never
-    exercised a cell that FAILS while re-binding an already-known name, nor a
-    dirty re-exec that fails.  The contract under the two-layer design:
-
-    * a failed (re)bind reifies as an :class:`ErrorValue` that SUPERSEDES the
-      prior value/hole (L1.3 — value→error / hole→error is a versioned
-      transition, never a silent stale keep), with a NAMED ``error_reified``
-      entry, and downstream cells chain off it (L1.1);
-    * work the failed cell completed before raising is still kept;
-    * the ``dirty`` entry reports the re-exec's ACTUAL outcome (``clean`` /
-      ``reified``), never a clean-refresh claim for a failed re-run;
-    * (strict mode) a dirtied cell whose first run was OBSERVED performing a
-      world effect — through any surface, including an attribute-call write
-      invisible to static classification — is withheld, with the observed
-      events on the ledger entry.  Best-effort observation, not proof.
-    """
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_error_on_reasserted_known_name_reifies_and_chains(
-        self, context
-    ):
-        # Linear path: x = 5, then a failing re-assert, then a dependent.
-        result = await run_batch(
-            context, lackpy_doc("x = 5", "x = 1 // 0", "z = x + 1")
-        )
-        ledger = result.metadata["ledger"]
-        versions = result.metadata["versions"]
-        variables = result.metadata["variables"]
-
-        # x reifies as an ErrorValue — the stale 5 must not survive.
-        assert isinstance(variables["x"], ErrorValue)
-        assert "ZeroDivisionError" in variables["x"].error
-
-        # L1.3 composition: value→error is a versioned supersession.
-        hist = versions.history("x")
-        assert [type(v.value).__name__ for v in hist] == ["int", "ErrorValue"]
-        assert hist[0].superseded_by == hist[1].version
-        sup = ledger.query(entry_type=SUPERSEDED, name="x")
-        assert sup and sup[-1].detail["prior"] == "value"
-
-        # The error_reified entry NAMES x — never name=None for a real bind.
-        err = ledger.query(entry_type=ERROR_REIFIED, name="x")
-        assert err and err[-1].detail["kept"] == []
-
-        # L1.1 composition: downstream chains off the reified error.
-        assert isinstance(variables["z"], Hole)
-        assert "x" in variables["z"].blocked_by
-        assert round_is_left(ledger.entries())
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_hole_then_failing_reassert_supersedes_hole_with_error(
-        self, context
-    ):
-        # hole→error: x holed in round 1, failing re-bind in round 2.
-        session = LiterateSession(context)
-        await session.step(lackpy_doc("y = x + 1"))    # x: origin hole
-        await session.step(lackpy_doc("x = 1 // 0"))   # x: failing re-bind
-        ns = session._kernel.get_namespace()
-        assert isinstance(ns["x"], ErrorValue)
-        hist = session.versions.history("x")
-        assert [type(v.value).__name__ for v in hist] == ["Hole", "ErrorValue"]
-        sup = session.ledger.query(entry_type=SUPERSEDED, name="x")
-        assert sup and sup[-1].detail["prior"] == "hole"
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_partial_bindings_before_failure_still_kept(self, context):
-        # The OTHER side of the partition: work the failed cell completed
-        # before raising is kept (and versioned); only the unfinished
-        # (re)bind reifies.
-        result = await run_batch(
-            context, lackpy_doc("x = 5", "x = 6\nboom = 1 // 0")
-        )
-        variables = result.metadata["variables"]
-        ledger = result.metadata["ledger"]
-        assert variables["x"] == 6                # rebound pre-failure: kept
-        assert isinstance(variables["boom"], ErrorValue)
-        err = ledger.query(entry_type=ERROR_REIFIED, name="boom")
-        assert err and err[-1].detail["kept"] == ["x"]
-        assert [
-            v.value for v in result.metadata["versions"].history("x")
-        ] == [5, 6]
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_failing_dirty_reexec_reifies_and_ledger_tells_truth(
-        self, context
-    ):
-        # Reactive path (C1: heal-only): b and c are blocked on the unbound a;
-        # a heals to 0 → the re-exec of b = 10 // a raises.
-        result = await run_batch(
-            context, lackpy_doc("b = 10 // a", "c = b + 1", "a = 0")
-        )
-        ledger = result.metadata["ledger"]
-        versions = result.metadata["versions"]
-        variables = result.metadata["variables"]
-        dirty = {
-            e.detail["cell_index"]: e for e in ledger.query(entry_type=DIRTY)
-        }
-
-        # b reifies and the transition is versioned (hole → error).
-        assert isinstance(variables["b"], ErrorValue)
-        b_hist = versions.history("b")
-        assert [type(v.value).__name__ for v in b_hist] == ["Hole", "ErrorValue"]
-
-        # The dirty entry reports the ACTUAL outcome — no clean-refresh claim.
-        assert dirty[0].detail["reexecuted"] is True
-        assert dirty[0].detail["outcome"] == "reified"
-        assert dirty[0].detail["reified"] == ["b"]
-
-        # Downstream c re-execs into a chained hole off the reified b —
-        # truthfully recorded too.
-        assert isinstance(variables["c"], Hole)
-        assert "b" in variables["c"].blocked_by
-        assert dirty[1].detail["reexecuted"] is True
-        assert dirty[1].detail["outcome"] == "reified"
-        assert dirty[1].detail["reified"] == ["c"]
-        assert round_is_left(ledger.entries())
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_clean_dirty_reexec_outcome_recorded(self, context):
-        result = await run_batch(
-            context, lackpy_doc("b = a + 1", "a = 2")  # C1: a heals from a hole
-        )
-        dirty = result.metadata["ledger"].query(entry_type=DIRTY)
-        assert dirty[0].detail["reexecuted"] is True
-        assert dirty[0].detail["outcome"] == "clean"
-        assert result.metadata["variables"]["b"] == 3
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_attribute_call_write_withheld_from_reexec(
-        self, context, tmp_path
-    ):
-        # World-effect withhold: `target.write_text(...)` is invisible to
-        # static bare-name classification, but the RUNTIME observer sees the
-        # write open on the first run and strict mode withholds the re-exec:
-        # the file is written exactly once, with the ORIGINAL upstream value.
-        out = tmp_path / "tick.txt"
-        result = await run_batch(
-            context,
-            lackpy_doc(
-                "from pathlib import Path\ntarget = Path('tick.txt')",
-                "a = 1",
-                "n = target.write_text(f'tick{a}')\nboom = 1 // 0",
-                "a = 1 // 0",  # C1: a becomes an ErrorValue, then heals
-                "a = 0",
-            ),
-        )
-        ledger = result.metadata["ledger"]
-        dirty = {
-            e.detail["cell_index"]: e for e in ledger.query(entry_type=DIRTY)
-        }
-        assert dirty[2].detail["reexecuted"] is False
-        assert "observed to perform a world effect" in dirty[2].detail["reason"]
-        assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
-        # Written exactly once — a double-fire would have left 'tick0'.
-        assert out.read_text() == "tick1"
-
-
-class TestRuntimeEffectObservation:
-    """The re-review corrections (2026-07 re-review): runtime observation.
-
-    The first fix's STATIC re-exec gate was unsound in both directions — a
-    bare-name call to an effectful helper graded "pure" (double-fired a
-    write), while a pure method-call dependent was withheld.  The corrected
-    design observes what each cell's first execution actually DOES (since
-    literate stepy Task 3: the ``Path`` write entries in the cell's slice of
-    the session trace, ``effects.path_writes``; the audit hook is gone), and
-    gates dirty re-execution on that evidence:
-
-    * ``strict`` (default): withhold a dirtied dependent iff its first run
-      was OBSERVED performing a world effect;
-    * ``permissive`` (opt-in, ``config={"reactive_mode": "permissive"}``):
-      re-run all dirty dependents — effects may re-fire, documented.
-
-    The ``Path`` stand-in is a cell's only route to the filesystem, so the
-    trace sees every write a cell makes. A first run that skipped its
-    effectful branch still observes no write.
-    """
-
-    HELPER_WRITE_DOC = (
-        "from pathlib import Path\n"
-        "def save(v):\n    return Path('helper_out.txt').write_text(v)",  # 0
-        "seed = 'one'",                                              # 1
-        "res = save(seed)\nboom = 1 // 0",  # 2: helper-wrapped write, then fails
-        "seed = 1 // 0",      # 3: C1: seed becomes an ErrorValue
-        "seed = 'two'",       # 4: heal → cell 2 dirty
-    )
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_helper_wrapped_write_withheld_in_strict_mode(
-        self, context, tmp_path
-    ):
-        # NEW-1 (the static gate's unsoundness): a bare-name call to a
-        # write-wrapping helper looks pure to any source classifier.  The
-        # runtime observer sees the write itself → strict mode withholds.
-        result = await run_batch(context, lackpy_doc(*self.HELPER_WRITE_DOC))
-        dirty = {
-            e.detail["cell_index"]: e
-            for e in result.metadata["ledger"].query(entry_type=DIRTY)
-        }
-        assert dirty[2].detail["reexecuted"] is False
-        assert dirty[2].detail["mode"] == "strict"
-        assert "observed to perform a world effect" in dirty[2].detail["reason"]
-        assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
-        # The file was written exactly once, with the ORIGINAL seed.
-        assert (tmp_path / "helper_out.txt").read_text() == "one"
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_helper_wrapped_write_reruns_in_permissive_mode(
-        self, tmp_path, tmp_home
-    ):
-        # The SAME document under permissive mode re-runs the effectful
-        # dependent — the effect re-fires, and the ledger says so.  This test
-        # exists to document the mode difference.
-        context = ExecutionContext(
-            base_dir=tmp_path, config={
-                "reactive_mode": "permissive",
-                "path_policy": load_policy(tmp_path, home=tmp_home, managed=None)},
-        )
-        result = await run_batch(context, lackpy_doc(*self.HELPER_WRITE_DOC))
-        dirty = {
-            e.detail["cell_index"]: e
-            for e in result.metadata["ledger"].query(entry_type=DIRTY)
-        }
-        assert dirty[2].detail["reexecuted"] is True
-        assert dirty[2].detail["mode"] == "permissive"
-        assert dirty[2].detail["outcome"] == "reified"  # boom fails again
-        # The re-run's own observed effects are ledgered — the replay is
-        # visible, never silent.
-        assert dirty[2].detail["observed_effects"] == ["Path.write_text"]
-        # The effect DID re-fire: the file now holds the NEW seed.
-        assert (tmp_path / "helper_out.txt").read_text() == "two"
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_pure_method_call_dependent_is_rerun(self, context):
-        # NEW-3 (the static gate's over-correction): `name.upper()` is an
-        # attribute call, which the static rule withheld wholesale.  Its
-        # first run observes NO world effect → strict mode re-runs it.
-        result = await run_batch(
-            context,
-            lackpy_doc(
-                "name = 'alice'",
-                "label = name.upper()\nboom = 1 // 0",
-                "name = 1 // 0",  # C1: name becomes an ErrorValue, then heals
-                "name = 'bob'",
-            ),
-        )
-        dirty = {
-            e.detail["cell_index"]: e
-            for e in result.metadata["ledger"].query(entry_type=DIRTY)
-        }
-        assert dirty[1].detail["reexecuted"] is True
-        assert dirty[1].detail["outcome"] == "reified"  # boom fails again
-        assert result.metadata["variables"]["label"] == "BOB"
-
-    @pytest.mark.asyncio
-    async def test_invalid_reactive_mode_rejected(self, tmp_path):
-        # A mode typo must fail loudly, not silently mean "strict" — but as
-        # a STRUCTURED pre-execution refusal on the same surface as parse
-        # errors (success=False + error), not an uncaught ValueError out of
-        # execute().  (Updated by the third-review fixes: the raise was
-        # inconsistent with the structured error contract.)
-        context = ExecutionContext(
-            base_dir=tmp_path, config={"reactive_mode": "yolo"}
-        )
-        result = await run_batch(context, lackpy_doc("a = 1"))
-        assert result.success is False
-        assert "reactive_mode" in result.error
-        assert "yolo" in result.error
-        # Pre-execution refusal: nothing ran, nothing bound.
-        assert result.metadata.get("variables") is None
-
-
-class TestInjectedAndIdentityRebindConformance:
-    """The re-review regressions (NEW-2 / NEW-4) on failed (re)binds.
-
-    NEW-2: a failed re-bind may only reify names the DOCUMENT asserted (ones
-    with version history).  INJECTED names — params, tools, environment —
-    keep their provided values (``kept_injected`` on the ledger entry), with
-    no fabricated ``superseded`` trace.
-
-    NEW-4: a (re)bind that actually COMPLETED before a later same-cell
-    failure is kept even when the identity delta cannot see it (``x = x``,
-    interned equal values) — the failure's top-level line
-    (``CellResult.error_lineno``) shows the binding statement finished.
-    Known corner (low, documented in ``_assignment_completed``): a bind
-    completing inside a loop/branch before a later failure still reifies
-    when identity cannot see it.
-    """
-
-    # test_injected_param_failed_rebind_keeps_provided_value was retired by the
-    # final fix wave (I4): params no longer bind bare names (design D15), so a
-    # param is never an injected name a document can fail to rebind.
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_document_asserted_name_still_reifies_on_failed_rebind(
-        self, context
-    ):
-        # CONTRAST guard for the NEW-2 gate: once the DOCUMENT owns the name
-        # (version history exists), a failed re-bind still supersedes — the
-        # Finding-1 contract is unchanged.
-        result = await run_batch(context, lackpy_doc("x = 5", "x = 1 // 0"))
-        assert isinstance(result.metadata["variables"]["x"], ErrorValue)
-        assert result.metadata["ledger"].query(entry_type=SUPERSEDED, name="x")
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_identity_rebind_before_later_failure_is_kept(self, context):
-        # NEW-4: `x = x` completed (line 1) before the failure (line 2).
-        # The identity delta can't see it; the failure line can.
-        session = LiterateSession(context)
-        await session.step(lackpy_doc("x = [1, 2, 3]"))
-        await session.step(lackpy_doc("x = x\nboom = 1 // 0"))
-        ns = session._kernel.get_namespace()
-
-        assert ns["x"] == [1, 2, 3]          # kept, not reified
-        assert isinstance(ns["boom"], ErrorValue)
-        # The completed identity rebind is recorded as kept work, and x's
-        # history is untouched (rebinding the identical object is not a new
-        # version — consistent with the success path's identity delta).
-        err = session.ledger.query(entry_type=ERROR_REIFIED, name="boom")
-        assert err and err[-1].detail["kept"] == ["x"]
-        assert len(session.versions.history("x")) == 1
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_interned_equal_rebind_before_later_failure_is_kept(
-        self, context
-    ):
-        # Same signal for the subtler shape: re-binding an interned equal
-        # value (small int) is identity-invisible too.
-        result = await run_batch(
-            context, lackpy_doc("x = 5", "x = 5\nboom = 1 // 0")
-        )
-        assert result.metadata["variables"]["x"] == 5
-        assert isinstance(result.metadata["variables"]["boom"], ErrorValue)
-
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_failed_rebind_at_the_binding_statement_still_reifies(
-        self, context
-    ):
-        # CONTRAST guard for the NEW-4 signal: when the failure IS the
-        # binding statement (`x = 1 // 0`), the bind did not complete —
-        # reified, exactly as before.
-        result = await run_batch(
-            context, lackpy_doc("x = [1]", "x = x\nx = 1 // 0")
-        )
-        assert isinstance(result.metadata["variables"]["x"], ErrorValue)

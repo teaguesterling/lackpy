@@ -1,26 +1,26 @@
 """Multi-round literate fold -- the interpreter-as-fold-returning-Either.
 
 A literate *session* folds model responses across rounds. Each round is one
-``step(raw) -> StepResult``, an Either under the TWO-LAYER forgiveness
-contract (L1.1/L1.2 — design conflict #2, option (c)):
+``step(raw) -> StepResult``, an Either:
 
   - Right (success): the round's document ran cleanly. Returns the clean rendered
     output (``<think>`` reasoning stripped) + advanced state -- the kernel is
     mutated in place. ``@continue`` in the doc surfaces as
     ``continue_requested`` so the caller feeds the next round.
-  - Left (failure): the round contained at least one REIFIED failure — an
-    unknown name bound as a typed hole (``hole_opened``) or a runtime error
-    bound as an error value (``error_reified``). The Left is an AGGREGATE
-    VIEW derived from the session ledger's per-round slice, NOT a
-    control-flow abort: the round still completes, its output joins
-    ``rendered`` (annotated through the [kernel] channel), and its partial
-    state is KEPT as real values + forgiving values — nothing rolls back.
-    Returns the ledger-derived errors + the *raw* un-interpreted message so
-    the model can correct its own work (cleaning would hide the bug); a
-    corrected round simply rebinds the holes with real values.
-  - A pre-execution refusal (parse errors — since L1.5 the effect-ceiling
-    gate reifies per cell as ``source_unavailable`` instead of refusing the
-    document) is also a Left, but nothing ran and no state changed.
+  - Left (failure): a round stops at its first failure (spec E1) — an
+    unbound name (``hole_opened``), a runtime error (``error_reified``), the
+    effect-ceiling gate (``source_unavailable``) or a timeout
+    (``timed_out``). The failure binds nothing and later cells do not run.
+    The Left is derived from the session ledger's per-round slice: the round
+    still completes, its output joins ``rendered`` (annotated through the
+    [kernel] channel), and the state from before the failed cell is kept —
+    nothing rolls back. Returns the document's error (``cell {i} ({first
+    line}): {cause}``) + the *raw* un-interpreted message so the model can
+    correct its own work (cleaning would hide the bug). literate_agent
+    answers a Left with a full resubmission of the corrected document
+    (``scripts/literate_agent.py``); a later round does not heal this one.
+  - A pre-execution refusal (parse errors) is also a Left, but nothing ran
+    and no state changed.
 
 The session is a PURE fold: ``step`` takes a raw string and returns a result. The
 model-call loop (prompt -> model -> step -> feed back) is a thin client's job, so
@@ -35,8 +35,9 @@ next -- the old loop rebuilt a fresh kernel each round and passed only
 
 Historical note: before L1.1/L1.2 a Left was an abort — the write journal
 rolled file writes back and the kernel's name rebindings were restored. That
-rollback contract is retired (deliberately, with its tests): forgiveness keeps
-the work and records the failure in the queryable session ledger instead.
+rollback contract is retired (deliberately, with its tests): the session keeps
+the work from before the failure and records the failure in the queryable
+session ledger instead.
 
 STATELESSNESS CONTRACT (the canonical mode): the writer holds NO hidden
 conversational state. Every round it is handed a fresh prompt containing the
@@ -373,7 +374,7 @@ class LiterateSession:
         # same validated program (rounds only append; nothing is edited).
         self._kernel = _build_kernel(context)
         # ONE ledger threaded across every round (L1.0/L1.1): the queryable
-        # record of the session's execution + reified failures. Each step's
+        # record of the session's execution + failures. Each step's
         # aggregate Either is derived from this ledger, per-round slice.
         # ONE binding version history threaded across every round (L1.3):
         # bindings are immutable versions; re-asserting a name in a later
@@ -406,7 +407,7 @@ class LiterateSession:
         # the flat "what printed this round" view.
         self._rendered_parts: list[str] = []
         # L7 startup self-test: BEFORE this session accepts any work, the
-        # kernel proves it can evaluate (known value, hole, error, unavailable,
+        # kernel proves it can evaluate (known value, unbound name, error, ceiling gate,
         # round-trip) — see selftest.run_selftest.  The outcome is observable
         # (the `selftest` property) and ledgered; on failure the kernel is
         # disabled and every step() returns the structured refusal (fail
@@ -447,8 +448,8 @@ class LiterateSession:
             )
 
         # D4 / review I1: a refusal closed this session's CellSession. Every
-        # later round is a refused Left, whatever it holds (prose only, a
-        # hole, a bare pause marker): nothing runs and nothing is reified.
+        # later round is a refused Left, whatever it holds (prose only, an
+        # unbound name, a bare pause marker): nothing runs.
         refusal = self._kernel.refusal
         if refusal is not None:
             return StepResult(
@@ -497,9 +498,8 @@ class LiterateSession:
 
         from .kernel.forgiveness import reified_failures
 
-        # No snapshot/rollback (L1.1/L1.2 contract change): failures during a
-        # round reify as bound values (holes / error values) and the round
-        # completes; a pre-execution refusal never runs a cell, so there is
+        # No snapshot/rollback: a failure stops the round at its cell and is
+        # ledgered; a pre-execution refusal never runs a cell, so there is
         # nothing to restore either way.
         round_mark = len(self._ledger)
         result = await self._interpreter._run_document(
@@ -508,17 +508,16 @@ class LiterateSession:
         )
 
         if not result.metadata.get("completed"):
-            # Pre-execution refusal (parse errors; the ceiling gate reifies
-            # per cell since L1.5 and completes instead): no cell ran, no
-            # state changed — a plain Left with the refusal reason.
+            # Pre-execution refusal (parse errors): no cell ran, no state
+            # changed — a plain Left with the refusal reason.
             return StepResult(
                 ok=False, raw=raw,
                 errors=[result.error or "execution failed"],
             )
 
-        # The round COMPLETED — its output and bindings stand, even when
-        # failures were reified. The Either below is the aggregate view
-        # derived from this round's ledger slice (conflict #2 option (c)).
+        # The round COMPLETED — its output and the bindings from before a
+        # failure stand. The Either below is derived from this round's ledger
+        # slice.
         self._clean_parts.append(result.output or "")
         # Accumulate the canonical source-preserving render for this round —
         # what `rendered` (the fed-back document) exposes. Derived in
@@ -582,7 +581,7 @@ class LiterateSession:
     @property
     def ledger(self):
         """The session's queryable event ledger (L1.0) — one across all
-        rounds. Reified failures (``hole_opened`` / ``error_reified``) live
+        rounds. Failures (``hole_opened`` / ``error_reified``, and so on) live
         here; the per-round Left is derived from it, never thrown."""
         return self._ledger
 
@@ -624,8 +623,7 @@ class LiterateSession:
 
         This is the exp1 close: what a thin client feeds back to the stateless
         writer is THIS render — authored prose + code source preserved, with
-        each round's forgiveness state (holes / error values / unavailable
-        sources / supersessions) drawn FROM THE LEDGER and routed through the
+        each round's failure notes and supersessions drawn FROM THE LEDGER and routed through the
         inert ``[kernel]`` channel — NOT the flat stdout (``clean_doc``). Fed
         back and re-emitted, it re-parses cleanly: the channel notes are
         stripped by the parser (never re-printed) and the overlap guard cuts an

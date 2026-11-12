@@ -26,13 +26,8 @@ from .forgiveness import (
     HOLE_OPENED,
     SOURCE_UNAVAILABLE,
     TIMED_OUT,
-    ErrorValue,
-    Hole,
-    Unavailable,
     describe_failure,
-    is_forgiving,
     reified_failures,
-    round_is_left,
 )
 from .interface import CellResult, KernelInterface
 from .ledger import AIDR_LEDGER_COLUMNS, Ledger, LedgerEntry
@@ -46,7 +41,6 @@ from .persistence import (
     serialize_value,
 )
 from .plugins import ExecutionPlugin, PluginAdvice, merge_advice
-from .reactive import DIRTY, DependencyGraph
 from .versions import (
     AIDR_BINDING_COLUMNS,
     SUPERSEDED,
@@ -69,16 +63,12 @@ __all__ = [
     "BindingVersions",
     "CellExecutionEvent",
     "CellResult",
-    "DIRTY",
-    "DependencyGraph",
     "ERROR_REIFIED",
-    "ErrorValue",
     "ExecutionPlugin",
     "SUPERSEDED",
     "TIMED_OUT",
     "FORGIVENESS_ENTRY_TYPES",
     "HOLE_OPENED",
-    "Hole",
     "InferenceRecoveryHandler",
     "KernelInterface",
     "Ledger",
@@ -95,13 +85,10 @@ __all__ = [
     "SOURCE_UNAVAILABLE",
     "StreamingCellParser",
     "StreamingDriver",
-    "Unavailable",
     "describe_failure",
     "deserialize_value",
-    "is_forgiving",
     "ledger_entry_to_dict",
     "merge_advice",
     "reified_failures",
-    "round_is_left",
     "serialize_value",
 ]

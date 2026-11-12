@@ -77,9 +77,9 @@ class TestSelftestCoversEachSemanticClass:
         assert all(p.ok for p in probes.values())
         # Each probe demonstrably exercised its class (the report says so).
         assert "4" in probes["value"].got
-        assert "unbound" in probes["hole"].got  # ⟨name: unbound⟩ Hole repr
-        assert "ZeroDivisionError" in probes["error"].got  # ErrorValue repr
-        assert "unavailable" in probes["unavailable"].got  # Unavailable repr
+        assert "unbound" in probes["hole"].got  # the cell failed on an unbound name
+        assert "ZeroDivisionError" in probes["error"].got  # the cell's failure
+        assert "unavailable" in probes["unavailable"].got  # the gate's verdict
         assert "round trip clean" in probes["round_trip"].got
 
     def test_probes_leave_no_state_behind(self, context):

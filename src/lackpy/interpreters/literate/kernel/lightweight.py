@@ -13,8 +13,7 @@ nothing and evals nothing: a cell can do nothing a lackpy program cannot.
   through the session's ``Path`` stand-in, the patch is applied here in pure
   Python, and the result is written through the same stand-in.
 * Code, ``@hidden``, ``@gather``, ``@read`` and ``@write`` run with
-  ``session.run_cell``; a re-run (reactive re-execution) uses
-  ``session.rerun_cell`` with the cell's id (:meth:`rerun_cell`).
+  ``session.run_cell``.
 * Prose (D3) is text and ``{expr}`` segments. A text segment renders as it
   is; each expression is evaluated with ``session.eval_expr`` and formatted
   here, on the host side. Prose never joins the program.
@@ -25,18 +24,11 @@ nothing and evals nothing: a cell can do nothing a lackpy program cannot.
 A refusal (D4) comes back as ``error_phase="refused"``. The session is then
 closed, so every later cell refuses too; the caller stops the document.
 
-Forgiveness values (``Hole``, ``ErrorValue``, ``Unavailable``) are bound by
-the runner, not by cell code (:meth:`bind`). They live in a host-side layer
-over the session's names and never enter the session's namespace: a cell
-that refers to one is skipped by the forgiveness pre-pass (D5), and a cell
-that binds the name again replaces it.
-
 Called by: StreamingDriver, LiterateInterpreter.execute()
 """
 
 from __future__ import annotations
 
-import ast
 from collections.abc import Iterable
 from typing import Any
 
@@ -46,9 +38,8 @@ from ..compiler import _COMPILERS, _IMPORT_PATH, binds_path, prose_segments, wit
 from ..display import DEFAULT_DISPLAY_THRESHOLD, make_display
 from ..parser import Cell
 from ..patch import apply_patch
-from .forgiveness import is_forgiving
 from .interface import CellResult
-from .static_analysis import StaticAnalysisError, check_cell, collect_bindings
+from .static_analysis import StaticAnalysisError, check_cell
 from .versions import Opaque
 
 #: Appended to the validator's rebinding error for a repeated Path import.
@@ -62,15 +53,9 @@ class LightweightKernel:
                  display_threshold: int = DEFAULT_DISPLAY_THRESHOLD) -> None:
         self._session = session
         self._display = make_display(display_threshold)
-        # Reified forgiveness values, by name (see the module text). Never
-        # passed to the session.
-        self._reified: dict[str, Any] = {}
         # The current Opaque marker of each name bound to a value that is not
         # data (review I2). A rebind gets a new marker.
         self._markers: dict[str, Opaque] = {}
-        # The session cell ids that are in the program (validated), so a
-        # re-run can use ``rerun_cell``.
-        self._in_program: set[int] = set()
         # Whether an annotation cell (@read, @write) emitted the Path import:
         # a later repeated import gets ANNOTATION_PATH_HINT.
         self._annotation_imports = False
@@ -105,21 +90,9 @@ class LightweightKernel:
 
     def execute_cell(self, cell: Cell, cell_index: int) -> CellResult:
         """Run ``cell`` for the first time: a program cell joins the session's program."""
-        return self._execute(cell, cell_index, rerun_id=None)
+        return self._execute(cell, cell_index)
 
-    def rerun_cell(self, cell: Cell, cell_index: int, cell_id: int | None) -> CellResult:
-        """Run ``cell`` again after a dependency changed (reactive re-execution).
-
-        A program cell that is in the session's program (``cell_id`` from its
-        first run) runs its validated code again with ``session.rerun_cell``:
-        the program text does not change. A cell that never joined the program
-        (it was skipped for a hole, or failed validation) runs as a new cell.
-        Prose is evaluated again; it was never in the program.
-        """
-        rerun = cell_id if cell_id in self._in_program else None
-        return self._execute(cell, cell_index, rerun_id=rerun)
-
-    def _execute(self, cell: Cell, cell_index: int, rerun_id: int | None) -> CellResult:
+    def _execute(self, cell: Cell, cell_index: int) -> CellResult:
         if self._disabled is not None:
             return _failed(cell_index, f"kernel disabled: {self._disabled}", "disabled")
         closed = self._session.closed_text()
@@ -158,26 +131,22 @@ class LightweightKernel:
             check_cell(source, self.known_names())
         except StaticAnalysisError as e:
             return _failed(cell_index, str(e), "static")
-        return self._run_program_cell(cell, cell_index, source, rerun_id)
+        return self._run_program_cell(cell, cell_index, source)
 
-    def _run_program_cell(self, cell: Cell, cell_index: int, source: str,
-                          rerun_id: int | None) -> CellResult:
+    def _run_program_cell(self, cell: Cell, cell_index: int, source: str) -> CellResult:
         names_before = self._session.bound_names()
         if not source.strip():
             outcome = CellOutcome(ok=True)  # an empty @scratch body: nothing to run
-        elif rerun_id is not None:
-            outcome = self._session.rerun_cell(rerun_id)
         else:
             outcome = self._session.run_cell(source, label=cell_label(cell, cell_index))
-        if outcome.cell_id is not None and outcome.phase in (None, "runtime"):
-            self._in_program.add(outcome.cell_id)
-            if cell.cell_type in ("read", "write") and source.startswith(_IMPORT_PATH):
-                self._annotation_imports = True
+        if (outcome.cell_id is not None and outcome.phase in (None, "runtime")
+                and cell.cell_type in ("read", "write") and source.startswith(_IMPORT_PATH)):
+            self._annotation_imports = True
 
         # The names this run bound or rebound (review I2): the session reports
         # them by identity, with their type names. A data value goes in the
         # delta as it is; any other value as a fresh Opaque marker, so a def or
-        # a Path supersedes, dirties and fills a hole like data does.
+        # a Path supersedes like data does.
         data = self._session.data(outcome.rebound)
         delta: dict[str, Any] = {}
         for name, type_name in outcome.rebound.items():
@@ -188,19 +157,11 @@ class LightweightKernel:
                 marker = Opaque(type_name)
                 self._markers[name] = marker
                 delta[name] = marker
-            self._reified.pop(name, None)
-        if outcome.ok:
-            # A cell that ran binds its module-level names again (also to the
-            # identical object, which identity cannot see): an earlier reified
-            # value for any of them is replaced.
-            for name in _static_bindings(source):
-                self._reified.pop(name, None)
-
         if not outcome.ok:
             return CellResult(success=False, output=outcome.stdout or None,
                               error=self._hinted(outcome.error), error_phase=outcome.phase,
                               namespace_delta={}, cell_index=cell_index,
-                              error_lineno=outcome.line, cell_id=outcome.cell_id)
+                              cell_id=outcome.cell_id)
 
         output = outcome.stdout
         if cell.cell_type == "scratch":
@@ -252,36 +213,19 @@ class LightweightKernel:
 
     def known_names(self) -> set[str]:
         """The name set a cell's static analysis resolves against — exactly
-        the ``known_names`` :meth:`execute_cell` passes to ``check_cell``:
-        the session's bound names and the reified ones. Used by the batch
-        path's forgiveness pre-pass (L1.1) so its undefined-name detection can
-        never disagree with the kernel's own check."""
-        return self._session.bound_names() | set(self._reified)
+        the ``known_names`` :meth:`execute_cell` passes to ``check_cell``: the
+        session's bound names. Used by the batch path's unbound-name check
+        (spec E1) so its detection can never disagree with the kernel's own
+        check."""
+        return self._session.bound_names()
 
     def lookup(self, name: str, default: Any = None) -> Any:
-        """The value bound to ``name``: a reified value, a data value, or the
-        name's :class:`Opaque` marker when its value is not data (the host
-        never holds a live object)."""
-        if name in self._reified:
-            return self._reified[name]
+        """The value bound to ``name``: a data value, or the name's
+        :class:`Opaque` marker when its value is not data (the host never
+        holds a live object)."""
         if name in self._markers:
             return self._markers[name]
         return self._session.data([name]).get(name, default)
-
-    def is_reified(self, name: str) -> bool:
-        """Whether ``name`` holds a reified forgiveness value (no data walk)."""
-        return name in self._reified
-
-    def bind(self, name: str, value: Any) -> None:
-        """Bind a reified forgiveness value (``Hole``, ``ErrorValue``, ``Unavailable``).
-
-        The forgiveness reification path (L1.1/L1.2/L1.5): holes and error
-        values are bound *by the runner*, not by executing cell code. They stay
-        on the host side; the session never sees them. Any other value is
-        refused: nothing but a cell binds a name in the session."""
-        if not is_forgiving(value):
-            raise TypeError(f"the kernel binds only reified values, not {type(value).__name__}")
-        self._reified[name] = value
 
     def inspect(self, expr: str) -> str:
         """Evaluate ``expr`` in the session (``eval_expr``) and return its repr, or the error."""
@@ -297,14 +241,12 @@ class LightweightKernel:
 
     def get_scope(self) -> dict[str, str]:
         scope: dict[str, str] = {}
-        names = self._session.bound_names() | set(self._reified)
+        names = self._session.bound_names()
         data = self._session.data(names)
         for k in sorted(names):
             if k.startswith("_"):
                 continue
-            if k in self._reified:
-                v = self._reified[k]
-            elif k in data:
+            if k in data:
                 v = data[k]
             elif k in self._markers:
                 scope[k] = f"{self._markers[k].type_name}: (not data)"
@@ -316,13 +258,11 @@ class LightweightKernel:
         return scope
 
     def get_namespace(self, names: Iterable[str] | None = None) -> dict[str, Any]:
-        """The data values and reified values by name (no live objects).
+        """The data values by name (no live objects).
 
         ``names`` limits the result (and the data walk, review M3) to those names."""
         wanted = self._session.bound_names() if names is None else set(names)
-        ns = {k: v for k, v in self._session.data(wanted).items() if not k.startswith("_")}
-        ns.update({k: v for k, v in self._reified.items() if names is None or k in wanted})
-        return ns
+        return {k: v for k, v in self._session.data(wanted).items() if not k.startswith("_")}
 
 
 def cell_label(cell: Cell, cell_index: int) -> str:
@@ -330,13 +270,6 @@ def cell_label(cell: Cell, cell_index: int) -> str:
     document (prose cells count, as ``parse()`` numbers them, from 1) and the
     document line of its fence."""
     return f"document cell {cell_index + 1} (line {cell.line_number})"
-
-
-def _static_bindings(source: str) -> set[str]:
-    try:
-        return collect_bindings(ast.parse(source))
-    except SyntaxError:
-        return set()
 
 
 def _failed(cell_index: int, error: str, phase: str, output: str | None = None) -> CellResult:

@@ -4,9 +4,7 @@ Ground rule 3 of the L1 design: **bindings are immutable versions**.  When a
 cell binds a name that already has a recorded binding, that is a
 RE-ASSERTION — not a silent in-place overwrite.  The kernel records a NEW
 version, marks the prior version superseded, and writes one ``superseded``
-ledger entry naming the transition.  Both re-assertion and write-once-reactive
-styles are legitimate; the kernel supports both; the ledger makes the choice
-visible.
+ledger entry naming the transition.  The ledger makes every re-assertion visible.
 
 Where the immutability lives
 ----------------------------
@@ -30,14 +28,12 @@ serialize, not a redesign.
 
 Scope
 -----
-The history covers names asserted BY DOCUMENT CELLS on the batch/session path
-(including holes and error values bound by the forgiveness runner — a hole
-filled by a later definition is a versioned transition like any other).
+The history covers names asserted BY DOCUMENT CELLS on the batch/session path.
 Pre-existing environment names (tools, params, injected callables) have no
 version 0: the first *document* assertion of such a name is version 1 with no
 supersession, because the binding layer never asserted the environment value.
-A ``superseded`` entry records a legitimate transition — it is NOT a reified
-failure and does not make a round Left (see ``forgiveness.round_is_left``).
+A ``superseded`` entry records a legitimate transition — it is NOT a failure
+and does not make a round Left (see ``forgiveness.reified_failures``).
 """
 
 from __future__ import annotations
@@ -97,10 +93,9 @@ class BindingVersion:
 
     @property
     def kind(self) -> str:
-        """The binding-layer kind of this version's value —
-        ``"value"`` / ``"hole"`` / ``"error"`` / ``"unavailable"`` (via
-        :func:`value_kind`).  NOTE 'superseded' is a *lifecycle* state
-        (``superseded_by`` is set), not a value kind."""
+        """The kind of this version's value (via :func:`value_kind`).  NOTE
+        'superseded' is a *lifecycle* state (``superseded_by`` is set), not a
+        value kind."""
         return value_kind(self.value)
 
     def to_dict(
@@ -172,19 +167,12 @@ class Opaque:
 
 
 def value_kind(value: Any) -> str:
-    """``"hole"`` / ``"error"`` / ``"unavailable"`` / ``"value"`` — the
-    binding-layer kind of a version's value, for the ``superseded`` entry's
-    detail."""
-    # Local import: forgiveness imports nothing from here, but keep the
-    # modules decoupled at import time regardless of future direction.
-    from .forgiveness import ErrorValue, Hole, Unavailable
+    """The kind of a version's value: always ``"value"``.
 
-    if isinstance(value, Hole):
-        return "hole"
-    if isinstance(value, ErrorValue):
-        return "error"
-    if isinstance(value, Unavailable):
-        return "unavailable"
+    Kept for the pinned ``kind`` column (:data:`AIDR_BINDING_COLUMNS`) and the
+    ``superseded`` entry's ``prior`` detail. Until spec E3 a version could also
+    hold a hole, an error value or an unavailable source, kinds ``"hole"``,
+    ``"error"`` and ``"unavailable"``."""
     return "value"
 
 

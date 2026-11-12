@@ -1,18 +1,13 @@
-"""L1.1 + L1.2 acceptance: two-layer forgiveness — typed holes + error-as-value.
+"""L1.1 + L1.2 acceptance: a failure is ledgered and stops the document.
 
-The decided contract (design conflict #2, option (c), Teague 2026-07-17):
+Spec E1 and E3: a failure (an unbound name, a runtime error) stops the
+document at its cell. It is ledgered (``hole_opened`` for an unbound name,
+``error_reified`` for a runtime error), it binds nothing, and cells after it
+do not run. Nothing rolls back: the bindings from before the cell stand.
 
-* **Binding layer (default):** a failure is REIFIED AS A BOUND VALUE and
-  ledgered; execution continues; NO rollback.  An unknown name binds a typed
-  hole ``⟨name: unbound⟩`` (``hole_opened``); a runtime error binds an
-  :class:`ErrorValue` (``error_reified``).  A cell that references a hole or
-  an error value cannot produce a real value, so its bindings become *chained*
-  holes — detected statically (referenced name bound to a forgiving value),
-  so the cell is skipped, never executed: a hole never flows into arithmetic.
-* **Aggregate layer (preserved):** the per-round Either/Left signal survives
-  as a VIEW DERIVED FROM THE LEDGER (:func:`round_is_left`) — a round
-  containing any reified failure still reports Left to callers who ask; it is
-  no longer a control-flow abort.
+The per-round Either/Left signal is a VIEW DERIVED FROM THE LEDGER
+(:func:`reified_failures`) — a round containing a failure reports Left to
+callers who ask; it is not a control-flow abort.
 
 These tests cover the batch/session execution path
 (``LiterateSession.step`` → ``LiterateInterpreter._run_document`` →
@@ -24,11 +19,9 @@ import pytest
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateInterpreter, LiterateSession
-from lackpy.interpreters.literate.kernel import ErrorValue, Hole
 from lackpy.interpreters.literate.kernel.forgiveness import (
     FORGIVENESS_ENTRY_TYPES,
     reified_failures,
-    round_is_left,
 )
 
 
@@ -63,41 +56,20 @@ class TestTypedHoles:
         assert not result.ok
         assert any("x" in e for e in result.errors)
 
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_chained_hole(self, context):
-        # Hole in cell A blocks dependent cell B; BOTH are ledgered.
-        session = LiterateSession(context)
-        await session.step(
-            "```lackpy\na = missing + 1\n```\n\n```lackpy\nb = a * 2\n```"
-        )
-        ledger = session.ledger
-        assert ledger.query(entry_type="hole_opened", name="missing")  # origin
-        a_entries = ledger.query(entry_type="hole_opened", name="a")
-        b_entries = ledger.query(entry_type="hole_opened", name="b")
-        assert a_entries and b_entries
-        assert "missing" in a_entries[0].detail["blocked_by"]
-        assert "a" in b_entries[0].detail["blocked_by"]
-
-        ns = session._kernel.get_namespace()
-        assert isinstance(ns["a"], Hole) and isinstance(ns["b"], Hole)
-        assert ns["a"].blocked_by == ("missing",)
-        assert ns["b"].blocked_by == ("a",)
-
     @pytest.mark.asyncio
     async def test_aggregate_either_view_from_ledger(self, context):
         session = LiterateSession(context)
 
         clean = await session.step("```lackpy\nk = 1\n```")
         assert clean.ok
-        assert not round_is_left(session.ledger.entries())
+        assert not reified_failures(session.ledger.entries())
 
         mark = len(session.ledger)
         left = await session.step("```lackpy\nv = unknown_name\n```")
         round_entries = session.ledger.entries()[mark:]
 
         # The Left is a view DERIVED FROM THE LEDGER, not a control-flow abort.
-        assert round_is_left(round_entries)
+        assert reified_failures(round_entries)
         failures = reified_failures(round_entries)
         assert failures
         assert all(e.entry_type in FORGIVENESS_ENTRY_TYPES for e in failures)
@@ -193,27 +165,13 @@ class TestErrorAsValue:
         errs = session.ledger.query(entry_type="error_reified")
         assert errs and "KeyError" in errs[0].detail["error"]
 
-    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-    @pytest.mark.asyncio
-    async def test_error_value_chains_to_dependent_cell(self, context):
-        # An error value blocks a dependent cell the same way a hole does.
-        session = LiterateSession(context)
-        await session.step(
-            "```lackpy\ne = 1 / 0\n```\n\n```lackpy\nf = e + 1\n```"
-        )
-        ns = session._kernel.get_namespace()
-        assert isinstance(ns["e"], ErrorValue)
-        assert isinstance(ns["f"], Hole)
-        assert ns["f"].blocked_by == ("e",)
-        assert session.ledger.query(entry_type="hole_opened", name="f")
-
     @pytest.mark.asyncio
     async def test_aggregate_view_covers_errors(self, context):
         session = LiterateSession(context)
         mark = len(session.ledger)
         await session.step("```lackpy\nz = 1 / 0\n```")
         round_entries = session.ledger.entries()[mark:]
-        assert round_is_left(round_entries)
+        assert reified_failures(round_entries)
         assert reified_failures(round_entries)[0].entry_type == "error_reified"
 
     @pytest.mark.asyncio

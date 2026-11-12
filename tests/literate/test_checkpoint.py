@@ -368,27 +368,6 @@ def test_test_hooks_need_test_ops(env):
     assert (env["ws"] / "t.txt").read_text() == "x"
 
 
-@pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
-def test_hook_forks_each_dirty_rerun_too():
-    """The re-exec pass calls the hook before each re-run, so a re-run is under the limit too."""
-    doc = _doc("y = x + 1", "x = 1", prose="Y={y}")
-    first = _cell_number(doc, "y = x + 1") - 1
-    calls = []
-
-    def checkpoint(index):
-        calls.append(index)
-        if calls.count(first) == 2:  # the re-run of the healed cell
-            return Resume("timeout", seconds=1.0)
-        return None
-
-    r = _execute(doc, checkpoint)
-    assert calls.count(first) == 2, calls
-    assert r.metadata["error_phase"] == "timeout"
-    assert f"timeout: cell {first + 1} took longer than 1 s and was stopped" in r.output
-    dirty = [e for e in r.metadata["ledger"].entries() if e.entry_type == "dirty"]
-    assert dirty and dirty[-1].detail["outcome"] == "reified"
-
-
 def test_death_between_cell_end_and_cell_start_is_a_crash(env, runner):
     """A process that dies in its hook, before the next cell_start, is reported at once.
 
@@ -572,8 +551,8 @@ def test_cell_path_after_the_hook_never_awaits():
     is unsafe. Every hook call is inside ``_run_document`` (and its sync
     callees, which cannot await), and ``execute`` returns right after it. So the
     rule holds while ``_run_document`` has no ``await``/``async for``/``async
-    with``, ``_run_resolved_cell`` and ``_reexecute_dirty_subgraph`` stay plain
-    functions, and ``execute`` has nothing to await after ``_run_document``.
+    with``, ``_run_resolved_cell`` stays a plain
+    function, and ``execute`` has nothing to await after ``_run_document``.
     This does not see sync code that reaches for the loop explicitly.
     """
     import ast
@@ -589,8 +568,7 @@ def test_cell_path_after_the_hook_never_awaits():
     assert not [n for n in ast.walk(run_doc) if isinstance(n, awaits)], \
         "_run_document awaits: the forked child would use the event loop"
     assert "checkpoint(" in inspect.getsource(cls._run_document)
-    for name in ("_run_resolved_cell", "_reexecute_dirty_subgraph"):
-        assert not inspect.iscoroutinefunction(getattr(cls, name)), name
+    assert not inspect.iscoroutinefunction(cls._run_resolved_cell)
     execute = tree(cls.execute)
     found = [n for n in ast.walk(execute) if isinstance(n, awaits)]
     assert len(found) == 1, "execute must await only _run_document"

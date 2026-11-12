@@ -118,8 +118,7 @@ def render_markdown_from_cells(
 
     ``annotations`` maps a cell's index (into ``cells``) to the note texts to
     emit through the channel AFTER that cell — the single place the batch/
-    session path routes its LEDGER-derived forgiveness notes (holes / error
-    values / unavailable sources / supersessions / dirty re-execs). The
+    session path routes its LEDGER-derived notes (failures / supersessions). The
     streaming path passes only the per-cell truncation note (see
     :func:`render_markdown`). Reusing this one renderer + the one channel keeps
     a single annotation path (no parallel emitters).

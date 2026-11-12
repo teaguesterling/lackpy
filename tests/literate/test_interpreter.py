@@ -490,19 +490,16 @@ class TestRefusalEndsTheDocument:
         assert "[kernel]" in md and "refused" in md and "not allowed in lackpy" in md
 
     @pytest.mark.asyncio
-    async def test_a_refusal_is_never_reified_as_a_hole_or_error_value(
+    async def test_a_refusal_is_never_ledgered_as_a_failure(
             self, interpreter, context):
-        """Review Focus 4: forgiveness must not turn a refusal into a value."""
+        """Review Focus 4: a refusal is not an ordinary failure: it is ledgered
+        as a refusal, never as an unbound name, an error or an unavailable source."""
         from lackpy.interpreters.literate.kernel.forgiveness import (
-            ERROR_REIFIED, HOLE_OPENED, SOURCE_UNAVAILABLE, is_forgiving)
+            ERROR_REIFIED, HOLE_OPENED, SOURCE_UNAVAILABLE)
         result = await interpreter.execute(self.DOC, context)
         ledger = result.metadata["ledger"]
         for kind in (HOLE_OPENED, ERROR_REIFIED, SOURCE_UNAVAILABLE):
             assert ledger.query(entry_type=kind) == []
-        versions = result.metadata["versions"]
-        for name in ("t", "Path"):
-            current = versions.current(name)
-            assert current is None or not is_forgiving(current.value)
 
     @pytest.mark.asyncio
     async def test_a_refusal_inside_try_stops_the_document(
