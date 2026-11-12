@@ -139,7 +139,7 @@ Under `stepy`, the Path stand-in allows a write only when the path matches a dec
 - **A refused write** is a refusal, as the policy's refusals are today. It names the path and the declared globs.
 - **For a document,** the declared writes of the first cell's block cover the whole session.
 - **Which operations count** (Claude's call). Every path the policy checks as a write (`PathPolicy.check(path, "write")`) must also match a declared glob. A rename checks both ends. `mkdir` is allowed for a directory that is an ancestor of a path some declared glob can match, so `writes = ["out/*.txt"]` allows `mkdir("out", parents=True)`.
-- **Glob form** (Claude's call). The existing `PathRule` pattern semantics, relative to the workspace.
+- **Glob form** (Claude's call, amended by Teague, 2026-11-11: "Anchor at workspace"). The existing `PathRule` pattern semantics, relative to the workspace, with one change. A glob with no slash is a path at the workspace root: `report.txt` is only `./report.txt`, and a filled-in `{name}.txt` is anchored too. `**/report.txt` matches at any depth. So the `mkdir` rule above allows no directory for `report.txt`. Claude-settings rules keep the `PathRule` bare-filename semantics.
 - **Only `stepy`.** `lackpy script.py`, `lackpyctl` and the MCP tools are unchanged. The cost: for a while, one program can write under one command and be refused under another.
 
 ## Decisions: the `stepy` command

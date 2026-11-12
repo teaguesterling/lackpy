@@ -105,12 +105,33 @@ def test_the_protected_locations_still_win_over_a_glob_that_matches_them(ws):
     p.check(ws / "deep" / "x.txt", "write")  # ** is every other path in the workspace
 
 
-def test_a_bare_filename_glob_matches_at_any_depth_under_the_workspace(ws):
-    # PathRule allow semantics (rules.py item 3): recorded in the Task 7 report.
+def test_a_glob_with_no_slash_is_a_path_at_the_workspace_root(ws):
+    # Teague, 2026-11-11: "Anchor at workspace". Not the PathRule bare-filename rule.
     p = _policy(ws, ["report.txt"])
     p.check(ws / "report.txt", "write")
-    p.check(ws / "sub" / "report.txt", "write")
+    _refused(p, ws / "deep" / "report.txt", match="declared writes")
     _refused(p, ws / "other.txt")
+
+
+def test_a_glob_with_no_slash_and_a_wildcard_is_anchored_too(ws):
+    # A filled-in ``{name}.txt`` is such a glob.
+    p = _policy(ws, ["*.txt"])
+    p.check(ws / "r.txt", "write")
+    _refused(p, ws / "deep" / "r.txt", match="declared writes")
+
+
+def test_a_double_star_glob_matches_at_any_depth(ws):
+    p = _policy(ws, ["**/report.txt"])
+    p.check(ws / "report.txt", "write")
+    p.check(ws / "deep" / "report.txt", "write")
+    p.check(ws / "a" / "b" / "report.txt", "write")
+
+
+def test_mkdir_is_refused_under_a_glob_with_no_slash(ws):
+    P = make_path_class(_policy(ws, ["report.txt"]))
+    with pytest.raises(LackpyRefusal, match="declared writes"):
+        P("deep").mkdir()
+    assert not (ws / "deep").exists()
 
 
 def test_a_dot_slash_glob_is_anchored_at_the_workspace(ws):

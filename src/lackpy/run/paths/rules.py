@@ -46,8 +46,10 @@ Semantics:
    allows, and is how Linux paths compare.
 8. Declared writes (spec E7, ``with_write_globs``): under ``stepy`` a write
    must also match a declared glob, in the allow pattern semantics, on both
-   the lexical and the resolved form. This is checked last; it never allows
-   a write that items 1-7 refuse.
+   the lexical and the resolved form, with one change: a glob with no ``/``
+   is a path at the workspace root (``report.txt`` is only
+   ``./report.txt``; ``**/report.txt`` is any depth). This is checked last;
+   it never allows a write that items 1-7 refuse.
 
 Stricter readings where the brief is silent: a bare ``Read`` or ``Edit`` (no
 parentheses) deny matches every path, and a bare allow is ignored. A
@@ -287,7 +289,10 @@ class PathPolicy:
         """``glob`` as absolute segment patterns; refuse one whose fixed prefix leaves the roots."""
         if not glob.strip():
             raise LackpyRefusal("an empty declared writes glob")
-        rule = PathRule(kind="edit", effect="allow", pattern=glob, anchor=self.workspace,
+        # Teague, 2026-11-11 ("Anchor at workspace"): a glob with no slash is a
+        # path at the workspace root, not a PathRule bare filename at any depth.
+        pattern = glob if "/" in glob or glob == "~" else "./" + glob
+        rule = PathRule(kind="edit", effect="allow", pattern=pattern, anchor=self.workspace,
                         source="the declared writes")
         patterns = _compile(rule, self.workspace)
         roots = self._roots_lexical | self._roots_real
@@ -462,7 +467,8 @@ def with_write_globs(policy: PathPolicy, globs: Sequence[str]) -> PathPolicy:
     """A new policy: ``policy`` plus the declared writes ``globs`` (spec E7).
 
     A write must then also match one of ``globs``: the ``PathRule`` pattern
-    semantics, relative to the workspace. The rules, roots, denies and
+    semantics, relative to the workspace, except that a glob with no ``/`` is
+    a path at the workspace root (module item 8). The rules, roots, denies and
     protected locations of ``policy`` still apply first; ``()`` allows no
     write. The caller fills in each ``{name}`` before the call. A glob that,
     made absolute and normalized, is not under the workspace or an extra
