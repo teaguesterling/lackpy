@@ -198,3 +198,14 @@ def test_the_parser_checks_the_rerun_value():
     assert parse("```lackpy rerun=yes\nx = 1\n```\n").errors == []
     errors = parse("```lackpy rerun=maybe\nx = 1\n```\n").errors
     assert len(errors) == 1 and "rerun='maybe' is not valid" in errors[0], errors
+
+
+def test_the_rerun_refusal_names_the_cell_by_its_first_code_line(env, runner):
+    """Final review 7: the refusal uses the interpreter's helper, so a leading comment is skipped."""
+    run = _literate_run(env, runner)
+    try:
+        assert not run.submit(_doc("a = 1", "no: # the log\n" + WRITE, "1/0"), None).success
+        second = run.submit(_doc("a = 2", "no: # the log\n" + WRITE, "1/0"), None)
+    finally:
+        run.close()
+    assert second.error.startswith("cell 1 (from pathlib import Path) has rerun=no"), second

@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..interpreters.literate import runs_no_code
-from ..interpreters.literate.parser import parse
+from ..interpreters.literate.parser import Cell, first_line, parse
 from .base import ExecutionResult
 from .paths import PathPolicy
 from .process import _check_checkpoint_budget, _check_max_checkpoints
@@ -70,12 +70,6 @@ def _segment_start(cells: list[tuple[Any, ...]], index: int) -> int:
     while index > 0 and cells[index - 1][-1]:
         index -= 1
     return index
-
-
-def _first_line(cell: tuple[Any, ...]) -> str:
-    """The first non-blank line of a ``_shape`` cell, as an error names the cell (spec E1)."""
-    lines = cell[1].strip().splitlines()
-    return lines[0].strip() if lines else cell[0]
 
 
 class LiterateRun:
@@ -237,7 +231,7 @@ class LiterateRun:
         for i, cell in enumerate(cells):
             if dict(cell[3]).get("rerun") == "no" and _segment_start(cells, i) in self._channel.started:
                 self._ran_no_rerun.add(i)
-                self._no_rerun_lines[i] = _first_line(cell)
+                self._no_rerun_lines[i] = first_line(Cell(cell[0], cell[1]))
 
     def _fresh(self, document: str, params: dict[str, Any]) -> ExecutionResult:
         self._close_channel()

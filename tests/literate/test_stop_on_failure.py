@@ -104,3 +104,39 @@ async def test_a_rebind_in_the_failed_cell_is_not_kept(context):
     result = await run(context, lackpy_doc("a = 1", "a = 2\n1/0"))
     assert not result.success
     assert result.metadata["variables"] == {"a": 1}
+
+
+# Final review 7: how an error names a cell. One helper for the interpreter and
+# the session's rerun refusal.
+
+def test_first_line_skips_comment_lines_in_a_code_cell():
+    from lackpy.interpreters.literate.parser import Cell, first_line
+
+    block = "# /// intent\n# goal = 'g'\n# ///\n\nx = 1/0\n"
+    assert first_line(Cell("code", block)) == "x = 1/0"
+    assert first_line(Cell("code", "# only\n# comments\n")) == "# only"
+    assert first_line(Cell("code", "")) == "code"
+
+
+def test_first_line_keeps_a_markdown_heading_in_prose():
+    from lackpy.interpreters.literate.parser import Cell, first_line
+
+    assert first_line(Cell("prose", "# Heading\n\n{1/0}\n")) == "# Heading"
+
+
+def test_first_line_is_at_most_60_characters():
+    from lackpy.interpreters.literate.parser import Cell, first_line
+
+    long = "x = " + "1 + " * 40 + "1"
+    text = first_line(Cell("code", long))
+    assert len(text) == 60 and text.endswith("…"), text
+    assert text[:-1] == long[:59]
+    exact = "y = " + "a" * 56
+    assert first_line(Cell("code", exact)) == exact  # 60 characters: kept whole
+
+
+@pytest.mark.asyncio
+async def test_the_error_names_the_intent_cell_by_its_first_code_line(context):
+    doc = lackpy_doc("# /// intent\n# goal = 'g'\n# ///\nx = 1/0")
+    result = await run(context, doc)
+    assert result.error.startswith("cell 0 (x = 1/0): "), result.error

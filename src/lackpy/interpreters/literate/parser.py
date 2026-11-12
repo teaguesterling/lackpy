@@ -130,6 +130,27 @@ class Cell:
     truncated: bool = False
 
 
+#: The most characters of a cell's first line that an error shows.
+FIRST_LINE_MAX = 60
+
+
+def first_line(cell: Cell) -> str:
+    """How an error names ``cell`` after its index (spec E1): its first line.
+
+    The first non-blank line; in a code cell, the first one that is not a
+    comment (so a cell that opens with its intent block shows its code), or
+    the first comment when it holds only comments. A prose ``#`` line is a
+    heading, so it counts. At most ``FIRST_LINE_MAX`` characters, "…" included.
+    """
+    lines = [line.strip() for line in cell.content.splitlines() if line.strip()]
+    if cell.cell_type != "prose":
+        lines = [line for line in lines if not line.startswith("#")] or lines
+    if not lines:
+        return cell.cell_type
+    text = lines[0]
+    return text if len(text) <= FIRST_LINE_MAX else text[:FIRST_LINE_MAX - 1] + "…"
+
+
 @dataclass
 class Frontmatter:
     echo: str = "true"

@@ -49,7 +49,7 @@ from .kernel.formats import render_markdown_from_cells
 from .kernel.ledger import Ledger, LedgerEntry
 from .kernel.static_analysis import BUILTIN_NAMES, collect_names
 from .kernel.versions import SUPERSEDED, BindingVersions, value_kind
-from .parser import Cell, ParseResult, parse
+from .parser import Cell, ParseResult, first_line, parse
 from .prompt import LITERATE_HINT
 
 
@@ -384,7 +384,7 @@ class LiterateInterpreter:
         if failure is not None:
             # Ruling P2: the error names the failed cell, then the cause.
             failed_index, cause = failure
-            errors = [f"cell {failed_index} ({_first_line(parsed.cells[failed_index])}): "
+            errors = [f"cell {failed_index} ({first_line(parsed.cells[failed_index])}): "
                       f"{cause}"]
         if refusal is not None:
             errors.insert(0, f"refused: {refusal}")
@@ -682,12 +682,6 @@ def runs_no_code(cell: Cell) -> bool:
     Task 7). The prefix rule (``lackpy.run.sessions``) uses the same test.
     """
     return cell.cell_type == "prose" and all(seg.expr is None for seg in prose_segments(cell))
-
-
-def _first_line(cell: Cell) -> str:
-    """The first non-blank line of ``cell``, as an error names the cell (spec E1)."""
-    lines = cell.content.strip().splitlines()
-    return lines[0].strip() if lines else cell.cell_type
 
 
 def _gate_violations(parsed: ParseResult, context: ExecutionContext) -> dict[int, str]:
