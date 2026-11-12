@@ -75,6 +75,16 @@ def test_run_program_description_names_pathlib():
     assert "pathlib.Path" in d["delegate"].description
 
 
+def test_run_program_description_states_the_stop_contract():
+    """Spec E1, E2, E4: the agent reads the contract here, so it must be the current one."""
+    text = " ".join({t.name: t for t in _tools()}["run_program"].description.split())
+    assert "goes on" not in text  # the retired D7 contract
+    assert "later cells do not run" in text
+    assert "no later than the failed cell" in text
+    assert "rerun=no" in text and '"refused"' in text
+    assert "a refusal ends the document and the session" in text.lower()
+
+
 def test_executing_tools_are_marked_destructive_others_readonly():
     d = {t.name: t for t in _tools()}
     assert d["delegate"].annotations.readOnlyHint is False

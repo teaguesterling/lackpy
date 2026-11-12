@@ -2,7 +2,7 @@
 
 The zygote forks a session worker for ``{"op": "spawn_session"}``. The whole
 literate interpreter runs in it (ledger Ruling D): the kernel's state (the
-ledger, the versions, the dependency graph, the rendered parts, the holes) lives
+ledger, the versions, the dependency graph, the rendered parts) lives
 in the same coroutine as the namespace, so a fork checkpoints all of it at once.
 
 At the top of each cell, the kernel calls the hook that ``context.config
@@ -82,9 +82,9 @@ OP_WAIT = 60.0
 class Resume:
     """What a checkpoint's child left it to do.
 
-    ``kind`` is ``"timeout"``: the kernel reifies the cell as timed out
-    (``seconds`` was the limit; ``entries`` is what the stopped cell streamed)
-    and goes to the next cell. Or ``"resume"``: the kernel parses ``document``
+    ``kind`` is ``"timeout"``: the kernel records the cell's timeout as its
+    failure (``seconds`` was the limit; ``entries`` is what the stopped cell
+    streamed), and the document stops there (spec E1). Or ``"resume"``: the kernel parses ``document``
     and continues its loop at the same index over the new document's cells.
     """
 

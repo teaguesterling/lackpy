@@ -157,10 +157,14 @@ async def run_program(program: str, profile: str | None = None,
     the run's limit in seconds (default: the sandbox timeout, 120 s, or the
     profile's max_timeout when that is lower); a value over the profile's
     max_timeout is refused before the run. On the literate
-    axis the limit applies to each cell: a cell over it is stopped and noted,
-    and the document goes on. A literate run returns a `session_id`: to retry,
-    pass it back with the full corrected document, and the run resumes from
-    the first changed cell (the cells before it do not run again). Call
+    axis the limit applies to each cell. A failure (an exception, a timeout,
+    an unbound name, or the effect ceiling) stops the document: later cells do
+    not run, and the error names the cell. A literate run returns a
+    `session_id`: to retry, pass it back with the full corrected document. The
+    run resumes no later than the failed cell, and the cells before the first
+    changed cell do not run again. A cell with rerun=no that has run is not run
+    again: such a resubmission is refused (error_phase "refused") and the
+    session stays open. A refusal ends the document and the session. Call
     `close_session` when done; an idle session ends after 10 minutes.
     `error_phase` is "timeout" when the run was stopped at the limit, "refused"
     when it was refused, else null. Bytes, nan and infinity come back as their

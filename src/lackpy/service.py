@@ -890,8 +890,8 @@ class LackpyService:
         raise. It crosses to the worker as data. The whole literate interpreter
         runs in the worker, with a checkpoint fork at the top of each cell, and
         each cell runs under ``timeout`` seconds: a cell over the limit is
-        killed, reified as timed out, and the document goes on (D7,
-        ``error_phase="timeout"``). The document is parsed and every cell is
+        killed and is a failure (``error_phase="timeout"``). A failure stops
+        the document; later cells do not run (spec E1). The document is parsed and every cell is
         validated in the worker, with the caller's rules as names
         (``rule_names``).
         No toolset is passed: there is no kit grade, so no static ceiling; the
@@ -902,7 +902,7 @@ class LackpyService:
         last code cell ends in an expression statement, that expression's
         value (data, or its ``repr`` text), else ``None``; ``trace`` is what
         the cells streamed, a stopped cell's entries included; ``error`` is the
-        refusal that ended the document, then the reified failures. A refusal
+        refusal that ended the document, or the failure, which names its cell. A refusal
         outranks a timeout in ``error_phase``. A read-only profile also passes a
         read-only ``grade_ceiling``, so the static planner refuses a visible
         write cell before it runs (the policy still refuses what the planner

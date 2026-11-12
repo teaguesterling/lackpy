@@ -705,7 +705,8 @@ class SessionChannel:
         the deadline; so does the start of the document and each timeout). At a
         deadline the parent SIGKILLs the deepest process, drains what it sent,
         and sends ``{"op": "timeout"}`` with the stopped cell's entries to the
-        checkpoint above it; the document goes on (D7). With no checkpoint above
+        checkpoint above it. The checkpoint records the timeout as the failure
+        of that cell, and the document stops there (spec E1). With no checkpoint above
         (the root itself ran over), the run ends with the timeout text.
         """
         self.finished = False
