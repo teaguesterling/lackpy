@@ -139,9 +139,9 @@ def document_intent(document: str) -> Intent | None:
 def _matches(declared: str, value: Any) -> bool:
     if declared == "list[str]":
         return isinstance(value, list) and all(type(item) is str for item in value)
-    if declared == "float":
-        return type(value) in (int, float)
-    return type(value) is {"str": str, "int": int, "bool": bool}[declared]
+    # Exact types: a float param needs a float default, never an int or a bool
+    # (Task 8 fix round 1), because the runner checks a value against its default's type.
+    return type(value) is {"str": str, "int": int, "float": float, "bool": bool}[declared]
 
 
 def _no_literal_message(tree: ast.Module) -> str:

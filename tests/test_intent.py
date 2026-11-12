@@ -151,8 +151,10 @@ def _float_intent():
     return parse_intent(_block("[params]", 'x = { type = "float", doc = "d" }'))
 
 
-def test_a_float_param_accepts_an_int_default_but_not_a_bool():
-    assert check_params(_float_intent(), "params = {'x': 1}\n")[1] == []
+def test_a_float_param_needs_a_float_default():
+    # Controller ruling (Task 8 fix round 1): an int default would make the run
+    # refuse a float value, since the runner compares a value to its default's type.
+    assert len(check_params(_float_intent(), "params = {'x': 1}\n")[1]) == 1
     assert check_params(_float_intent(), "params = {'x': 1.5}\n")[1] == []
     assert len(check_params(_float_intent(), "params = {'x': True}\n")[1]) == 1
 
