@@ -495,7 +495,7 @@ class LiterateSession:
             # asks for values back, same Right shape as a lone fenced cell.
             return StepResult(ok=True, clean_doc="", continue_requested=True)
 
-        from .kernel.forgiveness import describe_failure, reified_failures
+        from .kernel.forgiveness import reified_failures
 
         # No snapshot/rollback (L1.1/L1.2 contract change): failures during a
         # round reify as bound values (holes / error values) and the round
@@ -554,13 +554,12 @@ class LiterateSession:
             # D4: a refusal ended the round, and the session with it (the
             # CellSession is closed: every later cell refuses). The output up
             # to the refusal stands; the round is a Left.
-            errors = [describe_failure(e) for e in failures]
-            if refused is not None:
-                errors.insert(0, f"refused: {refused}")
+            # The document's own error: ``refused: ...`` for a refusal, else
+            # ``cell {i} ({first line}): {cause}`` (spec E1).
             return StepResult(
                 ok=False,
                 raw=raw,
-                errors=errors,
+                errors=[result.error or "execution failed"],
                 clean_doc=result.output or "",
                 continue_requested=continue_requested,
                 variables=variables,

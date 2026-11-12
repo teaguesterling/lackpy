@@ -78,6 +78,24 @@ class TestEitherSemantics:
         assert result.errors and "ZeroDivisionError" in result.errors[0]
 
     @pytest.mark.asyncio
+    async def test_the_error_names_the_failed_cell(self, context):
+        # Spec E1: the session's error names the cell (index from 0 and its
+        # first line), as the document's own error does.
+        session = LiterateSession(context)
+        result = await session.step("```lackpy\nx = 1\n```\n\n```lackpy\nx = 1 / 0\n```")
+        assert not result.ok
+        assert result.errors[0].startswith("cell 1 (x = 1 / 0): ")
+        assert "ZeroDivisionError" in result.errors[0]
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_keeps_its_refused_text(self, tmp_path):
+        # literate_agent checks ``errors[0].startswith("refused:")``.
+        ctx = ExecutionContext(base_dir=tmp_path)
+        session = LiterateSession(ctx)
+        result = await session.step("```lackpy\nfrom pathlib import Path\n```")
+        assert result.errors and result.errors[0].startswith("refused:")
+
+    @pytest.mark.asyncio
     async def test_left_keeps_partial_state_as_forgiving_values(self, context):
         # WAS test_left_does_not_advance_state: "round 2 rebinds x then fails
         # -> Left must restore x to 1". Under the two-layer contract the
