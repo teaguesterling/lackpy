@@ -36,6 +36,8 @@ class ExecutionResult:
     #: Spec E11: only what the program's ``print()`` calls wrote (a document: its
     #: cells', in cell order, with what a failed cell printed before it failed).
     #: A program's equals ``stdout``; a document's ``stdout`` is its rendered output.
+    #: On a resume it also holds what the cells before the resume point printed
+    #: in the earlier submit: the checkpoint keeps that text.
     printed: str = ""
 
     @property

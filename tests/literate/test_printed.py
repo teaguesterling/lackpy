@@ -146,3 +146,26 @@ def test_printed_keeps_the_cells_before_a_timeout(tmp_path, home):
     assert not result.success
     assert result.error_phase == "timeout", result
     assert result.printed == "one\ntwo\n"
+
+
+@needs_linux
+def test_printed_on_a_resume_keeps_the_earlier_cells_prints(tmp_path, home):
+    """Final review 8: a resume's ``printed`` holds what the cells before the resume point
+    printed in the earlier submit (the checkpoint kept it), then the resumed cells' prints."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    runner = ProcessRunner()
+    run = LiterateRun(runner, workspace=ws, profile_name="lit", cell_timeout=5.0,
+                      path_policy=load_policy(ws, home=home, managed=None))
+    try:
+        first = run.submit(FAILING_DOC, None)
+        channel = run._channel
+        fixed = run.submit(FAILING_DOC.replace("; 1/0", ""), None)
+        resumed = run._channel is channel  # a fresh run opens a new channel
+    finally:
+        run.close()
+        runner.close()
+    assert not first.success
+    assert fixed.success, fixed
+    assert resumed
+    assert fixed.printed == "one\ntwo\nthree\n"
