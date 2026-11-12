@@ -514,6 +514,9 @@ class SessionChannel:
         #: holds now: cleared by ``submit``, and by ``resume(index)`` for those
         #: at ``index`` or later (fix round 1, ruling A).
         self.stopped: set[int] = set()
+        #: The ``cell_start`` indices (segment starts) of the last submit or
+        #: resume: the segments that began to run (spec E4).
+        self.started: set[int] = set()
         self._protect: int | None = None  # the checkpoint before the last stopped or failed cell
         #: True after a submit or resume that ended with the document's result:
         #: then every process but the deepest is a checkpoint waiting in its hook.
@@ -705,6 +708,7 @@ class SessionChannel:
         """
         self.finished = False
         self.stopped.clear()
+        self.started.clear()
         self._protect = None
         try:
             self.send({"op": "submit", "document": document, "params": params,
@@ -750,6 +754,7 @@ class SessionChannel:
             raise ValueError(f"no checkpoint can resume cell {index}")
         self.finished = False
         self.stopped = {i for i in self.stopped if i < index}
+        self.started.clear()
         while len(self._stack) > j + 1:
             self._stack.pop().close()
         checkpoint = self._stack[j]
@@ -776,6 +781,7 @@ class SessionChannel:
                     if not entry.tool.endswith(START_SUFFIX):
                         entries.append(entry)
                 elif event == "cell_start":
+                    self.started.add(msg["index"])
                     deadline = time.monotonic() + self.cell_timeout
                     cell = []
                 elif event == "done":
@@ -863,6 +869,10 @@ class SessionChannel:
             # does. It ran in the deepest process, so that process's parent
             # is the checkpoint before it: keep it, as ``_timeout`` does.
             self.stopped.add(failed)
+            # Its segment's start too (Task 3 review): with plain prose before
+            # the failed cell, ``can_resume`` holds at that index.
+            if self._stack[-1].index is not None:
+                self.stopped.add(self._stack[-1].index)
             self._protect = self._stack[-1].parent
         return ExecutionResult(success=r["success"], output=r.get("output"), stdout=r["stdout"],
                                error=error, trace=_trace(entries), variables=variables,

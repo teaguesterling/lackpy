@@ -743,6 +743,24 @@ def test_a_resume_after_a_failure_starts_at_the_failed_cell(env, runner):
     assert _lines(env) == 1  # cell 0 did not run again
 
 
+def test_a_failure_after_prose_stops_its_segment_start(env, runner):
+    """Spec E2, Task 3 review: the prose before the failed code cell shares its
+    checkpoint, so the segment start joins ``stopped`` too, and ``can_resume`` holds
+    there. The resume starts at that segment; cell 0 does not run again."""
+    run = _literate_run(env, runner)
+    try:
+        first = run.submit(_doc(LOG_A1, "> Now the division.", "b = a / 0", prose=""), None)
+        assert first.error.startswith("cell 2 (b = a / 0): "), first
+        assert run._channel.stopped == {1, 2}
+        assert run._channel.can_resume(1)
+        second = run.submit(_doc(LOG_A1, "> Now the division.", "b = a / 1", prose=""), None)
+    finally:
+        run.close()
+    assert second.success, second
+    assert second.variables["b"] == 1.0, second
+    assert _lines(env) == 1  # cell 0 did not run again
+
+
 def test_a_fixed_failed_cell_resumes_from_its_checkpoint(env, runner):
     """Spec E2: the fixed cell runs from the checkpoint before it; cell 0 does not run again."""
     run = _literate_run(env, runner)

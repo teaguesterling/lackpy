@@ -199,6 +199,9 @@ def _parse_info_string(info: str) -> tuple[CellType, dict[str, str], dict[str, s
         if "=" in pair:
             key, _, value = pair.partition("=")
             options[key.strip()] = value.strip()
+    # Spec E4: ``rerun=no`` forbids a second run of the cell in a session.
+    if options.get("rerun", "yes") not in ("yes", "no"):
+        errors.append(f"rerun={options['rerun']!r} is not valid: use rerun=yes or rerun=no")
 
     if not annotation:
         return "code", {}, options, errors

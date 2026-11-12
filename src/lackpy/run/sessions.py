@@ -20,6 +20,9 @@ applies the prefix rule to each full-document submission:
 - Otherwise the worker is closed and the document runs fresh. So does the
   first submission, a submission with other params, and one after the session
   failed.
+- A cell with ``rerun=no`` runs at most once in the run (spec E4). Once it has
+  run, a submission that starts at or before it (a resume, or a fresh run,
+  which starts at cell 0) is refused, and runs nothing.
 
 Retries are the caller's job (D7): ``submit`` resumes a resubmission, it never
 retries one.
@@ -62,6 +65,19 @@ def _shape(document: str) -> tuple[Any, list[tuple[Any, ...]]] | None:
     return (fm.echo, fm.output, fm.interpreter), cells
 
 
+def _segment_start(cells: list[tuple[Any, ...]], index: int) -> int:
+    """The start of the segment that holds cell ``index``: back over the cells that run no code."""
+    while index > 0 and cells[index - 1][-1]:
+        index -= 1
+    return index
+
+
+def _first_line(cell: tuple[Any, ...]) -> str:
+    """The first non-blank line of a ``_shape`` cell, as an error names the cell (spec E1)."""
+    lines = cell[1].strip().splitlines()
+    return lines[0].strip() if lines else cell[0]
+
+
 class LiterateRun:
     """The parent's handle on one literate session worker.
 
@@ -99,6 +115,10 @@ class LiterateRun:
         self._lock = threading.Lock()
         self._channel: Any = None
         self._last: tuple[Any, dict[str, Any]] | None = None  # (shape, params) last submitted
+        #: Spec E4: the indices of the ``rerun=no`` cells that have run in this
+        #: run, and each one's first line (a later document may not hold it).
+        self._ran_no_rerun: set[int] = set()
+        self._no_rerun_lines: dict[int, str] = {}
         self._settings: tuple[Any, ...] = ()
         self._policy = path_policy
         self._timeout = float(cell_timeout)
@@ -171,18 +191,53 @@ class LiterateRun:
         shape = _shape(document)
         last, self._last = self._last, (shape, params)
         channel = self._channel
+        start, resume = 0, False  # a fresh run starts at cell 0
         if (channel is not None and last is not None and shape is not None
                 and last[0] is not None and last[1] == params and last[0][0] == shape[0]):
             old, new = last[0][1], shape[1]
             k = next((i for i, (a, b) in enumerate(zip(old, new)) if a != b), min(len(old), len(new)))
             k = min([k, *channel.stopped])  # ruling A: no later than a stopped cell
-            start = k
-            while start > 0 and new[start - 1][-1]:  # back over cells that run no code
-                start -= 1
-            if channel.can_resume(start):
-                channel.cell_timeout = self._timeout
-                return channel.resume(start, document)
-        return self._fresh(document, params)
+            start = _segment_start(new, k)
+            resume = channel.can_resume(start)
+            if not resume:
+                start = 0
+        refused = self._rerun_refusal(start)
+        if refused is not None:
+            self._last = last  # nothing ran: the session still holds the last document
+            return refused
+        if resume:
+            channel.cell_timeout = self._timeout
+            result = channel.resume(start, document)
+        else:
+            result = self._fresh(document, params)
+        self._record_no_rerun(shape)
+        return result
+
+    def _rerun_refusal(self, start: int) -> ExecutionResult | None:
+        """Spec E4: the refusal of a submission that starts at or before a ``rerun=no``
+        cell that has run; None when there is no such cell."""
+        late = sorted(i for i in self._ran_no_rerun if i >= start)
+        if not late:
+            return None
+        i = late[0]
+        return ExecutionResult(
+            success=False, error_phase="refused",
+            error=(f"cell {i} ({self._no_rerun_lines[i]}) has rerun=no and has already run "
+                   f"in this session; start a new session to run it again"))
+
+    def _record_no_rerun(self, shape: tuple[Any, list[tuple[Any, ...]]] | None) -> None:
+        """Spec E4: record the ``rerun=no`` cells of ``shape`` whose segment began to run.
+
+        A segment's ``cell_start`` comes before any of its cells runs, so a cell
+        that failed, or was stopped at the limit, is recorded too.
+        """
+        if shape is None or self._channel is None:
+            return
+        cells = shape[1]
+        for i, cell in enumerate(cells):
+            if dict(cell[3]).get("rerun") == "no" and _segment_start(cells, i) in self._channel.started:
+                self._ran_no_rerun.add(i)
+                self._no_rerun_lines[i] = _first_line(cell)
 
     def _fresh(self, document: str, params: dict[str, Any]) -> ExecutionResult:
         self._close_channel()
