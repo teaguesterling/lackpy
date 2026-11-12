@@ -89,44 +89,52 @@ def test_a_toml_error_is_an_intent_error():
 def test_a_param_key_missing_from_the_literal_is_an_error():
     intent = parse_intent(_block("[params]", 'a = { type = "int", doc = "d" }',
                                  'b = { type = "int", doc = "d" }'))
-    errors = check_params(intent, "params = {'a': 1}\n")
+    _, errors = check_params(intent, "params = {'a': 1}\n")
     assert len(errors) == 1 and "'b'" in errors[0]
 
 
 def test_a_literal_key_missing_from_params_is_an_error():
     intent = parse_intent(_block("[params]", 'a = { type = "int", doc = "d" }'))
-    errors = check_params(intent, "params = {'a': 1, 'c': 2}\n")
+    _, errors = check_params(intent, "params = {'a': 1, 'c': 2}\n")
     assert len(errors) == 1 and "'c'" in errors[0]
 
 
 def test_a_default_of_the_wrong_type_is_an_error():
     intent = parse_intent(_block("[params]", 'limit = { type = "int", doc = "d" }'))
-    errors = check_params(intent, "params = {'limit': '20'}\n")
+    _, errors = check_params(intent, "params = {'limit': '20'}\n")
     assert len(errors) == 1 and "limit" in errors[0] and "int" in errors[0]
 
 
 def test_a_bool_is_not_an_int_and_list_items_must_be_str():
     intent = parse_intent(_block("[params]", 'n = { type = "int", doc = "d" }',
                                  'xs = { type = "list[str]", doc = "d" }'))
-    assert len(check_params(intent, "params = {'n': True, 'xs': ['a']}\n")) == 1
-    assert len(check_params(intent, "params = {'n': 1, 'xs': ['a', 2]}\n")) == 1
-    assert check_params(intent, "params = {'n': 1, 'xs': ['a']}\n") == []
+    assert len(check_params(intent, "params = {'n': True, 'xs': ['a']}\n")[1]) == 1
+    assert len(check_params(intent, "params = {'n': 1, 'xs': ['a', 2]}\n")[1]) == 1
+    assert check_params(intent, "params = {'n': 1, 'xs': ['a']}\n")[1] == []
 
 
 def test_check_params_fills_the_defaults():
     intent = program_intent(EXAMPLE)
-    assert check_params(intent, EXAMPLE) == []
-    assert [p.default for p in intent.params] == ["src", 20]
+    filled, errors = check_params(intent, EXAMPLE)
+    assert errors == []
+    assert [p.default for p in filled.params] == ["src", 20]
+
+
+def test_check_params_leaves_the_intent_it_was_given_unchanged():
+    intent = program_intent(EXAMPLE)
+    filled, _ = check_params(intent, EXAMPLE)
+    assert filled is not intent
+    assert [p.default for p in intent.params] == [None, None]
 
 
 def test_params_without_a_literal_is_an_error():
     intent = parse_intent(_block("[params]", 'a = { type = "int", doc = "d" }'))
-    assert len(check_params(intent, "x = 1\n")) == 1
+    assert len(check_params(intent, "x = 1\n")[1]) == 1
 
 
 def test_a_literal_without_params_is_an_error_only_when_a_block_exists():
-    assert len(check_params(parse_intent(_block('goal = "g"')), "params = {'a': 1}\n")) == 1
-    assert check_params(None, "params = {'a': 1}\n") == []
+    assert len(check_params(parse_intent(_block('goal = "g"')), "params = {'a': 1}\n")[1]) == 1
+    assert check_params(None, "params = {'a': 1}\n") == (None, [])
 
 
 def test_the_block_in_the_first_code_cell_of_a_document_is_found():
@@ -137,3 +145,71 @@ def test_the_block_in_the_first_code_cell_of_a_document_is_found():
 def test_a_block_in_the_second_cell_of_a_document_is_not_found():
     document = "```lackpy\nx = 1\n```\n\n```lackpy\n" + _block('goal = "late"') + "```\n"
     assert document_intent(document) is None
+
+
+def _float_intent():
+    return parse_intent(_block("[params]", 'x = { type = "float", doc = "d" }'))
+
+
+def test_a_float_param_accepts_an_int_default_but_not_a_bool():
+    assert check_params(_float_intent(), "params = {'x': 1}\n")[1] == []
+    assert check_params(_float_intent(), "params = {'x': 1.5}\n")[1] == []
+    assert len(check_params(_float_intent(), "params = {'x': True}\n")[1]) == 1
+
+
+def test_a_marker_line_inside_a_string_is_not_a_block():
+    program = _block('goal = "g"') + 'doc = """\n# /// intent\n# goal = "x"\n# ///\n"""\n'
+    assert program_intent(program).goal == "g"
+    program = 'doc = """\n' + _block('goal = "x"') + '"""\n'
+    assert program_intent(program) is None
+
+
+def test_a_marker_in_a_docstring_before_the_block_hides_nothing_and_counts_nothing():
+    program = '"""\n' + _block('goal = "x"') + '"""\n' + _block('goal = "g"')
+    assert program_intent(program) is None
+
+
+def test_a_non_literal_params_value_gets_its_own_message():
+    intent = parse_intent(_block("[params]", 'a = { type = "int", doc = "d" }'))
+    for program in ("params = {'a': len('x')}\n", "params = {**base}\n"):
+        errors = check_params(intent, program)[1]
+        assert len(errors) == 1 and "only literal values" in errors[0]
+
+
+def test_an_annotated_params_gets_its_own_message():
+    intent = parse_intent(_block("[params]", 'a = { type = "int", doc = "d" }'))
+    errors = check_params(intent, "params: dict = {'a': 1}\n")[1]
+    assert len(errors) == 1 and "no annotation" in errors[0]
+
+
+def test_an_indented_marker_is_an_error_naming_column_0():
+    with pytest.raises(IntentError, match="column 0"):
+        parse_intent("  # /// intent\n  # goal = 'g'\n  # ///\nx = 1\n")
+
+
+def test_an_unterminated_block_is_an_error():
+    with pytest.raises(IntentError, match="closing"):
+        parse_intent("# /// intent\n# goal = 'g'\nx = 1\n")
+
+
+def test_a_block_line_without_a_hash_ends_the_comments_and_leaves_the_block_unterminated():
+    with pytest.raises(IntentError, match="closing"):
+        parse_intent("# /// intent\n# goal = 'g'\nx = 1\n# ///\n")
+
+
+@pytest.mark.parametrize("key", ["reads", "writes", "checks"])
+def test_a_list_field_that_is_not_a_list_of_strings_is_an_error(key):
+    for value in ('"a"', "[1]"):
+        with pytest.raises(IntentError, match=key):
+            parse_intent(_block(f"{key} = {value}"))
+
+
+def test_a_param_entry_with_the_wrong_shape_is_an_error():
+    for entry in ('n = "int"', 'n = { type = "int" }', 'n = { type = "int", doc = "d", x = 1 }'):
+        with pytest.raises(IntentError, match="'n'"):
+            parse_intent(_block("[params]", entry))
+
+
+def test_a_goal_that_is_not_a_string_is_an_error():
+    with pytest.raises(IntentError, match="goal"):
+        parse_intent(_block("goal = 3"))

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .interpreters.literate.parser import parse as parse_document
@@ -52,22 +52,32 @@ def _toml_text(lines: list[str]) -> str:
     return "\n".join(line[2:] if line.startswith("# ") else line[1:] for line in lines)
 
 
+def _leading_comments(source: str) -> list[str]:
+    """The lines before the first code line: a shebang, blank lines and comments."""
+    lines = []
+    for line in source.splitlines():
+        text = line.strip()
+        if text and not text.startswith("#"):
+            break
+        lines.append(line.rstrip())
+    return lines
+
+
 def parse_intent(source: str) -> Intent | None:
-    """Parse the intent block in ``source``; None when there is none."""
+    """Parse the intent block in the leading comments of ``source``; None when there is none."""
     blocks: list[list[str]] = []
     current: list[str] | None = None
-    for line in source.splitlines():
-        text = line.rstrip()
+    for text in _leading_comments(source):
         if current is None:
             if text == _OPEN:
                 current = []
+            elif text.strip() == _OPEN:
+                raise IntentError("intent block: the '# /// intent' marker must start at column 0.")
         elif text == _CLOSE:
             blocks.append(current)
             current = None
-        elif text.startswith("#"):
-            current.append(text)
         else:
-            raise IntentError("intent block: a line without '#' comes before the closing '# ///'.")
+            current.append(text)
     if current is not None:
         raise IntentError("intent block: the closing '# ///' is missing.")
     if not blocks:
@@ -115,15 +125,7 @@ def parse_intent(source: str) -> Intent | None:
 
 def program_intent(program: str) -> Intent | None:
     """The block at the top of a program: only a shebang, blank lines and comments may precede it."""
-    for number, line in enumerate(program.splitlines()):
-        text = line.strip()
-        if text == _OPEN:
-            return parse_intent(program)
-        if text and not text.startswith("#"):
-            return None
-        if text.startswith("#!") and number != 0:
-            return None
-    return None
+    return parse_intent(program)
 
 
 def document_intent(document: str) -> Intent | None:
@@ -137,37 +139,54 @@ def document_intent(document: str) -> Intent | None:
 def _matches(declared: str, value: Any) -> bool:
     if declared == "list[str]":
         return isinstance(value, list) and all(type(item) is str for item in value)
-    return type(value) is {"str": str, "int": int, "float": float, "bool": bool}[declared]
+    if declared == "float":
+        return type(value) in (int, float)
+    return type(value) is {"str": str, "int": int, "bool": bool}[declared]
 
 
-def check_params(intent: Intent | None, program: str) -> list[str]:
+def _no_literal_message(tree: ast.Module) -> str:
+    for stmt in tree.body:
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) \
+                and stmt.target.id == "params":
+            return ("The 'params' assignment has an annotation. "
+                    "Write params = {...} with no annotation.")
+        if isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "params" for t in stmt.targets):
+            return ("The 'params' dict literal must hold only literal values, "
+                    "with no ** entries and no calls.")
+    return ("The intent block has [params], but the program has no top-level "
+            "'params' dict literal. Add one, or remove [params].")
+
+
+def check_params(intent: Intent | None, program: str) -> tuple[Intent | None, list[str]]:
     """Check ``[params]`` against the ``params`` literal of ``program``, both ways.
 
-    Returns error texts, empty when the checks pass. Fills each ``Param.default``.
-    A program with no block is valid.
+    Returns a new Intent whose Params carry their defaults, and the error texts
+    (empty when the checks pass). The Intent passed in is not changed. A program
+    with no block is valid: it returns (None, []).
     """
     if intent is None:
-        return []
+        return None, []
     try:
-        literal = _params_literal(ast.parse(program))
+        tree = ast.parse(program)
     except SyntaxError as exc:
-        return [f"The program does not parse, so its params cannot be checked: {exc.msg}."]
+        return intent, [f"The program does not parse, so its params cannot be checked: {exc.msg}."]
+    literal = _params_literal(tree)
     if literal is None:
-        if intent.params:
-            return ["The intent block has [params], but the program has no top-level "
-                    "'params' dict literal. Add one, or remove [params]."]
-        return []
+        return intent, [_no_literal_message(tree)] if intent.params else []
     defaults = {k.value: ast.literal_eval(v) for k, v in zip(literal.keys, literal.values)}
     declared = {p.name for p in intent.params}
     errors = [f"The 'params' literal has key {key!r}, which [params] does not describe. "
               "Add it to [params]." for key in defaults if key not in declared]
+    filled = []
     for param in intent.params:
         if param.name not in defaults:
             errors.append(f"[params] describes {param.name!r}, but the 'params' literal "
                           "has no such key. Add it to the literal.")
+            filled.append(param)
             continue
-        object.__setattr__(param, "default", defaults[param.name])
+        filled.append(replace(param, default=defaults[param.name]))
         if not _matches(param.type, defaults[param.name]):
             errors.append(f"The default of param {param.name!r} is {defaults[param.name]!r}, "
                           f"but [params] declares type {param.type}.")
-    return errors
+    return replace(intent, params=tuple(filled)), errors
