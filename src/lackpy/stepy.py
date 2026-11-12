@@ -1,19 +1,24 @@
-"""The ``stepy`` command (spec E8-E11): run a program under its intent block.
+"""The ``stepy`` command (spec E8-E11): run a program or a document under its intent block.
 
 ``stepy script.py [options]``, ``stepy -c 'program text' [options]`` and a
-``#!/usr/bin/env stepy`` first line all run a program. Every option after the
+``#!/usr/bin/env stepy`` first line all run a program. ``stepy doc.md [options]``
+runs a literate document (Task 9): its intent block is in the first code cell,
+its profile is resolved as ``lackpyctl render --execute`` resolves it
+(``LackpyService.literate_profile``), and ``--timeout`` is the limit for each
+cell. Every option after the
 script belongs to it: stepy's own (``--help``, ``--check``, ``--timeout``,
 ``--profile``, ``--workspace``) and one ``--<key>`` per ``[params]`` key.
 Before a run, the intent block, the ``[params]`` match, the program and the
 declared writes are checked; an error there exits 2 and nothing runs.
 
-stdout carries only what the program printed. A failure writes ``stepy: `` and
+stdout carries only what the program or the cells printed. A failure writes ``stepy: `` and
 the error to stderr. Exit codes: 0 success; 1 failure or refusal; 2 usage or
 validation error, nothing ran; 124 timeout.
 """
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import re
 import sys
@@ -21,12 +26,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .intent import Intent, IntentError, Param, check_params, program_intent
+from .intent import Intent, IntentError, Param, check_params, document_intent, program_intent
 from .run.refusal import LackpyRefusal
 
 _OWN = ("--help", "--check", "--timeout", "--profile", "--workspace")
 _USAGE = ("usage: stepy SCRIPT.py [--help] [--check] [--timeout SECONDS] [--profile NAME] "
           "[--workspace DIR] [--<param> VALUE ...]\n"
+          "       stepy DOC.md [options]\n"
           "       stepy -c 'program text' [options]")
 _PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 _UNSAFE = frozenset("*?[]")  # a filled value may not widen a glob (Task 7 review)
@@ -146,9 +152,10 @@ def _fill(glob: str, intent: Intent, values: dict[str, Any]) -> str:
     return _PLACEHOLDER.sub(value, glob)
 
 
-def _help(intent: Intent | None, script: str) -> str:
+def _help(intent: Intent | None, script: str, document: bool) -> str:
     if intent is None:
-        return f"{script}: this script declares nothing, so it may write nothing.\n\n{_USAGE}\n"
+        what = "document" if document else "script"
+        return f"{script}: this {what} declares nothing, so it may write nothing.\n\n{_USAGE}\n"
     lines = [intent.goal or f"{script}: the intent block has no goal.", ""]
     if intent.params:
         lines.append("parameters:")
@@ -160,22 +167,24 @@ def _help(intent: Intent | None, script: str) -> str:
     lines += [f"  {g}" for g in intent.reads or ("none",)]
     lines.append("checks:")
     lines += [f"  {c}" for c in intent.checks or ("none",)]
-    lines += ["", "--timeout SECONDS is the time limit for the whole run.", _USAGE]
+    if document:
+        lines += ["", "--timeout SECONDS is the time limit for each cell. "
+                  "To limit the whole run, use timeout(1).", _USAGE]
+    else:
+        lines += ["", "--timeout SECONDS is the time limit for the whole run.", _USAGE]
     return "\n".join(lines) + "\n"
 
 
-def _source(argv: list[str]) -> tuple[str, str, list[str]]:
-    """The script's name, the program text, and the options after it."""
+def _source(argv: list[str]) -> tuple[str, str, list[str], bool]:
+    """The script's name, its text, the options after it, and True for a document."""
     if not argv:
         raise _Usage("give a script to run.")
     if argv[0] == "-c":
         if len(argv) < 2:
             raise _Usage("-c needs the program text.")
-        return "-c", argv[1], argv[2:]
+        return "-c", argv[1], argv[2:], False
     path = Path(argv[0])
-    if path.suffix == ".md":
-        raise _Usage(f"{path}: running a .md document is not available yet. Use a .py program.")
-    if path.suffix != ".py":
+    if path.suffix not in (".py", ".md"):
         raise _Usage(f"{path}: stepy runs a .py program or a .md document, "
                      f"not a file with the extension {path.suffix or '(none)'!r}.")
     if not path.is_file():
@@ -184,14 +193,16 @@ def _source(argv: list[str]) -> tuple[str, str, list[str]]:
         program = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         raise _Usage(f"{path}: the file cannot be read (stepy reads UTF-8 text): {e}.") from None
-    return str(path), program, argv[1:]
+    return str(path), program, argv[1:], path.suffix == ".md"
 
 
-def _prepare(service: Any, intent: Intent, program: str, args: _Args) -> tuple[dict, list[str]]:
+def _prepare(service: Any, intent: Intent, program: str, args: _Args,
+             document: bool) -> tuple[Any, dict, list[str]]:
     """The checks before a run, shared with ``--check``: the workspace, the profile
     and ``--timeout``, the program, then the declared writes.
 
-    Returns the final parameter values and the declared writes. Raises ``_Usage``.
+    Returns the profile to run under (for a document, the literate profile), the
+    final parameter values and the declared writes. Raises ``_Usage``.
     A policy that cannot be loaded (a malformed settings file) is not checked
     here: the run reports it, and exits 1, as ``lackpy`` does.
     """
@@ -200,13 +211,14 @@ def _prepare(service: Any, intent: Intent, program: str, args: _Args) -> tuple[d
     if args.workspace is not None and not args.workspace.is_dir():
         raise _Usage(f"--workspace {args.workspace}: it is not a directory.")
     try:
-        rp = service._resolve_profile(args.profile)
+        profile = service.literate_profile(args.profile) if document else args.profile
+        rp = service._resolve_profile(profile)
     except (ProfileError, ValueError) as e:
         raise _Usage(str(e)) from None
     _, refusal = service._check_timeout(args.timeout, rp, args.profile)  # the run's own rule
     if refusal is not None:
         raise _Usage(f"--timeout: {refusal}.")
-    validation = service.validate(program, profile=args.profile)
+    validation = service.validate(program, profile=profile)
     if not validation.valid:
         raise _Usage(validation_error(validation))
     values = {p.name: p.default for p in intent.params} if intent else {}
@@ -216,12 +228,12 @@ def _prepare(service: Any, intent: Intent, program: str, args: _Args) -> tuple[d
     try:
         policy = service._load_path_policy(read_only=False)
     except (Exception, LackpyRefusal):
-        return values, globs  # the run reports a policy that cannot be loaded
+        return profile, values, globs  # the run reports a policy that cannot be loaded
     try:
         with_write_globs(policy, globs)
     except LackpyRefusal as e:  # a glob that leaves the workspace (Task 7 review)
         raise _Usage(f"refused: {e.what}.") from None
-    return values, globs
+    return profile, values, globs
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,17 +242,25 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE)
         return 0
     try:
-        script, program, rest = _source(argv)
-        intent, errors = check_params(program_intent(program), program)
+        script, program, rest, document = _source(argv)
+        if document:
+            # Ruling P3: [params] is checked against the code cells joined in
+            # order, the program whose literal the run replaces.
+            from .interpreters.literate import document_program
+            from .interpreters.literate.parser import parse
+            intent, errors = check_params(document_intent(program),
+                                          ast.unparse(document_program(parse(program))))
+        else:
+            intent, errors = check_params(program_intent(program), program)
         if errors:
             raise _Usage(" ".join(errors))
         args = _parse(intent, rest)
         if args.help:
-            sys.stdout.write(_help(intent, script))
+            sys.stdout.write(_help(intent, script, document))
             return 0
         from .service import LackpyService
         service = LackpyService(workspace=args.workspace or Path.cwd())
-        values, globs = _prepare(service, intent, program, args)
+        profile, values, globs = _prepare(service, intent, program, args, document)
     except (_Usage, IntentError) as e:
         print(f"stepy: {e}", file=sys.stderr)
         if not argv:
@@ -249,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         return 0
     result = asyncio.run(service.run_program(
-        program, profile=args.profile, params=values or None, timeout=args.timeout,
+        program, profile=profile, params=values or None, timeout=args.timeout,
         declared_writes=globs))
     sys.stdout.write(result.printed)
     sys.stdout.flush()

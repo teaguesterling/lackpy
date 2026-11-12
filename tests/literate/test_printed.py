@@ -124,3 +124,25 @@ def test_printed_survives_the_too_large_failure_fallback(tmp_path, home):
     assert not result.success
     assert "big" not in result.variables
     assert result.printed == "kept\n"
+
+
+TIMEOUT_DOC = ('```lackpy\nprint("one")\n```\n\n```lackpy\nprint("two")\n```\n\n'
+               '```lackpy\nfor i in iter(int, 1): pass\n```\n')
+
+
+@needs_linux
+def test_printed_keeps_the_cells_before_a_timeout(tmp_path, home):
+    """Task 5 review ruling: a timed-out document keeps what the earlier cells printed, in order."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    runner = ProcessRunner()
+    run = LiterateRun(runner, workspace=ws, profile_name="lit", cell_timeout=3.0,
+                      path_policy=load_policy(ws, home=home, managed=None))
+    try:
+        result = run.submit(TIMEOUT_DOC, None)
+    finally:
+        run.close()
+        runner.close()
+    assert not result.success
+    assert result.error_phase == "timeout", result
+    assert result.printed == "one\ntwo\n"

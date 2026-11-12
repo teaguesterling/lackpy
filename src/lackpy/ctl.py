@@ -41,27 +41,16 @@ def _render(args) -> int:
 
     if args.execute:
         import asyncio
-        import dataclasses
 
-        from .profiles import Profile, ProfileError
+        from .profiles import ProfileError
         from .service import LackpyService
 
         workspace = Path(args.base_dir or getattr(args, "workspace", None) or source_dir)
         service = LackpyService(workspace=workspace.resolve())
-        # Review M6: the named profile, else the configured default, with the
-        # execution axis set to literate (render runs a document). No
-        # configured default: a plain literate profile.
-        profiles = service._config.profiles
-        name = args.profile or (service._config.profile_default
-                                if service._config.profile_default in profiles else None)
+        # Review M6: the named profile, else the configured default, run as
+        # literate (render runs a document); the rule stepy uses too.
         try:
-            if name is None:
-                profile = Profile(execution="literate")
-            elif name not in profiles:
-                raise ProfileError(f"unknown profile {name!r} (no [profiles.{name}] table)")
-            else:
-                profile = dataclasses.replace(service._configured_profile(name),
-                                              execution="literate")
+            profile = service.literate_profile(args.profile or None)
         except ProfileError as e:
             print(f"lackpyctl render --execute: {e}", file=sys.stderr)
             return 1

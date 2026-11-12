@@ -591,6 +591,28 @@ class LackpyService:
         except ValueError as e:
             raise ProfileError(f"profile {name!r}: {e}") from None
 
+    def literate_profile(self, name: str | None) -> Profile:
+        """The profile a document runs under: ``name``, else the configured
+        default profile (``[profile] default``, when that table exists), with
+        the execution axis set to literate. No configured default: a plain
+        literate profile. A read-only profile stays read-only.
+
+        One rule for ``lackpyctl render --execute`` (review M6) and ``stepy``
+        (spec E8, Task 9).
+
+        Raises:
+            ProfileError: ``name`` is not configured, or its table is not valid.
+        """
+        import dataclasses
+        profiles = self._config.profiles
+        if name is None and self._config.profile_default in profiles:
+            name = self._config.profile_default
+        if name is None:
+            return Profile(execution="literate")
+        if name not in profiles:
+            raise ProfileError(f"unknown profile {name!r} (no [profiles.{name}] table)")
+        return dataclasses.replace(self._configured_profile(name), execution="literate")
+
     def _resolve_tool_selection(self, profile: Any, extra_tools: list[str] | None = None) -> ResolvedTools:
         """The retired kit resolution, for the internal toolbox views only
         (``profile_info``, ``docs_index``). No run uses it."""

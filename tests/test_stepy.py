@@ -364,3 +364,152 @@ def test_workspace_option(ws, tmp_path, capsys):
     assert main([script, "--workspace", str(other)]) == 0
     assert (other / "out" / "a.txt").exists()
     assert not (ws / "out").exists()
+
+
+# --- Task 9: stepy runs a literate document (spec E8, E10, E11) ---
+
+def _doc(ws, *cells, prose="# Title\n\nSome prose.\n", name="d.md"):
+    """A document: ``prose``, then each cell as a ```lackpy fence with prose between.
+
+    The run counts every cell, prose too, so code cell k is document cell 2k + 1.
+    """
+    parts = [prose] + [f"```lackpy\n{c}```\n\nBetween.\n" for c in cells]
+    path = ws / name
+    path.write_text("\n".join(parts))
+    return str(path)
+
+
+def _block(writes=None, params=None):
+    """An intent block for a document's first cell, then its params literal."""
+    lines = ["# /// intent"]
+    if writes is not None:
+        lines.append(f"# writes = {writes!r}".replace("'", '"'))
+    if params:
+        lines.append("# [params]")
+        lines += [f'# {k} = {{ type = "str", doc = "a name" }}' for k in params]
+    lines.append("# ///")
+    if params:
+        lines.append(f"params = {params!r}")
+    return "\n".join(lines) + "\n"
+
+
+def test_document_prints_only_cell_output(ws, capsys):
+    assert main([_doc(ws, "print('a')\nx = 2\n", "print('b')\nx\n")]) == 0
+    out = capsys.readouterr()
+    assert out.out == "a\nb\n"  # no prose, no rendered value
+    assert out.err == ""
+
+
+def test_document_stops_at_the_first_failure(ws, capsys):
+    assert main([_doc(ws, "print('one')\n", "print('two')\ny = 1 / 0\n", "print('three')\n")]) == 1
+    out = capsys.readouterr()
+    assert out.out == "one\ntwo\n"  # the failed cell's print, then nothing after it
+    assert out.err.startswith("stepy: cell 3 (print('two')): ")
+    assert "ZeroDivisionError" in out.err
+
+
+def test_document_params_from_options(ws, capsys):
+    doc = _doc(ws, _block(params={"name": "world"}), "print('hello', params['name'])\n")
+    assert main([doc]) == 0
+    assert capsys.readouterr().out == "hello world\n"
+    assert main([doc, "--name", "you"]) == 0
+    assert capsys.readouterr().out == "hello you\n"
+    assert main([doc, "--nope", "x"]) == 2
+    assert "--nope" in capsys.readouterr().err
+
+
+def test_document_params_are_checked_against_the_literal(ws, capsys):
+    # Ruling P3: the literal may be in any code cell; [params] is checked against it.
+    block = '# /// intent\n# [params]\n# n = { type = "int", doc = "n" }\n# ///\nprint(1)\n'
+    doc = _doc(ws, block, "params = {'n': 'one'}\nprint(params['n'])\n")
+    assert main([doc]) == 2
+    out = capsys.readouterr()
+    assert out.out == "" and "'n'" in out.err and "int" in out.err
+
+
+_DOC_WRITE = "from pathlib import Path\nPath('out').mkdir(exist_ok=True)\nPath({!r}).write_text('x')\nprint('wrote')\n"
+
+
+def test_document_declared_writes_are_enforced(ws, capsys):
+    assert main([_doc(ws, _block(writes=["out/*.txt"]), _DOC_WRITE.format("out/a.txt"))]) == 0
+    assert capsys.readouterr().out == "wrote\n"
+    assert (ws / "out" / "a.txt").exists()
+    assert main([_doc(ws, _block(writes=["out/*.txt"]), _DOC_WRITE.format("out/b.md"))]) == 1
+    err = capsys.readouterr().err
+    # A refusal's text names the path and the globs, not the cell (E1: it is unchanged).
+    assert err.startswith("stepy: refused: ") and "out/b.md" in err and "out/*.txt" in err
+    assert not (ws / "out" / "b.md").exists()
+
+
+def test_document_with_no_block_may_write_nothing(ws, capsys):
+    assert main([_doc(ws, "from pathlib import Path\nPath('a.txt').write_text('x')\n")]) == 1
+    assert "a.txt" in capsys.readouterr().err
+    assert not (ws / "a.txt").exists()
+
+
+def test_document_timeout_is_per_cell_and_exits_124(ws, capsys):
+    doc = _doc(ws, "print('one')\n", "print('two')\n", "for i in iter(int, 1): pass\n",
+               "print('after')\n")
+    assert main([doc, "--timeout", "3"]) == 124
+    out = capsys.readouterr()
+    assert out.out == "one\ntwo\n"  # Task 5 review ruling: the earlier cells' prints, in order
+    assert out.err.startswith("stepy: cell 5 (for i in iter(int, 1): pass): timeout: ")
+    assert "the cell took longer than 3 s" in out.err
+
+
+def test_document_check_runs_nothing(ws, capsys):
+    assert main([_doc(ws, _block(writes=["out/*.txt"]), _DOC_WRITE.format("out/a.txt")),
+                 "--check"]) == 0
+    out = capsys.readouterr()
+    assert out.out == "" and out.err == ""
+    assert not (ws / "out").exists()
+
+
+def test_document_validation_error_exits_2_and_runs_nothing(ws, capsys):
+    assert main([_doc(ws, "print('hi')\n", "import os\n")]) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    # The validator's own text: "document cell 4 (line 11): Forbidden AST node: Import".
+    assert "import" in out.err.lower() and "line 11" in out.err
+
+
+def test_document_help_says_the_timeout_is_per_cell(ws, capsys):
+    assert main([_doc(ws, _block(params={"name": "world"}), "print(1)\n"), "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "--name str (default: 'world') a name" in out
+    assert "--timeout SECONDS is the time limit for each cell" in out
+    assert main([_doc(ws, "print('ran')\n", name="e.md"), "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "this document declares nothing, so it may write nothing" in out
+    assert "ran" not in out
+
+
+def _profiles(ws, default):
+    (ws / ".lackpy").mkdir()
+    (ws / ".lackpy" / "config.toml").write_text(
+        f'[profile]\ndefault = "{default}"\n\n'
+        '[profiles.ro]\npolicy = { read_only = true }\n\n[profiles.rw]\n')
+
+
+def test_document_profile_is_the_configured_default_run_as_literate(ws, capsys):
+    # As render --execute resolves it: the named profile, else the default, as literate.
+    _profiles(ws, "ro")
+    doc = _doc(ws, _block(writes=["out/*.txt"]), _DOC_WRITE.format("out/a.txt"))
+    assert main([doc]) == 1  # the read-only default refuses the write
+    capsys.readouterr()
+    assert not (ws / "out" / "a.txt").exists()
+    assert main([doc, "--profile", "rw"]) == 0
+    assert capsys.readouterr().out == "wrote\n"
+    assert main([doc, "--profile", "nope"]) == 2
+    assert "nope" in capsys.readouterr().err
+
+
+def test_render_execute_is_unchanged(ws, capsys):
+    # The shared profile helper must not change render --execute: it still
+    # prints the rendered document, prose included.
+    from lackpy.ctl import main as ctl_main
+    doc = ws / "r.md"
+    doc.write_text("# Title\n\n```lackpy\nprint('a')\nx = 6 * 7\n```\n\nX={x}\n")
+    assert ctl_main(["render", "--execute", str(doc)]) == 0
+    out = capsys.readouterr().out
+    assert "# Title" in out and "X=42" in out

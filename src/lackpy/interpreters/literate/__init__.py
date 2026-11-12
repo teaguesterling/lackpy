@@ -816,6 +816,28 @@ def _build_kernel(context: ExecutionContext) -> LightweightKernel:
 _SOURCE_CELLS = frozenset({"code", "hidden", "gather", "scratch"})
 
 
+def _code_trees(parsed: ParseResult) -> list[tuple[Cell, ast.Module]]:
+    """Each code cell of the document and its parsed tree, in order. A cell
+    that does not parse is left out: the kernel reports it when the cell runs."""
+    trees: list[tuple[Cell, ast.Module]] = []
+    for cell in parsed.cells:
+        if cell.cell_type == "prose":
+            continue
+        try:
+            trees.append((cell, ast.parse(compile_cell(cell))))
+        except (ValueError, SyntaxError):
+            continue
+    return trees
+
+
+def document_program(parsed: ParseResult) -> ast.Module:
+    """The document's code cells joined in order, as one program: the program
+    whose ``params`` literal the run replaces (:func:`_apply_document_params`)
+    and stepy checks against ``[params]`` (ruling P3, Task 9)."""
+    trees = _code_trees(parsed)
+    return ast.Module(body=[stmt for _, tree in trees for stmt in tree.body], type_ignores=[])
+
+
 def _apply_document_params(parsed: ParseResult, params: dict[str, Any]) -> str | None:
     """Replace the defaults of the document's ``params`` literal with ``params``.
 
@@ -831,14 +853,7 @@ def _apply_document_params(parsed: ParseResult, params: dict[str, Any]) -> str |
     """
     from ...run.runner import _apply_params, _params_literal
 
-    trees: list[tuple[Cell, ast.Module]] = []
-    for cell in parsed.cells:
-        if cell.cell_type == "prose":
-            continue
-        try:
-            trees.append((cell, ast.parse(compile_cell(cell))))
-        except (ValueError, SyntaxError):
-            continue  # the kernel reports the error when the cell runs
+    trees = _code_trees(parsed)
     program = ast.Module(body=[stmt for _, tree in trees for stmt in tree.body], type_ignores=[])
     literal = _params_literal(program)
     error = _apply_params(program, params)
