@@ -6,11 +6,14 @@ The block follows PEP 723: ``# /// intent`` ... ``# ///``, with TOML inside.
 from __future__ import annotations
 
 import ast
+import io
+import tokenize
 import tomllib
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .interpreters.literate.parser import parse as parse_document
+from .interpreters.literate import _SOURCE_CELLS
+from .interpreters.literate.parser import first_line, parse as parse_document
 from .run.runner import _params_literal
 
 _OPEN = "# /// intent"
@@ -63,11 +66,37 @@ def _leading_comments(source: str) -> list[str]:
     return lines
 
 
+def _late_marker(source: str, after: int) -> int | None:
+    """The line of the first ``# /// intent`` comment after line ``after``, or None.
+
+    Comments only, by the tokenizer: a marker inside a string does not count.
+    Source that does not tokenize gives None; its syntax error is reported
+    when it is validated.
+    """
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT and tok.start[0] > after \
+                    and tok.string.strip() == _OPEN:
+                return tok.start[0]
+    except (tokenize.TokenError, SyntaxError):
+        pass
+    return None
+
+
 def parse_intent(source: str) -> Intent | None:
-    """Parse the intent block in the leading comments of ``source``; None when there is none."""
+    """Parse the intent block in the leading comments of ``source``; None when there is none.
+
+    A marker comment after the leading comments is an ``IntentError`` (final
+    review 9): the block must be at the top, and is never silently ignored.
+    """
+    leading = _leading_comments(source)
+    late = _late_marker(source, len(leading))
+    if late is not None:
+        raise IntentError(f"intent block: the '# /// intent' marker at line {late} comes "
+                          "after code. Put the block at the top of the program, before any code.")
     blocks: list[list[str]] = []
     current: list[str] | None = None
-    for text in _leading_comments(source):
+    for text in leading:
         if current is None:
             if text == _OPEN:
                 current = []
@@ -129,11 +158,22 @@ def program_intent(program: str) -> Intent | None:
 
 
 def document_intent(document: str) -> Intent | None:
-    """The block in the first code cell of a document."""
-    for cell in parse_document(document).cells:
-        if cell.cell_type != "prose":
-            return program_intent(cell.content)
-    return None
+    """The block in the first code cell of a document.
+
+    A marker comment in a later cell of program text is an ``IntentError``
+    that names the cell (final review 9). The body of a ``@write`` cell is
+    file text, so a marker there does not count.
+    """
+    cells = parse_document(document).cells
+    first = next((i for i, cell in enumerate(cells) if cell.cell_type != "prose"), None)
+    if first is None:
+        return None
+    for index in range(first + 1, len(cells)):
+        cell = cells[index]
+        if cell.cell_type in _SOURCE_CELLS and _late_marker(cell.content, 0) is not None:
+            raise IntentError(f"intent block: the block is in cell {index} "
+                              f"({first_line(cell)}). Put it in the first code cell.")
+    return program_intent(cells[first].content)
 
 
 def _matches(declared: str, value: Any) -> bool:

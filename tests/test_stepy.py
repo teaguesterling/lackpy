@@ -125,6 +125,15 @@ def test_unknown_option_exits_2_and_runs_nothing(ws, capsys, args, named):
     assert out.err.startswith("stepy: ") and named in out.err
 
 
+def test_a_block_after_code_exits_2_and_runs_nothing(ws, capsys):
+    # Final review 9: a misplaced block fails loud; it is never read as "no block".
+    script = _script(ws, 'print("ran")\n# /// intent\n# writes = ["a.txt"]\n# ///\n')
+    assert main([script]) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert out.err.startswith("stepy: intent block: ") and "at the top" in out.err
+
+
 def test_wrong_type_exits_2(ws, capsys):
     assert main([_script(ws, _COUNT_TODOS), "--limit", "many"]) == 2
     out = capsys.readouterr()

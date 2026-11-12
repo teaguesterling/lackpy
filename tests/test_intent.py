@@ -52,8 +52,15 @@ def test_a_shebang_and_comments_may_come_before_the_block():
     assert program_intent(program).goal == "g"
 
 
-def test_code_before_the_block_hides_it_from_a_program():
-    assert program_intent("x = 1\n" + _block('goal = "g"')) is None
+def test_a_block_after_code_is_an_error():
+    # Final review 9: fail loud; the block is never silently ignored.
+    with pytest.raises(IntentError, match=r"line 2.*at the top of the program"):
+        program_intent("x = 1\n" + _block('goal = "g"'))
+
+
+def test_a_marker_comment_after_the_block_is_an_error():
+    with pytest.raises(IntentError, match="at the top"):
+        program_intent(_block('goal = "g"') + "x = 1\n    # /// intent\n")
 
 
 def test_an_unknown_key_is_named_in_the_error():
@@ -142,9 +149,24 @@ def test_the_block_in_the_first_code_cell_of_a_document_is_found():
     assert document_intent(document).goal == "doc"
 
 
-def test_a_block_in_the_second_cell_of_a_document_is_not_found():
-    document = "```lackpy\nx = 1\n```\n\n```lackpy\n" + _block('goal = "late"') + "```\n"
-    assert document_intent(document) is None
+def test_a_block_in_a_later_cell_of_a_document_is_an_error():
+    # Final review 9: the error names the cell and says where the block goes.
+    document = "```lackpy\nx = 1\n```\n\n```lackpy\n" + _block('goal = "late"') + "y = 2\n```\n"
+    with pytest.raises(IntentError, match=r"cell 1 \(y = 2\).*first code cell"):
+        document_intent(document)
+
+
+def test_a_block_after_code_in_the_first_cell_of_a_document_is_an_error():
+    document = "```lackpy\nx = 1\n" + _block('goal = "late"') + "```\n"
+    with pytest.raises(IntentError, match="at the top"):
+        document_intent(document)
+
+
+def test_a_marker_in_a_later_write_cell_body_is_not_a_block():
+    # A @write body is file text, not program text: it may hold a stepy program.
+    document = ("```lackpy\n" + _block('goal = "doc"') + "x = 1\n```\n\n"
+                "```lackpy @write(t.py)\n" + _block('goal = "inner"') + "```\n")
+    assert document_intent(document).goal == "doc"
 
 
 def _float_intent():
@@ -166,9 +188,10 @@ def test_a_marker_line_inside_a_string_is_not_a_block():
     assert program_intent(program) is None
 
 
-def test_a_marker_in_a_docstring_before_the_block_hides_nothing_and_counts_nothing():
+def test_a_marker_in_a_docstring_counts_nothing_and_a_block_after_it_is_an_error():
     program = '"""\n' + _block('goal = "x"') + '"""\n' + _block('goal = "g"')
-    assert program_intent(program) is None
+    with pytest.raises(IntentError, match="line 6"):  # the real marker, not the docstring's
+        program_intent(program)
 
 
 def test_a_non_literal_params_value_gets_its_own_message():
