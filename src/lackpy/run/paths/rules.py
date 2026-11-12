@@ -324,7 +324,7 @@ class PathPolicy:
                  for r in d["rules"]]
         return cls(Path(d["workspace"]), rules, [Path(p) for p in d["extra_dirs"]],
                    protected=[Path(p) for p in d["protected"]],
-                   write_globs=d.get("write_globs"))
+                   write_globs=d["write_globs"])  # no .get: a missing key fails loud
 
     def absolute(self, path: Path | str) -> Path:
         """``path`` joined to the workspace when relative, not normalized."""

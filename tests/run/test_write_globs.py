@@ -230,6 +230,14 @@ def test_from_data_checks_the_globs_again(ws):
         PathPolicy.from_data(data)
 
 
+def test_from_data_without_the_key_fails_loud(ws):
+    # A producer that drops the key must not turn "no writes" into "any write".
+    data = with_write_globs(PathPolicy(ws, []), []).to_data()
+    del data["write_globs"]
+    with pytest.raises(KeyError, match="write_globs"):
+        PathPolicy.from_data(data)
+
+
 def test_read_only_keeps_the_globs(ws):
     ro = read_only_policy(_policy(ws, ["out/*.txt"]))
     assert ro.write_globs == ("out/*.txt",)
