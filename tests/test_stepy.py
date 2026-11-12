@@ -173,6 +173,9 @@ def test_param_in_write_glob_is_filled_in(ws, capsys):
                     name="other.py")
     assert main([other, "--name", "r"]) == 1
     assert "out/r.txt" in capsys.readouterr().err
+    # Review Focus 3: a value cannot move the glob out (more values in the next test).
+    assert main([script, "--name", "../x"]) == 2
+    assert not (ws.parent / "x.txt").exists()
 
 
 @pytest.mark.parametrize("value", ["*", "a?", "[ab]", ".", "..", "../x", "a/../b", ""])
