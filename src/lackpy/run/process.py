@@ -774,6 +774,7 @@ class SessionChannel:
         """Read the session's messages until the document's result."""
         entries: list[TraceEntry] = []  # the session's trace, start entries left out
         cell: list[TraceEntry] = []  # the deepest cell's entries, start entries included
+        printed = _CellPrints()  # the deepest cell's print text (spec E11, final review 4)
         deadline = time.monotonic() + self.cell_timeout
         while True:
             try:
@@ -786,24 +787,28 @@ class SessionChannel:
                         entries.append(entry)
                 elif event == "code_start":
                     self._code_start(msg)
+                elif event == "stdout":
+                    printed.add(msg)
                 elif event == "cell_start":
                     deadline = time.monotonic() + self.cell_timeout
                     cell = []
+                    printed = _CellPrints()
                 elif event == "done":
                     self.finished = True
                     return self._result(msg["result"], entries)
                 elif event == "ended":
                     return self._failed(f"the session process ended without a result "
                                         f"({msg['how']})", entries)
-                elif event not in ("start", "stdout"):
+                elif event != "start":
                     raise _BadMessage(f"unknown event {event!r}")
             except TimeoutError:
-                if not self._timeout(cell, entries):
+                if not self._timeout(cell, entries, printed):
                     return self._failed(f"timeout: the document took longer than "
                                         f"{self.cell_timeout:g} s and was stopped",
                                         entries, error_phase="timeout")
                 deadline = time.monotonic() + self.cell_timeout
                 cell = []
+                printed = _CellPrints()
             except _HandoffStall:
                 self.close()
                 return self._failed(f"the session process did not reach its next cell within "
@@ -813,8 +818,14 @@ class SessionChannel:
                 return self._failed(f"the session process sent a message that is not valid ({e})",
                                     entries)
 
-    def _timeout(self, cell: list[TraceEntry], entries: list[TraceEntry]) -> bool:
-        """Stop the deepest process; tell its checkpoint. False when there is none."""
+    def _timeout(self, cell: list[TraceEntry], entries: list[TraceEntry],
+                 printed: "_CellPrints") -> bool:
+        """Stop the deepest process; tell its checkpoint. False when there is none.
+
+        The checkpoint gets the stopped cell's entries and what it printed
+        (``printed``, and what the drain reads), so the document's ``printed``
+        keeps the cell's own prints after the earlier cells' (spec E11).
+        """
         dead = self._stack.pop()
         _kill(dead.pidfd)
         # Its socket: what it sent before the kill, then EOF (a partial last line
@@ -835,6 +846,8 @@ class SessionChannel:
                         entries.append(entry)
                 elif msg.get("event") == "code_start":
                     self._code_start(msg)
+                elif msg.get("event") == "stdout":
+                    printed.add(msg)
         except (TimeoutError, wire.WireError, OSError, KeyError, TypeError, _BadMessage):
             pass
         dead.close()
@@ -848,9 +861,14 @@ class SessionChannel:
             self._protect = checkpoint.pid
         checkpoint.cell_ended = True
         checkpoint.wait_until = time.monotonic() + self.HANDOFF_SECONDS
+        op = {"op": "timeout", "seconds": self.cell_timeout,
+              "entries": [e.to_data() for e in cell], "printed": printed.text()}
         try:
-            self.send({"op": "timeout", "seconds": self.cell_timeout,
-                       "entries": [e.to_data() for e in cell]})
+            try:
+                self.send(op)
+            except wire.WireError:
+                # Too large for one line with the print text: send the entries alone.
+                self.send({**op, "printed": ""})
         except (wire.WireError, OSError):
             return False
         return True
@@ -906,6 +924,25 @@ class SessionChannel:
         while self._stack:
             self._stack.pop().close()
         self._ctl.close()
+
+
+class _CellPrints:
+    """One cell's ``stdout`` event text, up to ``STDOUT_CAP`` characters (spec E11)."""
+
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._size = 0
+
+    def add(self, msg: dict[str, Any]) -> None:
+        text = msg.get("text")
+        if type(text) is not str:
+            raise _BadMessage("stdout text must be str")
+        text = text[:STDOUT_CAP - self._size]
+        self._parts.append(text)
+        self._size += len(text)
+
+    def text(self) -> str:
+        return "".join(self._parts)
 
 
 def _trace(entries: list[TraceEntry]) -> Trace:

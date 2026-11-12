@@ -106,14 +106,31 @@ class CellSession:
     """One literate document's namespace, and its program."""
 
     def __init__(self, *, path_policy: PathPolicy | None, trace: Trace | None = None,
-                 program_file: str | None = None, extra_rules: list | None = None) -> None:
+                 program_file: str | None = None, extra_rules: list | None = None,
+                 print_listener: Callable[[str], None] | None = None) -> None:
+        """``print_listener`` gets the text of each ``print()`` call that a cell's
+        code makes, as it happens (not a prose expression's): the session worker
+        streams it, so a cell stopped at the limit keeps what it printed (spec
+        E11, final review 4)."""
         self.trace = trace if trace is not None else Trace()
         # The caller's extra rules (``validate(extra_rules=...)``): every cell and
         # every expression is validated with them, as part of the whole program
         # (final review I3).
         self._extra_rules = list(extra_rules) if extra_rules else None
         self._path_policy = path_policy
-        self._captured, print_fn = make_print_capture()
+        self._captured, capture = make_print_capture()
+        captured = self._captured
+        # The listener while a cell runs (``run_cell``), else empty.
+        self._print_sink: list[Callable[[str], None]] = []
+        self._print_listener = print_listener
+        sink = self._print_sink
+
+        def streaming_print(*args: Any, **kwargs: Any) -> None:
+            capture(*args, **kwargs)
+            for listener in sink:
+                listener(captured[-1])
+
+        print_fn = capture if print_listener is None else streaming_print
         self._namespace = build_namespace(program_file=program_file, path_policy=path_policy,
                                           print_fn=print_fn, trace=self.trace)
         self._runtime_names = frozenset(self._namespace)
@@ -189,10 +206,14 @@ class CellSession:
         if self._refusal is not None:
             return self._closed(cell_id)
         self._captured.clear()
+        if self._print_listener is not None:
+            self._print_sink.append(self._print_listener)
         try:
             return self._run_cell(cell_id, source)
         except RUNTIME_FAILURES as e:  # never let a refusal (or a host fault) escape
             return self._failure(cell_id, e)
+        finally:
+            self._print_sink.clear()
 
     def check_cell(self, source: str, *, label: str | None = None) -> list[Violation]:
         """Validate ``source`` as an extension of the program, without running it.

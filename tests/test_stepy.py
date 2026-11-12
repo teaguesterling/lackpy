@@ -466,6 +466,16 @@ def test_document_timeout_is_per_cell_and_exits_124(ws, capsys):
     assert "the cell took longer than 3 s" in out.err
 
 
+def test_document_timeout_keeps_the_timed_out_cells_own_prints(ws, capsys):
+    # Final review 4 (spec E11): what the failed cell printed before it failed, in order.
+    doc = _doc(ws, "print('before')\n", "print('partial')\nfor i in iter(int, 1): pass\n",
+               "print('after')\n")
+    assert main([doc, "--timeout", "2"]) == 124
+    out = capsys.readouterr()
+    assert out.out == "before\npartial\n"
+    assert out.err.startswith("stepy: cell 3 (print('partial')): timeout: "), out.err
+
+
 def test_document_check_runs_nothing(ws, capsys):
     assert main([_doc(ws, _block(writes=["out/*.txt"]), _DOC_WRITE.format("out/a.txt")),
                  "--check"]) == 0

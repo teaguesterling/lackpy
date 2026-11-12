@@ -37,6 +37,7 @@ reads its instruction from its own socket. So:
 
 Messages, worker to parent, on a process's own socket: ``start`` (the root
 only), ``trace`` (each entry as it happens, start entries included),
+``stdout`` (a cell's print text as it happens),
 ``code_start`` (``index``: the cell's code begins to run, spec E4),
 ``cell_end`` (this process's output for its cell is complete; the
 ``cell_start`` for the next cell follows on the shared channel, or ``done`` on
@@ -45,7 +46,8 @@ from there each host step has its own short bound.
 On the shared channel: ``{"event": "cell_start", "index", "pid", "from"}``.
 
 Messages, parent to worker: ``submit`` to the root; to a woken checkpoint,
-``{"op": "timeout", "seconds", "entries"}`` (the stopped cell's streamed entries)
+``{"op": "timeout", "seconds", "entries", "printed"}`` (the stopped cell's
+streamed entries and print text)
 or ``{"op": "resume", "document"}`` (Task 7). At EOF a checkpoint exits, and
 so does a waiting one when the zygote is gone (``_Hook`` has the lifetime rule).
 
@@ -93,6 +95,8 @@ class Resume:
     document: str | None = None
     seconds: float = 0.0
     entries: tuple[TraceEntry, ...] = ()
+    #: For ``"timeout"``: what the stopped cell printed before it was stopped.
+    printed: str = ""
 
 
 def _failed(error: str) -> dict[str, Any]:
@@ -241,9 +245,10 @@ class _Hook:
             os._exit(0)  # the session is closed
         op = msg.get("op")
         try:
-            if op == "timeout":
+            if op == "timeout" and type(msg.get("printed", "")) is str:
                 return Resume("timeout", seconds=float(msg["seconds"]),
-                              entries=tuple(TraceEntry.from_data(d) for d in msg["entries"]))
+                              entries=tuple(TraceEntry.from_data(d) for d in msg["entries"]),
+                              printed=msg.get("printed", ""))
             if op == "resume" and isinstance(msg.get("document"), str):
                 return Resume("resume", document=msg["document"])
         except (KeyError, TypeError, ValueError):
@@ -294,6 +299,9 @@ def _submit(channel: Any, ctl: socket.socket, msg: dict[str, Any], test_ops: boo
     if rules:
         config["extra_rules"] = rules
     config["trace_listener"] = channel.trace
+    # Spec E11 (final review 4): a cell's prints stream as they happen, so a
+    # cell stopped at the limit keeps what it printed.
+    config["print_listener"] = channel.stdout
     config["checkpoint"] = _Hook(channel, ctl, exit_at, float(handoff_delay))
     # The end of a cell's run when no hook follows it (the last cell, a re-run):
     # what comes after is host code, not that cell's time (fix round 1).

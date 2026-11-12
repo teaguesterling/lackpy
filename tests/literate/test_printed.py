@@ -149,6 +149,26 @@ def test_printed_keeps_the_cells_before_a_timeout(tmp_path, home):
 
 
 @needs_linux
+def test_printed_keeps_the_timed_out_cells_own_prints(tmp_path, home):
+    """Final review 4 (spec E11): the stopped cell's prints follow the earlier cells'."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    doc = ('```lackpy\nprint("before")\n```\n\n'
+           '```lackpy\nprint("partial"); print("more", end="")\nfor i in iter(int, 1): pass\n```\n\n'
+           '```lackpy\nprint("after")\n```\n')
+    runner = ProcessRunner()
+    run = LiterateRun(runner, workspace=ws, profile_name="lit", cell_timeout=2.0,
+                      path_policy=load_policy(ws, home=home, managed=None))
+    try:
+        result = run.submit(doc, None)
+    finally:
+        run.close()
+        runner.close()
+    assert result.error_phase == "timeout", result
+    assert result.printed == "before\npartial\nmore"
+
+
+@needs_linux
 def test_printed_on_a_resume_keeps_the_earlier_cells_prints(tmp_path, home):
     """Final review 8: a resume's ``printed`` holds what the cells before the resume point
     printed in the earlier submit (the checkpoint kept it), then the resumed cells' prints."""

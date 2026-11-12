@@ -301,6 +301,9 @@ class LiterateInterpreter:
                 # runs code. The document stops there.
                 note = _record_timeout(cell, index, pending_timeout, kernel, ledger)
                 output_parts.append(kernel_note(note) + "\n")
+                # Spec E11 (final review 4): what the stopped cell printed, after
+                # the earlier cells' prints.
+                printed_parts.append(getattr(pending_timeout, "printed", ""))
                 failure = (index, note)
                 break
 
@@ -803,8 +806,11 @@ def _build_kernel(context: ExecutionContext) -> LightweightKernel:
     # In the session worker, ``config["trace_listener"]`` streams each Path
     # call to the parent as it happens (Plan 3 D4, Task 6).
     trace = Trace(listener=config.get("trace_listener"))
+    # ``config["print_listener"]`` streams each cell's prints the same way
+    # (spec E11, final review 4).
     session = CellSession(path_policy=config.get("path_policy"),
-                          extra_rules=config.get("extra_rules"), trace=trace)
+                          extra_rules=config.get("extra_rules"), trace=trace,
+                          print_listener=config.get("print_listener"))
     return LightweightKernel(
         session,
         display_threshold=config.get("display_threshold", DEFAULT_DISPLAY_THRESHOLD),
