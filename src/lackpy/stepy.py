@@ -180,15 +180,32 @@ def _source(argv: list[str]) -> tuple[str, str, list[str]]:
                      f"not a file with the extension {path.suffix or '(none)'!r}.")
     if not path.is_file():
         raise _Usage(f"{path}: the file does not exist.")
-    return str(path), path.read_text(), argv[1:]
+    try:
+        program = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise _Usage(f"{path}: the file cannot be read (stepy reads UTF-8 text): {e}.") from None
+    return str(path), program, argv[1:]
 
 
 def _prepare(service: Any, intent: Intent, program: str, args: _Args) -> tuple[dict, list[str]]:
-    """The checks before a run, shared with ``--check``: the program, then the declared writes.
+    """The checks before a run, shared with ``--check``: the workspace, the profile
+    and ``--timeout``, the program, then the declared writes.
 
     Returns the final parameter values and the declared writes. Raises ``_Usage``.
+    A policy that cannot be loaded (a malformed settings file) is not checked
+    here: the run reports it, and exits 1, as ``lackpy`` does.
     """
+    from .profiles import ProfileError
     from .service import validation_error
+    if args.workspace is not None and not args.workspace.is_dir():
+        raise _Usage(f"--workspace {args.workspace}: it is not a directory.")
+    try:
+        rp = service._resolve_profile(args.profile)
+    except (ProfileError, ValueError) as e:
+        raise _Usage(str(e)) from None
+    _, refusal = service._check_timeout(args.timeout, rp, args.profile)  # the run's own rule
+    if refusal is not None:
+        raise _Usage(f"--timeout: {refusal}.")
     validation = service.validate(program, profile=args.profile)
     if not validation.valid:
         raise _Usage(validation_error(validation))

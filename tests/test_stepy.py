@@ -211,7 +211,58 @@ def test_a_placeholder_that_names_no_param_exits_2(ws, capsys):
 
 def test_timeout_exits_124(ws, capsys):
     assert main([_script(ws, "for i in iter(int, 1):\n    pass\n"), "--timeout", "0.5"]) == 124
-    assert capsys.readouterr().err.startswith("stepy: ")
+    err = capsys.readouterr().err
+    # The service's text: "timeout: the run took longer than 0.5 s and was stopped".
+    assert err.startswith("stepy: timeout: ") and "took longer than 0.5 s" in err
+
+
+_PRINT_AND_WRITE = _writer(["out/*.txt"], "'out/a.txt'")
+
+
+@pytest.mark.parametrize("check", [False, True], ids=["run", "check"])
+@pytest.mark.parametrize("args,named", [
+    (["--timeout", "100000"], "max_timeout"),   # over the profile's cap
+    (["--timeout", "0"], "timeout"),
+    (["--timeout", "nan"], "timeout"),
+    (["--workspace", "/nonexistent"], "/nonexistent"),
+    (["--profile", "nope"], "nope"),
+])
+def test_a_bad_own_option_exits_2_and_runs_nothing(ws, capsys, args, named, check):
+    # Fix round 1: --check and a run make the same pre-run checks.
+    assert main([_script(ws, _PRINT_AND_WRITE), *args, *(["--check"] if check else [])]) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert out.err.startswith("stepy: ") and named in out.err
+    assert not (ws / "out").exists()
+
+
+@pytest.mark.parametrize("check", [False, True], ids=["run", "check"])
+def test_a_float_param_with_an_int_default_exits_2(ws, capsys, check):
+    script = _script(ws, '# /// intent\n# [params]\n# ratio = { type = "float", doc = "r" }\n'
+                         '# ///\nparams = {"ratio": 1}\nprint(params["ratio"])\n')
+    assert main([script, "--ratio", "0.5", *(["--check"] if check else [])]) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert "ratio" in out.err and "float" in out.err
+
+
+def test_a_policy_that_cannot_be_loaded_fails_the_run(ws, capsys):
+    # _prepare leaves this to the run: exit 1 with the settings error (fix round 1).
+    (ws / ".claude").mkdir()
+    (ws / ".claude" / "settings.json").write_text("{not json")
+    assert main([_script(ws, "print('hi')\n")]) == 1
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert out.err.startswith("stepy: ") and "settings.json" in out.err
+
+
+def test_a_file_that_is_not_utf8_exits_2(ws, capsys):
+    path = ws / "bad.py"
+    path.write_bytes(b"print('\xff\xfe')\n")
+    assert main([str(path)]) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert out.err.startswith("stepy: ") and "bad.py" in out.err
 
 
 def test_a_failure_prints_what_ran_then_the_error(ws, capsys):
