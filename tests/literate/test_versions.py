@@ -88,6 +88,7 @@ class TestReassertionVersioning:
         assert result.ok
         assert not round_is_left(session.ledger.entries())
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_hole_then_definition_is_versioned_supersede(self, context):
         # L1.1 composition: "redefinition fills a hole" is a versioned
@@ -133,6 +134,7 @@ class TestReassertionVersioning:
             (e.detail["from_version"], e.detail["to_version"]) for e in entries
         ] == [(1, 2)]
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_chained_hole_supersedes_real_value(self, context):
         # A blocked cell re-binding an existing REAL name to a chained hole is
@@ -147,6 +149,7 @@ class TestReassertionVersioning:
         entries = session.ledger.query(entry_type=SUPERSEDED, name="x")
         assert len(entries) == 1 and entries[0].detail["prior"] == "value"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_error_value_reassertion_and_partial_binding_versioned(
         self, context

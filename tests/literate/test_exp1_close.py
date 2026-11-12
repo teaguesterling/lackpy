@@ -29,7 +29,6 @@ import pytest
 
 from lackpy.interpreters.base import ExecutionContext
 from lackpy.interpreters.literate import LiterateSession
-from lackpy.interpreters.literate.kernel.forgiveness import is_forgiving
 from lackpy.interpreters.literate.parser import parse
 
 
@@ -195,12 +194,13 @@ class TestRoundTripRegression:
         assert "undefined_thing" in code_cells[0].content
 
         # Re-run the reparsed render in a FRESH session: the annotations bound
-        # nothing — the only forgiving values come from the authored cell, and
-        # the unbound name stays a hole (not resurrected by any note repr).
+        # nothing, and the authored cell fails again on the unbound name (spec
+        # E1: a failure binds nothing).
         session2 = LiterateSession(context)
-        await session2.step(doc)
-        assert is_forgiving(session2._kernel.lookup("undefined_thing"))
-        assert is_forgiving(session2._kernel.lookup("out"))
+        r2 = await session2.step(doc)
+        assert not r2.ok
+        assert session2._kernel.lookup("undefined_thing") is None
+        assert session2._kernel.lookup("out") is None
 
     def test_forgiveness_repr_literal_does_not_bind(self):
         # L2's refusal law, re-verified for the ledger surface: a display repr
@@ -216,6 +216,7 @@ class TestComposeWithL1:
     """A hole in round 1 filled in round 2 shows the supersede correctly in the
     fed-back doc — not a stacked/stale hole annotation."""
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_hole_filled_next_round_shows_supersede_not_stacked_hole(
         self, context

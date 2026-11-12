@@ -362,8 +362,8 @@ class TestIdentityThreading:
 DOC_ALL_KINDS = (
     "```lackpy\nx = 1\n```\n\n"      # real value
     "```lackpy\nx = 2\n```\n\n"      # re-assertion → supersession
-    "```lackpy\ny = missing\n```\n\n"  # origin hole + chained hole
-    "```lackpy\nz = 1 / 0\n```"      # runtime error → ErrorValue
+    "```lackpy\ny = missing\n```\n\n"  # unbound name → failure, the document stops
+    "```lackpy\nz = 1 / 0\n```"      # never runs (spec E1)
 )
 
 
@@ -430,21 +430,22 @@ class TestDictBackendAcceptance:
             context, session_id="S1", document_id="D1", persistence=backend
         )
         result = await session.step(DOC_ALL_KINDS)
-        assert not result.ok  # holes + error reified → aggregate Left
+        assert not result.ok  # the unbound name is a failure → Left
 
         # (1) Every ledger row reached the backend, in order, serialized.
         assert backend.entries == [
             ledger_entry_to_dict(e) for e in session.ledger.entries()
         ]
         recorded_types = {e["entry_type"] for e in backend.entries}
-        assert {"executed", "hole_opened", "error_reified", "superseded"} <= (
-            recorded_types
-        )
+        assert {"executed", "hole_opened", "superseded"} <= recorded_types
+        # Spec E1: the document stopped at the unbound name, so the cell
+        # after it never ran.
+        assert "error_reified" not in recorded_types
 
         # (2) The backend's upsert view matches the in-memory history exactly.
         table = session.versions
         persisted = backend.binding_table()
-        assert table.names()  # x, y, z, missing (+ any kernel-asserted names)
+        assert table.names()  # x (+ any kernel-asserted names)
         for name in table.names():
             for version in table.history(name):
                 key = (name, version.version)
@@ -455,8 +456,8 @@ class TestDictBackendAcceptance:
         # (4) The interesting kinds all made it through, marked correctly.
         kinds = {(b["name"], b["kind"]) for b in backend.bindings}
         assert ("x", "value") in kinds
-        assert ("z", "error") in kinds
-        assert any(kind == "hole" for _, kind in kinds)
+        # A failure binds nothing (spec E1): only values are versioned.
+        assert {kind for _, kind in kinds} == {"value"}
         # Supersession is visible in the persisted view: x v1 → superseded by 2.
         assert persisted[("x", 1)]["superseded_by"] == 2
         assert persisted[("x", 2)]["superseded_by"] is None

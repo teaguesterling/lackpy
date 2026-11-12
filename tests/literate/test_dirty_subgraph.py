@@ -91,6 +91,7 @@ class TestDependencyGraphUnit:
 class TestDirtySubgraphReexecution:
     """L1.4 acceptance — the execution path re-runs only the dependents."""
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_heal_reexecutes_only_dependents(self, context):
         # Teague's C1 decision: only a heal re-runs. B uses A while A is an
@@ -121,6 +122,7 @@ class TestDirtySubgraphReexecution:
         assert result.metadata["variables"]["c"] == 99
         assert versions.history("c") and len(versions.history("c")) == 1
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_dirty_subgraph_transitive(self, context):
         # A -> B -> C chain; a sibling D off A's path.  A heals (C1) → B and C
@@ -163,6 +165,7 @@ class TestDirtySubgraphReexecution:
         assert len(result.metadata["versions"].history("b")) == 1
         assert result.metadata["variables"]["b"] == 50
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_dirty_reexec_composes_with_forgiveness(self, context):
         # A dependent re-run by a heal that hits ANOTHER unresolved name
@@ -199,6 +202,7 @@ class TestDirtySubgraphReexecution:
         # The re-exec reification is ledgered (a hole_opened for derived).
         assert ledger.query(entry_type="hole_opened", name="derived")
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_reexec_into_runtime_error_is_ledgered_not_crash(self, context):
         # A dependent whose re-exec now RAISES is LEDGERED as a failure rather
@@ -239,6 +243,7 @@ class TestDirtySubgraphReexecution:
         assert q_hist[0].superseded_by == q_hist[1].version
         assert ledger.query(entry_type="superseded", name="q")
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_effectful_dependent_is_dirtied_but_not_reexecuted(
         self, tmp_path, tmp_home
@@ -270,6 +275,7 @@ class TestDirtySubgraphReexecution:
         assert (tmp_path / "a.txt").exists()
         assert not (tmp_path / "b.txt").exists()
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_ceiling_refused_dependent_stays_refused_on_reexec(
         self, tmp_path, tmp_home
@@ -309,6 +315,7 @@ class TestDirtySubgraphReexecution:
         assert len(w_hist) == 1
         assert isinstance(w_hist[0].value, Unavailable)
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_ceiling_refused_stays_refused_in_permissive_mode(
         self, tmp_path, tmp_home
@@ -339,6 +346,7 @@ class TestDirtySubgraphReexecution:
         assert dirty[0].detail["reexecuted"] is False
         assert "effect ceiling" in dirty[0].detail["reason"]
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_hole_skipped_dependent_reruns_when_hole_fills(self, context):
         # CONTRAST with the ceiling case: a cell skipped because a referenced
@@ -361,6 +369,7 @@ class TestDirtySubgraphReexecution:
         assert isinstance(y_hist[0].value, Hole)
         assert y_hist[-1].value == 6
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_session_reexec_within_round(self, context):
         # The session path shares _run_document, so dirty re-exec works there
@@ -378,6 +387,7 @@ class TestReexecutionThroughTheSession:
     """Literate stepy Task 2: a dirty dependent re-runs its validated code with
     ``CellSession.rerun_cell``; the rebind that dirtied it is a new cell."""
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_rerun_does_not_append_to_the_program(self, context):
         # C1: b's cell joined the program and failed at runtime; a becomes an
@@ -389,6 +399,7 @@ class TestReexecutionThroughTheSession:
         assert session._kernel.get_namespace()["b"] == 0.5
         assert session._kernel.session._program == "a = 0\nb = 1 / a\na = 1 // 0\na = 2"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_refusal_during_reexecution_stops_the_document(
             self, tmp_path, tmp_home):
@@ -415,6 +426,7 @@ class TestNonDataBindingsAreTrackedByName:
     """Review I2: a binding to a non-data value (a def, a Path) supersedes and
     dirties by name; a hole it fills heals."""
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_hole_filled_by_a_def_heals(self, context):
         session = LiterateSession(context)
@@ -428,6 +440,7 @@ class TestNonDataBindingsAreTrackedByName:
         later = await session.step("Later y={y}\n")
         assert later.ok and "Later y=2" in later.clean_doc
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_hole_filled_by_a_path_heals(self, tmp_path, tmp_home):
         context = ExecutionContext(base_dir=tmp_path, config={
@@ -495,6 +508,7 @@ class TestPlainRebindDoesNotReexecute:
         assert result.metadata["variables"]["b"] == 2  # python3: b = 2
         assert _dirty(result.metadata["ledger"]) == []
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_heal_still_reruns_the_blocked_reader_but_not_a_reader_that_ran(self, context):
         # x heals (hole -> 5); cell 0 was blocked on it and re-runs. z read the

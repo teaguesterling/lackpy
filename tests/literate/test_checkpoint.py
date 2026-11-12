@@ -148,17 +148,20 @@ def _wait_gone(pids, bound=5.0) -> list[int]:
     return alive
 
 
-def test_cell_timeout_does_not_end_document(env):
+def test_cell_timeout_ends_the_document(env):
+    """Spec E1: a timeout is a failure, and the document stops at that cell."""
     doc = _doc("a = 1", LOOP, "b = a + 1", prose="B={b}")
     start = time.monotonic()
     r = _run(env, doc, timeout=1.0)
     elapsed = time.monotonic() - start
     assert r.error_phase == "timeout", r
     assert r.success is False
-    assert "B=2" in r.stdout, r.stdout
+    assert "B=2" not in r.stdout, r.stdout
     n = _cell_number(doc, LOOP)
-    assert f"timeout: cell {n} took longer than 1 s and was stopped" in r.stdout
-    assert r.variables.get("b") == 2
+    assert "timeout: the cell took longer than 1 s and was stopped" in r.stdout
+    assert r.error.startswith(f"cell {n - 1} (import re): timeout: the cell took longer"), r.error
+    assert "b" not in r.variables
+    assert r.variables.get("a") == 1
     assert elapsed < 6, elapsed
 
 
@@ -168,12 +171,11 @@ def test_timeout_names_written_file(env):
     doc = _doc("a = 1", cell, "b = a + 1", prose="B={b}")
     r = _run(env, doc, timeout=1.0)
     assert r.error_phase == "timeout", r
-    n = _cell_number(doc, cell)
-    assert (f"timeout: cell {n} took longer than 1 s and was stopped; "
-            f"it wrote out.json before it was stopped") in r.stdout, r.stdout
+    assert ("timeout: the cell took longer than 1 s and was stopped; "
+            "it wrote out.json before it was stopped") in r.stdout, r.stdout
     assert "out.json" in r.trace.files_modified
     assert (env["ws"] / "out.json").read_text() == "{}"
-    assert "B=2" in r.stdout
+    assert "B=2" not in r.stdout
 
 
 def test_write_started_not_confirmed(env, runner):
@@ -192,10 +194,9 @@ def test_write_started_not_confirmed(env, runner):
     finally:
         chan.close()
     assert r.error_phase == "timeout", r
-    n = _cell_number(doc, cell)
-    assert (f"timeout: cell {n} took longer than 1 s and was stopped; it wrote "
-            f"big.txt (write started, not confirmed) before it was stopped") in r.stdout, r.stdout
-    assert "B=2" in r.stdout
+    assert ("timeout: the cell took longer than 1 s and was stopped; it wrote "
+            "big.txt (write started, not confirmed) before it was stopped") in r.stdout, r.stdout
+    assert "B=2" not in r.stdout
 
 
 def test_refusal_still_latches(env):
@@ -267,7 +268,6 @@ def test_zygote_death_leaves_no_process(env, runner):
 
 from lackpy.interpreters.base import ExecutionContext  # noqa: E402
 from lackpy.interpreters.literate import LiterateInterpreter  # noqa: E402
-from lackpy.interpreters.literate.kernel.forgiveness import Hole  # noqa: E402
 from lackpy.run.session_worker import Resume  # noqa: E402
 from lackpy.run.trace import TraceEntry  # noqa: E402
 
@@ -277,8 +277,8 @@ def _execute(doc, checkpoint):
     return asyncio.run(LiterateInterpreter().execute(doc, ctx))
 
 
-def test_hook_timeout_reifies_the_cell_as_holes():
-    """A "timeout" Resume: the cell does not run, its names are holes, a later reader is blocked."""
+def test_hook_timeout_stops_the_document_at_the_cell():
+    """A "timeout" Resume: the cell does not run, binds nothing, and the document stops (E1)."""
     doc = _doc("a = 1", "x = a * 2", "c = x + 1", "d = a + 1", prose="D={d}")
     target = _cell_number(doc, "x = a * 2") - 1
     calls = []
@@ -294,15 +294,18 @@ def test_hook_timeout_reifies_the_cell_as_holes():
     r = _execute(doc, checkpoint)
     assert r.success is False
     assert r.metadata["error_phase"] == "timeout"
-    assert (f"timeout: cell {target + 1} took longer than 2.5 s and was stopped; "
-            f"it wrote w.txt before it was stopped") in r.output
-    assert "D=2" in r.output
-    assert r.metadata["variables"]["x"] == Hole("x")
+    note = ("timeout: the cell took longer than 2.5 s and was stopped; "
+            "it wrote w.txt before it was stopped")
+    assert note in r.output
+    assert r.error == f"cell {target} (x = a * 2): {note}"
+    assert "D=2" not in r.output
+    assert r.metadata["variables"] == {"a": 1}
     assert any(e.entry_type == "timed_out" for e in r.metadata["ledger"].entries())
-    assert any(e.entry_type == "hole_opened" and e.name == "c" for e in r.metadata["ledger"].entries())
+    assert not any(e.entry_type == "hole_opened" for e in r.metadata["ledger"].entries())
     # The stopped cell's entries join the document's trace.
     assert [e.tool for e in r.metadata["trace"].entries] == ["Path.write_text"]
-    assert calls == list(range(len(parse(doc).cells)))
+    # No cell after the stopped one takes a checkpoint: none of them runs.
+    assert calls == list(range(target + 1))
 
 
 def test_hook_resume_continues_over_the_new_document():
@@ -340,10 +343,11 @@ def test_partial_message_from_a_stopped_cell_is_dropped(env, runner):
         r = chan.submit(doc, params=None)
     finally:
         chan.close()
+    # The result still arrives whole, so the partial line was dropped.
     assert r.error_phase == "timeout", r
     assert "p.txt (write started, not confirmed)" in r.stdout
-    assert "B=2" in r.stdout
-    assert r.variables.get("b") == 2
+    assert "B=2" not in r.stdout
+    assert r.variables.get("a") == 1
 
 
 def test_test_hooks_need_test_ops(env):
@@ -364,6 +368,7 @@ def test_test_hooks_need_test_ops(env):
     assert (env["ws"] / "t.txt").read_text() == "x"
 
 
+@pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
 def test_hook_forks_each_dirty_rerun_too():
     """The re-exec pass calls the hook before each re-run, so a re-run is under the limit too."""
     doc = _doc("y = x + 1", "x = 1", prose="Y={y}")
@@ -429,15 +434,17 @@ def test_channel_events_send_and_kill(env, runner):
 
 @pytest.mark.parametrize("entry", ["run_program", "delegate", "mcp.run_program",
                                    "lackpyctl render --execute"])
-def test_every_entry_point_stops_a_cell_and_goes_on(env, monkeypatch, capsys, entry):
-    """D9: each literate route runs in the session worker, with the limit on each cell."""
+def test_every_entry_point_stops_the_document_at_a_cell_timeout(env, monkeypatch, capsys, entry):
+    """D9: each literate route runs in the session worker, with the limit on each cell.
+
+    Spec E1: on every route, the document stops at the cell that timed out."""
     from lackpy import service as service_module
 
     (env["ws"] / ".lackpy").mkdir()
     (env["ws"] / ".lackpy" / "config.toml").write_text('[profiles.lit]\nexecution = "literate"\n')
     monkeypatch.setattr(service_module, "load_policy", env["loader"])
     doc = _doc("a = 1", LOOP, "b = a + 1", prose="B={b}")
-    note = f"timeout: cell {_cell_number(doc, LOOP)} took longer than 1 s and was stopped"
+    note = "timeout: the cell took longer than 1 s and was stopped"
     service = LackpyService(workspace=env["ws"], path_policy_loader=env["loader"])
     start = time.monotonic()
     if entry == "run_program":
@@ -467,7 +474,7 @@ def test_every_entry_point_stops_a_cell_and_goes_on(env, monkeypatch, capsys, en
     if entry != "lackpyctl render --execute":
         assert phase == "timeout"
     assert note in text, text
-    assert "B=2" in text
+    assert "B=2" not in text
 
 
 # --- fix round 1 ---------------------------------------------------------------
@@ -647,4 +654,4 @@ def test_a_cell_that_streams_trace_entries_still_times_out(env, runner):
     assert elapsed < 2.0, elapsed
     reads = [e for e in r.trace.entries if e.tool == "Path.read_text"]
     assert len(reads) > 100, len(reads)  # the loop really streamed entries
-    assert "B=2" in r.stdout
+    assert "B=2" not in r.stdout

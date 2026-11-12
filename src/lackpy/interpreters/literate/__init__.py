@@ -8,7 +8,8 @@ the cell through the document's CellSession (lackpy.run.cells): each
 cell is validated as an extension of the program so far and runs in the
 restricted namespace. Prose is rendered from text and expression
 segments, each expression evaluated in the session. Captured stdout IS
-the rendered document. A refusal ends the document (design D4).
+the rendered document. A refusal ends the document (design D4), and so
+does the first failure (spec E1).
 
 This module owns the batch execution path (LiterateInterpreter.execute).
 The streaming path uses kernel.StreamingDriver instead — it adds
@@ -163,11 +164,12 @@ class LiterateInterpreter:
         ``executed`` / ``continue_requested`` on success, ``hole_opened`` /
         ``error_reified`` when a failure is reified (nothing silent).
 
-        Forgiveness (two-layer contract, conflict #2 option (c)): a cell whose
-        names cannot resolve binds typed holes and is skipped; the aggregate
-        Either for the run is DERIVED from the ledger at the end — ``success``
-        is False iff any failure was reified, while the rendered output,
-        namespace bindings, and file writes all stand.
+        Failure (spec E1): the run stops at its first failure (an exception,
+        an unbound name, the ceiling gate, a timeout, or a prose expression
+        that raises). The failure is ledgered and binds nothing; later cells
+        do not run. ``success`` is False, and ``error`` is ``cell {index}
+        ({first line}): {cause}``. The output and bindings from before the
+        failed cell stand.
 
         ``versions`` is the L1.3 binding version history (ground rule 3:
         bindings are immutable versions).  Every name a cell binds — a real
@@ -262,6 +264,8 @@ class LiterateInterpreter:
         cell_ids: dict[int, int | None] = {}
         # D4: the text of the refusal that ended this run, if one did.
         refusal: str | None = None
+        # Spec E1: the index and cause of the failure that ended this run.
+        failure: tuple[int, str] | None = None
         # Each cell's latest value, for the cells whose latest run succeeded.
         values: dict[int, Any] = {}
 
@@ -335,30 +339,27 @@ class LiterateInterpreter:
                 timed_out = True
                 pending_timeout = resume
             if pending_timeout is not None and not runs_no_code(cell):
-                values.pop(index, None)
-                output_parts.append(_reify_timeout_for_cell(
-                    cell, index, pending_timeout, kernel, ledger, versions, assigned_names,
-                    observed_effects,
-                ))
-                pending_timeout = None
-                index += 1
-                continue
+                # Spec E1: a timeout is a failure of the segment's one cell that
+                # runs code. The document stops there.
+                note = _record_timeout(cell, index, pending_timeout, kernel, ledger,
+                                       observed_effects)
+                output_parts.append(kernel_note(note) + "\n")
+                failure = (index, note)
+                break
 
-            # Unavailable-source reification (L1.5, binding layer): a cell the
-            # ceiling gate refuses binds Unavailable values for the names it
-            # would have bound, is ledgered (`source_unavailable`), and is
-            # SKIPPED — never executed, so the refused effect never happens.
+            # The ceiling gate (L1.5): a cell over the ceiling is a failure. It
+            # is ledgered (`source_unavailable`) and never executed, so the
+            # refused effect never happens, and the document stops (spec E1).
             # Gate-first: the refusal is about the cell's required effects,
             # independent of whether its names would resolve.
             if index in gate_violations and kernel.refusal is None:
-                output_parts.append(
-                    _reify_unavailable_for_cell(
-                        cell, index, gate_violations[index], kernel, ledger,
-                        versions, assigned_names,
-                    )
-                )
-                index += 1
-                continue
+                reason = gate_violations[index]
+                ledger.record(SOURCE_UNAVAILABLE, name=None, detail={
+                    "cell_index": index, "cell_type": cell.cell_type, "reason": reason,
+                })
+                output_parts.append(kernel_note(reason) + "\n")
+                failure = (index, reason)
+                break
 
             outcome = self._run_resolved_cell(
                 cell, index, kernel, ledger, versions, assigned_names
@@ -375,6 +376,11 @@ class LiterateInterpreter:
                 # there is no re-exec pass (the session is closed).
                 refusal = outcome.refusal
                 break
+            if outcome.failure is not None:
+                # Spec E1: the first failure ends the document. Later cells
+                # do not run.
+                failure = (index, outcome.failure)
+                break
             index += 1
 
         # L1.4 re-execution pass (batch/session path only — streaming untouched).
@@ -386,7 +392,7 @@ class LiterateInterpreter:
         # through the very same per-cell pipeline the linear walk used.
         if cell_done is not None:
             cell_done()
-        if refusal is None:
+        if refusal is None and failure is None:
             refusal, rerun_timed_out = self._reexecute_dirty_subgraph(
                 parsed.cells, graph, kernel, ledger, versions, assigned_names,
                 reactive_mode, observed_effects, gate_violations, run_mark,
@@ -404,6 +410,14 @@ class LiterateInterpreter:
             and k not in _INTERNAL_NAMES
             and not callable(v)
         }
+        if failure is not None:
+            # Spec E2: the bindings are those from before the failed cell. The
+            # failed cell recorded no version, so a name it rebound before it
+            # failed keeps its last recorded value.
+            for k in variables:
+                current = versions.current(k)
+                if current is not None:
+                    variables[k] = current.value
 
         rendered = "".join(output_parts)
 
@@ -429,10 +443,15 @@ class LiterateInterpreter:
         )
 
         errors = [describe_failure(e) for e in failures]
+        if failure is not None:
+            # Ruling P2: the error names the failed cell, then the cause.
+            failed_index, cause = failure
+            errors = [f"cell {failed_index} ({_first_line(parsed.cells[failed_index])}): "
+                      f"{cause}"]
         if refusal is not None:
             errors.insert(0, f"refused: {refusal}")
         return InterpreterExecutionResult(
-            success=not failures and refusal is None,
+            success=not failures and failure is None and refusal is None,
             output=rendered,
             error="; ".join(errors) or None,
             output_format="markdown",
@@ -494,19 +513,25 @@ class LiterateInterpreter:
         pass gates on.  Mutates ``kernel`` / ``ledger`` / ``versions`` /
         ``assigned_names`` in place, like the original inline body.
         """
-        # Forgiveness pre-pass (L1.1): a cell whose names cannot resolve binds
-        # typed holes, is ledgered, and is SKIPPED (never executed, so a hole
-        # can't flow into arithmetic). Not after a refusal (review I1): a
-        # closed session refuses every cell, so the kernel's refused result
-        # below is the outcome, never a hole.
+        # Spec E1: a cell that reads a name no earlier cell bound is a failure.
+        # It is ledgered, binds nothing, and is not executed. Not after a
+        # refusal (review I1): a closed session refuses every cell, so the
+        # kernel's refused result below is the outcome.
         if kernel.refusal is None:
-            reified = _reify_holes_for_cell(
-                cell, index, kernel, ledger, versions, assigned_names
-            )
-            if reified is not None:
-                return _CellOutcome(rendered=reified, continue_requested=False)
+            unbound = sorted(_unbound_names(cell, kernel))
+            if unbound:
+                for name in unbound:
+                    ledger.record(HOLE_OPENED, name=name, detail={
+                        "reason": "unbound", "cell_index": index,
+                        "cell_type": cell.cell_type,
+                    })
+                names = ", ".join(f"'{n}'" for n in unbound)
+                cause = (f"the name {names} is not bound. Bind it in an earlier cell"
+                         if len(unbound) == 1 else
+                         f"the names {names} are not bound. Bind them in earlier cells")
+                return _CellOutcome(rendered=kernel_note(cause) + "\n",
+                                    continue_requested=False, failure=cause)
 
-        known_before = kernel.known_names()
         # Observe the execution we are doing anyway (D7): the Path writes in
         # this cell's slice of the session trace, so the re-exec pass gates on
         # what the cell DID rather than on what its source looks like. The
@@ -537,22 +562,22 @@ class LiterateInterpreter:
             )
 
         if not result.success:
-            # L1.2: the failure is reified — an error value bound to the names
-            # the cell declared but did not reach — and the run CONTINUES. No
-            # abort, no rollback: partial output and bindings stand.
+            # Spec E1: the failure is ledgered and the document stops at this
+            # cell. Nothing is bound for it. What the cell printed before it
+            # failed stays in the output.
+            error = result.error or "unknown error"
+            ledger.record(ERROR_REIFIED, name=None, detail={
+                "cell_index": index, "cell_type": cell.cell_type,
+                "error": error, "error_phase": result.error_phase or "runtime",
+            })
             parts: list[str] = []
             if result.output:
                 parts.append(result.output)
-            parts.append(
-                _reify_error_for_cell(
-                    cell, index, result, kernel, ledger, versions,
-                    assigned_names, known_before,
-                )
-            )
+            parts.append(kernel_note(f"error: {error}") + "\n")
             return _CellOutcome(
                 rendered="".join(parts), continue_requested=False,
                 executed=True, observed_effects=observed,
-                cell_id=result.cell_id,
+                cell_id=result.cell_id, failure=error,
             )
 
         parts = []
@@ -830,6 +855,8 @@ class _CellOutcome:
     cell_id: int | None = None
     #: The refusal text when the cell's run refused (D4): the document stops.
     refusal: str | None = None
+    #: The cause when the cell failed (spec E1): the document stops.
+    failure: str | None = None
     #: Whether the cell ran and succeeded; then ``value`` is its trailing
     #: expression's value (``CellResult.value``), else None.
     ok: bool = False
@@ -1057,6 +1084,21 @@ _HOLE_EXEMPT_NAMES = frozenset({
     # name even though it is absent from the namespace between cells.
     "__literate_continue__",
 })
+
+
+def _unbound_names(cell: Cell, kernel: LightweightKernel) -> set[str]:
+    """The names ``cell`` reads that no earlier cell bound (spec E1).
+
+    The rules are the kernel's own static check (``check_cell``): a name the
+    cell itself defines is bound. A syntax error or an unknown cell type is not
+    a name problem: it returns no names, and the kernel reports the error.
+    """
+    try:
+        tree = ast.parse(compile_cell(cell))
+    except (ValueError, SyntaxError):
+        return set()
+    defined, referenced = collect_names(tree)
+    return referenced - kernel.known_names() - BUILTIN_NAMES - defined - _HOLE_EXEMPT_NAMES
 
 
 def _reify_holes_for_cell(
@@ -1318,6 +1360,12 @@ def runs_no_code(cell: Cell) -> bool:
     return cell.cell_type == "prose" and all(seg.expr is None for seg in prose_segments(cell))
 
 
+def _first_line(cell: Cell) -> str:
+    """The first non-blank line of ``cell``, as an error names the cell (spec E1)."""
+    lines = cell.content.strip().splitlines()
+    return lines[0].strip() if lines else cell.cell_type
+
+
 def _gate_violations(parsed: ParseResult, context: ExecutionContext) -> dict[int, str]:
     """The ceiling gate's verdict for each cell that exceeds the ceiling (L1.5).
 
@@ -1377,6 +1425,39 @@ def _timeout_writes(entries: list[TraceEntry]) -> tuple[list[str], tuple[str, ..
             if e.success:
                 names.setdefault(path, None)
     return list(names), tuple(sorted(tools))
+
+
+def _record_timeout(
+    cell: Cell,
+    index: int,
+    resume: Any,
+    kernel: LightweightKernel,
+    ledger: Ledger,
+    observed_effects: dict[int, tuple[str, ...]],
+) -> str:
+    """Record a cell stopped at its time limit, and return its note (spec E1, Plan 3 D7).
+
+    Called in the checkpoint, which holds the state from before the cell. The
+    cell's own process is gone, so ``resume.entries`` (its trace entries and
+    start entries) is the record of what it did. The entries join the
+    session's trace (start entries do not). One ``timed_out`` ledger entry
+    records the note: ``timeout: the cell took longer than {t:g} s and was
+    stopped``, plus ``; it wrote {paths} before it was stopped`` when the trace
+    shows writes. Nothing is bound: the document stops at this cell.
+    """
+    entries = list(resume.entries or [])
+    kernel.session.trace.entries.extend(e for e in entries if not e.tool.endswith(START_SUFFIX))
+    paths, tools = _timeout_writes(entries)
+    if tools:
+        observed_effects[index] = tools
+    note = f"timeout: the cell took longer than {resume.seconds:g} s and was stopped"
+    if paths:
+        note += f"; it wrote {', '.join(paths)} before it was stopped"
+    ledger.record(TIMED_OUT, name=None, detail={
+        "cell_index": index, "cell_type": cell.cell_type, "note": note,
+        "error_phase": "timeout", "seconds": resume.seconds,
+    })
+    return note
 
 
 def _reify_timeout_for_cell(

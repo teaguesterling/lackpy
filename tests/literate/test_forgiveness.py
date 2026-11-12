@@ -46,24 +46,24 @@ class TestTypedHoles:
     """L1.1 — an unknown name binds a typed hole instead of raising/blocking."""
 
     @pytest.mark.asyncio
-    async def test_undefined_name_binds_hole(self, context):
+    async def test_undefined_name_is_a_ledgered_failure(self, context):
         session = LiterateSession(context)
         result = await session.step("```lackpy\ny = x + 1\n```")
 
-        # Binding layer: x is reified as a typed hole and ledgered — the round
-        # completed (no raised StaticAnalysisError, no abort).
+        # Spec E1: the unbound name is ledgered, and nothing is bound for it
+        # (no raised StaticAnalysisError either).
         entries = session.ledger.query(entry_type="hole_opened", name="x")
         assert len(entries) == 1
         assert entries[0].detail["reason"] == "unbound"
 
         ns = session._kernel.get_namespace()
-        assert ns["x"] == Hole("x")
-        assert repr(ns["x"]) == "⟨x: unbound⟩"
+        assert "x" not in ns and "y" not in ns
 
         # Aggregate layer: the round still reports Left.
         assert not result.ok
         assert any("x" in e for e in result.errors)
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_chained_hole(self, context):
         # Hole in cell A blocks dependent cell B; BOTH are ledgered.
@@ -103,11 +103,10 @@ class TestTypedHoles:
         assert all(e.entry_type in FORGIVENESS_ENTRY_TYPES for e in failures)
         assert not left.ok
 
-        # ...while the forgiving values remain bound: state NOT erased.
+        # ...while the earlier state stays, and the failure binds nothing (E1).
         ns = session._kernel.get_namespace()
         assert ns["k"] == 1
-        assert isinstance(ns["unknown_name"], Hole)
-        assert isinstance(ns["v"], Hole)
+        assert "unknown_name" not in ns and "v" not in ns
 
     @pytest.mark.asyncio
     async def test_hole_round_keeps_output_and_annotates(self, context):
@@ -143,34 +142,32 @@ class TestTypedHoles:
         assert "x" in (result.error or "")
         ledger = result.metadata["ledger"]
         assert ledger.query(entry_type="hole_opened", name="x")
-        assert ledger.query(entry_type="hole_opened", name="y")
+        # Spec E1: ``y`` is not a hole; the cell failed and bound nothing.
+        assert not ledger.query(entry_type="hole_opened", name="y")
 
 
 class TestErrorAsValue:
     """L1.2 — a runtime error binds an error value; no abort, no rollback."""
 
     @pytest.mark.asyncio
-    async def test_runtime_error_binds_error_value(self, context):
+    async def test_runtime_error_is_a_ledgered_failure(self, context):
         session = LiterateSession(context)
         result = await session.step("```lackpy\nx = 1 / 0\n```")
 
-        # Binding layer: the failure is reified — bound + ledgered.
-        entries = session.ledger.query(entry_type="error_reified", name="x")
-        assert len(entries) == 1
+        # Spec E1: the failure is ledgered, and nothing is bound for it.
+        entries = session.ledger.query(entry_type="error_reified")
+        assert len(entries) == 1 and entries[0].name is None
         assert "ZeroDivisionError" in entries[0].detail["error"]
-
-        ns = session._kernel.get_namespace()
-        assert isinstance(ns["x"], ErrorValue)
-        assert "ZeroDivisionError" in repr(ns["x"])
+        assert "x" not in session._kernel.get_namespace()
 
         # Aggregate layer: Left preserved, with the exception info surfaced.
         assert not result.ok
         assert "ZeroDivisionError" in result.errors[0]
 
     @pytest.mark.asyncio
-    async def test_round_continues_after_error_no_rollback(self, context):
-        # The load-bearing L1.2 shape: the round does NOT abort at the failed
-        # cell — later cells run, earlier bindings stay, nothing rolls back.
+    async def test_round_stops_at_the_error(self, context):
+        # Spec E1: the round stops at the failed cell. Later cells do not run,
+        # and earlier bindings stay.
         session = LiterateSession(context)
         result = await session.step(
             "```lackpy @hidden\nbefore = 1\n```\n\n"
@@ -180,8 +177,8 @@ class TestErrorAsValue:
         assert not result.ok                     # aggregate Left
         ns = session._kernel.get_namespace()
         assert ns["before"] == 1                 # kept, not rolled back
-        assert ns["after"] == 2                  # later cell RAN
-        assert isinstance(ns["boom"], ErrorValue)
+        assert "after" not in ns                 # the later cell did not run
+        assert "boom" not in ns
 
     @pytest.mark.asyncio
     async def test_partial_bindings_keep_their_real_values(self, context):
@@ -196,6 +193,7 @@ class TestErrorAsValue:
         errs = session.ledger.query(entry_type="error_reified")
         assert errs and "KeyError" in errs[0].detail["error"]
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_error_value_chains_to_dependent_cell(self, context):
         # An error value blocks a dependent cell the same way a hole does.
@@ -223,4 +221,7 @@ class TestErrorAsValue:
         result = await interpreter.execute("```lackpy\nx = 1 / 0\n```", context)
         assert not result.success                     # aggregate Left
         assert "ZeroDivisionError" in (result.error or "")
-        assert result.metadata["ledger"].query(entry_type="error_reified", name="x")
+        # Spec E1: one entry for the failure, with no name bound.
+        entries = result.metadata["ledger"].query(entry_type="error_reified")
+        assert len(entries) == 1 and entries[0].name is None
+        assert "x" not in result.metadata["variables"]

@@ -48,8 +48,6 @@ from lackpy.interpreters.literate.kernel.forgiveness import (
     TIMED_OUT,
     ErrorValue,
     Hole,
-    Unavailable,
-    is_forgiving,
     round_is_left,
 )
 from lackpy.interpreters.literate.kernel.reactive import DIRTY
@@ -86,17 +84,15 @@ class TestSemantic1TypedHole:
     """
 
     @pytest.mark.asyncio
-    async def test_undefined_name_binds_hole_and_is_ledgered(self, context):
+    async def test_undefined_name_is_a_ledgered_failure(self, context):
         session = LiterateSession(context)
 
-        # No StaticAnalysisError, no abort: step returns normally.
+        # No StaticAnalysisError: step returns normally.
         result = await session.step(lackpy_doc("y = x + 1"))
 
-        # Reified value: x is a typed hole, bound in the live namespace.
+        # Spec E1: the unbound name is a failure, and nothing is bound for it.
         ns = session._kernel.get_namespace()
-        assert ns["x"] == Hole("x")
-        assert repr(ns["x"]) == "⟨x: unbound⟩"
-        assert is_forgiving(ns["x"])
+        assert "x" not in ns and "y" not in ns
 
         # Ledger entry: exactly one hole_opened for the origin hole.
         entries = session.ledger.query(entry_type=HOLE_OPENED, name="x")
@@ -120,30 +116,30 @@ class TestSemantic2ErrorAsValue:
     """
 
     @pytest.mark.asyncio
-    async def test_runtime_error_reifies_and_run_continues(self, context):
+    async def test_runtime_error_is_ledgered_and_the_run_stops(self, context):
         session = LiterateSession(context)
         result = await session.step(
             lackpy_doc(
                 "before = 'kept'",      # bound before the failure
                 "v = 1 / 0",            # raises ZeroDivisionError
-                "after = 2",            # must still execute — no abort
+                "after = 2",            # spec E1: never runs
             )
         )
 
-        # Reified value: v is an ErrorValue carrying the exception info.
+        # Nothing is bound for the failed cell.
         ns = session._kernel.get_namespace()
-        assert isinstance(ns["v"], ErrorValue)
-        assert "ZeroDivisionError" in ns["v"].error
-        assert ns["v"].error_phase == "runtime"
+        assert "v" not in ns
 
-        # Ledger entry: the failure is recorded as error_reified.
-        entries = session.ledger.query(entry_type=ERROR_REIFIED, name="v")
-        assert len(entries) == 1
+        # Ledger entry: the failure is recorded as error_reified, with no name.
+        entries = session.ledger.query(entry_type=ERROR_REIFIED)
+        assert len(entries) == 1 and entries[0].name is None
         assert "ZeroDivisionError" in entries[0].detail["error"]
+        assert entries[0].detail["error_phase"] == "runtime"
 
-        # No rollback, no abort: prior bindings kept, later cells ran.
+        # No rollback: prior bindings kept. The run stopped: later cells did
+        # not run.
         assert ns["before"] == "kept"
-        assert ns["after"] == 2
+        assert "after" not in ns
 
         # Aggregate layer: Left, derived — the state above all stands.
         assert result.ok is False
@@ -205,7 +201,7 @@ class TestSemantic4UnavailableSource:
     """
 
     @pytest.mark.asyncio
-    async def test_over_ceiling_cell_binds_unavailable(self, context, tmp_path):
+    async def test_over_ceiling_cell_is_a_ledgered_failure(self, context, tmp_path):
         ctx = ExecutionContext(
             base_dir=tmp_path, config={**context.config, "grade_ceiling": Grade(1, 1)}
         )
@@ -213,26 +209,23 @@ class TestSemantic4UnavailableSource:
             ctx,
             lackpy_doc(
                 "from pathlib import Path\ndata = Path('out.txt').write_text('x')",  # over
-                "ok = 1 + 1",                          # within — must run
+                "ok = 1 + 1",                          # within — never runs
             ),
         )
 
-        # Reified value: data is Unavailable, carrying the gate's reason.
-        data = result.metadata["variables"]["data"]
-        assert isinstance(data, Unavailable)
-        assert is_forgiving(data)
-        assert "ceiling" in data.reason
+        # Spec E1: nothing is bound for the gated cell.
+        assert "data" not in result.metadata["variables"]
 
-        # Ledger entry: one source_unavailable row for the name.
+        # Ledger entry: one source_unavailable row, with the gate's reason.
         ledger = result.metadata["ledger"]
-        entries = ledger.query(entry_type=SOURCE_UNAVAILABLE, name="data")
-        assert len(entries) == 1
+        entries = ledger.query(entry_type=SOURCE_UNAVAILABLE)
+        assert len(entries) == 1 and entries[0].name is None
         assert "ceiling" in entries[0].detail["reason"]
 
         # Refuse-before-running held per cell: the effect never happened,
-        # and execution continued past the gated cell.
+        # and the run stopped at the gated cell.
         assert not (tmp_path / "out.txt").exists()
-        assert result.metadata["variables"]["ok"] == 2
+        assert "ok" not in result.metadata["variables"]
         assert result.metadata["completed"] is True
 
         # Aggregate layer: unavailable is a reified failure → Left.
@@ -269,6 +262,7 @@ class TestSemantic5DirtySubgraph:
     run Left.
     """
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_reassert_reexecutes_pure_withholds_effectful(
         self, context, tmp_path
@@ -333,6 +327,7 @@ class TestChainedHoleAcceptance:
     merely tolerating one failure.
     """
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_hole_in_a_blocks_dependent_b_both_ledgered(self, context):
         session = LiterateSession(context)
@@ -395,13 +390,14 @@ class TestTwoLayerComposition:
         assert result.ok is False
         assert round_is_left(session.ledger.entries())
 
-        # ... while the binding layer kept everything: the real value stands,
-        # versioned, alongside the reified hole.
+        # ... while the real value stands, versioned. The failed cell binds
+        # nothing (spec E1).
         ns = session._kernel.get_namespace()
         assert ns["real"] == 42
         assert session.versions.current("real").value == 42
-        assert isinstance(ns["h"], Hole)
+        assert "h" not in ns
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_hole_filled_later_is_versioned_supersede(self, context):
         """L1.1 × L1.3: filling a hole is a versioned transition — the hole
@@ -472,6 +468,7 @@ class TestReassertionFailureConformance:
       events on the ledger entry.  Best-effort observation, not proof.
     """
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_error_on_reasserted_known_name_reifies_and_chains(
         self, context
@@ -504,6 +501,7 @@ class TestReassertionFailureConformance:
         assert "x" in variables["z"].blocked_by
         assert round_is_left(ledger.entries())
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_hole_then_failing_reassert_supersedes_hole_with_error(
         self, context
@@ -519,6 +517,7 @@ class TestReassertionFailureConformance:
         sup = session.ledger.query(entry_type=SUPERSEDED, name="x")
         assert sup and sup[-1].detail["prior"] == "hole"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_partial_bindings_before_failure_still_kept(self, context):
         # The OTHER side of the partition: work the failed cell completed
@@ -537,6 +536,7 @@ class TestReassertionFailureConformance:
             v.value for v in result.metadata["versions"].history("x")
         ] == [5, 6]
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_failing_dirty_reexec_reifies_and_ledger_tells_truth(
         self, context
@@ -572,6 +572,7 @@ class TestReassertionFailureConformance:
         assert dirty[1].detail["reified"] == ["c"]
         assert round_is_left(ledger.entries())
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_clean_dirty_reexec_outcome_recorded(self, context):
         result = await run_batch(
@@ -582,6 +583,7 @@ class TestReassertionFailureConformance:
         assert dirty[0].detail["outcome"] == "clean"
         assert result.metadata["variables"]["b"] == 3
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_attribute_call_write_withheld_from_reexec(
         self, context, tmp_path
@@ -642,6 +644,7 @@ class TestRuntimeEffectObservation:
         "seed = 'two'",       # 4: heal → cell 2 dirty
     )
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_helper_wrapped_write_withheld_in_strict_mode(
         self, context, tmp_path
@@ -661,6 +664,7 @@ class TestRuntimeEffectObservation:
         # The file was written exactly once, with the ORIGINAL seed.
         assert (tmp_path / "helper_out.txt").read_text() == "one"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_helper_wrapped_write_reruns_in_permissive_mode(
         self, tmp_path, tmp_home
@@ -687,6 +691,7 @@ class TestRuntimeEffectObservation:
         # The effect DID re-fire: the file now holds the NEW seed.
         assert (tmp_path / "helper_out.txt").read_text() == "two"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_pure_method_call_dependent_is_rerun(self, context):
         # NEW-3 (the static gate's over-correction): `name.upper()` is an
@@ -748,6 +753,7 @@ class TestInjectedAndIdentityRebindConformance:
     # final fix wave (I4): params no longer bind bare names (design D15), so a
     # param is never an injected name a document can fail to rebind.
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_document_asserted_name_still_reifies_on_failed_rebind(
         self, context
@@ -759,6 +765,7 @@ class TestInjectedAndIdentityRebindConformance:
         assert isinstance(result.metadata["variables"]["x"], ErrorValue)
         assert result.metadata["ledger"].query(entry_type=SUPERSEDED, name="x")
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_identity_rebind_before_later_failure_is_kept(self, context):
         # NEW-4: `x = x` completed (line 1) before the failure (line 2).
@@ -777,6 +784,7 @@ class TestInjectedAndIdentityRebindConformance:
         assert err and err[-1].detail["kept"] == ["x"]
         assert len(session.versions.history("x")) == 1
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_interned_equal_rebind_before_later_failure_is_kept(
         self, context
@@ -789,6 +797,7 @@ class TestInjectedAndIdentityRebindConformance:
         assert result.metadata["variables"]["x"] == 5
         assert isinstance(result.metadata["variables"]["boom"], ErrorValue)
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_failed_rebind_at_the_binding_statement_still_reifies(
         self, context

@@ -12,11 +12,10 @@ through the REAL surface (nothing reimplemented):
   which runs the cell in a ``CellSession``) AND the ``inspect`` surface
   (``CellSession.eval_expr``).  Catches the "eval silently zeroed" failure
   directly.
-* ``hole`` — an unknown name reifies a typed :class:`~.kernel.forgiveness.Hole`
-  (L1.1) and is ledgered, rather than crashing or silently succeeding.
-* ``error`` — a runtime error reifies an
-  :class:`~.kernel.forgiveness.ErrorValue` (L1.2) and is ledgered, rather than
-  aborting.
+* ``hole`` — an unknown name is a failure (spec E1): the cell binds nothing
+  and is ledgered, rather than crashing or silently succeeding.
+* ``error`` — a runtime error is a failure (spec E1): the cell binds nothing
+  and is ledgered, rather than escaping as a traceback.
 * ``unavailable`` — a gate-refused source reifies an
   :class:`~.kernel.forgiveness.Unavailable` (L1.5) and is ledgered.  The probe
   drives the reification surface with a synthetic gate reason: the ceiling
@@ -58,8 +57,6 @@ from .kernel.forgiveness import (
     ERROR_REIFIED,
     HOLE_OPENED,
     SOURCE_UNAVAILABLE,
-    ErrorValue,
-    Hole,
     Unavailable,
 )
 from .kernel.formats import render_markdown_from_cells
@@ -163,9 +160,9 @@ def _run_cell(
     kernel: LightweightKernel,
     ledger: Ledger,
     versions: BindingVersions,
-) -> None:
+) -> Any:
     cell = Cell(cell_type="code", content=source)
-    interpreter._run_resolved_cell(cell, 0, kernel, ledger, versions, set())
+    return interpreter._run_resolved_cell(cell, 0, kernel, ledger, versions, set())
 
 
 def _probe_value(
@@ -188,23 +185,23 @@ def _probe_hole(
     ledger: Ledger, versions: BindingVersions,
 ) -> tuple[bool, str, str]:
     expected = (
-        "an unknown referenced name reifies a typed Hole "
+        "an unknown referenced name is a failure: the cell binds nothing "
         "and is ledgered (hole_opened)"
     )
-    _run_cell(
+    outcome = _run_cell(
         interpreter,
         "lackpy_selftest_chained = lackpy_selftest_missing",
         kernel, ledger, versions,
     )
-    origin = kernel.lookup("lackpy_selftest_missing", default="<unbound>")
-    chained = kernel.lookup("lackpy_selftest_chained", default="<unbound>")
-    if not isinstance(origin, Hole):
-        return False, expected, f"'lackpy_selftest_missing' bound {origin!r}"
-    if not isinstance(chained, Hole) or not chained.blocked_by:
-        return False, expected, f"chained binding was {chained!r}"
+    if outcome.failure is None or "lackpy_selftest_missing" not in outcome.failure:
+        return False, expected, f"the cell's failure was {outcome.failure!r}"
+    for name in ("lackpy_selftest_missing", "lackpy_selftest_chained"):
+        bound = kernel.lookup(name, default="<unbound>")
+        if bound != "<unbound>":
+            return False, expected, f"{name!r} bound {bound!r}"
     if not ledger.query(entry_type=HOLE_OPENED):
-        return False, expected, "hole bound but no hole_opened ledger entry"
-    return True, expected, f"{origin!r}"
+        return False, expected, "the cell failed but no hole_opened ledger entry"
+    return True, expected, "'lackpy_selftest_missing' unbound: the cell failed"
 
 
 def _probe_error(
@@ -212,18 +209,18 @@ def _probe_error(
     ledger: Ledger, versions: BindingVersions,
 ) -> tuple[bool, str, str]:
     expected = (
-        "a runtime error (1 // 0) reifies an ErrorValue "
+        "a runtime error (1 // 0) is a failure: the cell binds nothing "
         "and is ledgered (error_reified)"
     )
-    _run_cell(interpreter, "lackpy_selftest_err = 1 // 0", kernel, ledger, versions)
+    outcome = _run_cell(interpreter, "lackpy_selftest_err = 1 // 0", kernel, ledger, versions)
+    if outcome.failure is None or "ZeroDivisionError" not in outcome.failure:
+        return False, expected, f"the cell's failure was {outcome.failure!r}"
     bound = kernel.lookup("lackpy_selftest_err", default="<unbound>")
-    if not isinstance(bound, ErrorValue):
+    if bound != "<unbound>":
         return False, expected, f"'lackpy_selftest_err' bound {bound!r}"
-    if "ZeroDivisionError" not in bound.error:
-        return False, expected, f"error value carries {bound.error!r}"
     if not ledger.query(entry_type=ERROR_REIFIED):
-        return False, expected, "error reified but no error_reified ledger entry"
-    return True, expected, f"{bound!r}"
+        return False, expected, "the cell failed but no error_reified ledger entry"
+    return True, expected, outcome.failure
 
 
 def _probe_unavailable(
@@ -292,8 +289,8 @@ def _probe_round_trip(
 #: full diagnostics before the kernel is disabled once at the end.
 _PROBES: tuple[tuple[str, str, _ProbeFn], ...] = (
     ("value", "known evaluation computes the right value", _probe_value),
-    ("hole", "unknown name reifies a typed Hole (L1.1)", _probe_hole),
-    ("error", "runtime error reifies an ErrorValue (L1.2)", _probe_error),
+    ("hole", "unknown name is a ledgered failure (E1)", _probe_hole),
+    ("error", "runtime error is a ledgered failure (E1)", _probe_error),
     ("unavailable", "refused source reifies an Unavailable (L1.5)",
      _probe_unavailable),
     ("round_trip", "rendered document reparses cleanly (L2)", _probe_round_trip),

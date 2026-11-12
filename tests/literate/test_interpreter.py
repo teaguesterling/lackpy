@@ -614,10 +614,9 @@ class TestParamsLiteral:
         doc = "```lackpy\nparams = {'n': 1}\n```\n\n```lackpy\nx = n * 2\n```\n"
         result = await interpreter.execute(doc, self._ctx(tmp_path, n=5))
         assert result.success is False
-        # ``n`` is an unbound hole, never the passed 5.
-        from lackpy.interpreters.literate.kernel.forgiveness import Hole
-        assert isinstance(result.metadata["variables"]["n"], Hole)
-        assert result.metadata["variables"]["params"] == {"n": 5}
+        # ``n`` is not bound, never the passed 5: the document stops there (E1).
+        assert "'n'" in result.error.split("): ", 1)[1]
+        assert result.metadata["variables"] == {"params": {"n": 5}}
 
     @pytest.mark.asyncio
     async def test_a_document_with_no_params_literal_fails_loud(self, interpreter, tmp_path):

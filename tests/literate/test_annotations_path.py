@@ -268,7 +268,7 @@ class TestDiff:
         assert not result.success
         assert not _refused(result)
         assert result.metadata["ledger"].query(entry_type="error_reified")
-        assert result.metadata["variables"]["after"] == 1  # the document went on
+        assert "after" not in result.metadata["variables"]  # spec E1: it stopped
         assert (ws / "hello.txt").read_text() == "Something else\n"
 
     @pytest.mark.asyncio
@@ -332,6 +332,7 @@ HEAL = "```lackpy\nname = 1 // 0\n```\n\n```lackpy\nname = 'b.out'\n```\n"
 
 
 class TestStrictModeReadsTheTrace:
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.parametrize("member", sorted(WRITES))
     @pytest.mark.asyncio
     async def test_a_dependent_that_wrote_is_withheld(self, ws, policy, member):
@@ -346,6 +347,7 @@ class TestStrictModeReadsTheTrace:
         assert (ws / "a.out").exists()
         assert not (ws / "b.out").exists()  # never replayed
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_permissive_mode_replays_the_write(self, ws, policy):
         doc = ("```lackpy\nfrom pathlib import Path\nname = 'a.out'\n```\n\n"
@@ -356,6 +358,7 @@ class TestStrictModeReadsTheTrace:
         assert dirty[0].detail["observed_effects"] == ["Path.write_text"]
         assert (ws / "b.out").read_text() == "hi"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_dependent_that_only_read_is_rerun(self, ws, policy):
         (ws / "b.txt").write_text("B")
@@ -367,6 +370,7 @@ class TestStrictModeReadsTheTrace:
         assert dirty[0].detail["reexecuted"] is True
         assert result.metadata["variables"]["t"] == "B"
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_a_write_through_a_helper_is_seen(self, ws, policy):
         # No static classifier sees this write; the trace does.
@@ -420,7 +424,7 @@ class TestDiffBindsNothing:
         assert ledger.query(entry_type=DIRTY) == []
         errors = ledger.query(entry_type="error_reified")
         assert [e.name for e in errors] == [None]
-        assert "A\n" in result.output
+        assert "A\n" not in result.output  # spec E1: the @read after it did not run
 
     @pytest.mark.asyncio
     async def test_the_gate_still_grades_a_diff_as_a_write(self, ws, policy):

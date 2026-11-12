@@ -388,8 +388,9 @@ def _bounded_submit(run, runner, doc, params=None, bound=15.0):
 
 
 @pytest.mark.parametrize("where", ["segment_start", "middle", "trailing"])
-def test_a_slow_prose_cell_times_out_and_the_document_goes_on(env, runner, where):
-    """C1: a prose interpolation over the limit is reified as timed out, once.
+def test_a_slow_prose_cell_times_out_and_the_document_stops(env, runner, where):
+    """C1: a prose interpolation over the limit times out, once (spec E1: the
+    document stops there).
 
     ``segment_start``: the document's first cell. ``middle``: between two code
     cells. ``trailing``: the last cell, with no code cell after it.
@@ -408,10 +409,11 @@ def test_a_slow_prose_cell_times_out_and_the_document_goes_on(env, runner, where
         run.close()
     assert r.error_phase == "timeout", r
     n = _cell_number(doc, "sum(range(")
-    assert r.stdout.count(f"timeout: cell {n} took longer than 1 s and was stopped") == 1, r.stdout
-    assert r.variables.get("b") in (1, 2), r
-    if where != "trailing":
-        assert "B=" in r.stdout
+    assert r.stdout.count("timeout: the cell took longer than 1 s and was stopped") == 1, r.stdout
+    assert r.error.startswith(f"cell {n - 1} (X={{sum(range(10000000000))}}): timeout"), r.error
+    # Only the trailing case binds ``b``: there, both code cells come first.
+    assert r.variables.get("b") == (2 if where == "trailing" else None), r
+    assert "B=" not in r.stdout
 
 
 def test_the_resume_route_validates_as_the_fresh_route(env, runner):
@@ -580,7 +582,9 @@ def test_the_checkpoint_budget_bounds_a_large_value(env, runner):
     (I5: about 87 MiB each). With a 256 MiB budget, the checkpoints other than the two
     D10 keeps stay under it, and a resume at the stopped cell still works."""
     sums = [f"s{i} = sum(big)" for i in range(1, 13)]
-    first_doc = _doc(LOG + "\n" + BIG, *sums, LOOP, "big = 0", prose="")
+    # ``big = 0`` comes before LOOP: the document stops at LOOP (spec E1), and
+    # the result must stay small enough to send.
+    first_doc = _doc(LOG + "\n" + BIG, *sums, "big = 0", LOOP, prose="")
     # Final review I3: cell 1 builds the large value in 1.2-2.0 s under suite load,
     # so 2 s flaked; 10 s gives the cells that are not LOOP room (LOOP costs 10 s).
     run = _literate_run(env, runner, cell_timeout=10.0, max_checkpoint_mb=256)
@@ -592,7 +596,7 @@ def test_the_checkpoint_budget_bounds_a_large_value(env, runner):
         kept = {deepest.pid, deepest.parent, run._channel._protect}
         others = sum(_pss_mib(p.pid) for p in stack if p.pid not in kept)
         assert others <= 256, (others, len(stack))
-        fixed = run.submit(_doc(LOG + "\n" + BIG, *sums, FIX, "big = 0", prose=""), None)
+        fixed = run.submit(_doc(LOG + "\n" + BIG, *sums, "big = 0", FIX, prose=""), None)
     finally:
         run.close()
     assert fixed.success, fixed

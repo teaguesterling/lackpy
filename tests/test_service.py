@@ -665,12 +665,12 @@ class TestLiterateExecutionAxis:
     @pytest.mark.asyncio
     async def test_write_doc_refused_under_a_read_only_profile(self, service):
         # Fix round 1, M5: the static ceiling refuses the write cell before it
-        # runs (it is Unavailable); the document goes on.
+        # runs. Spec E1: that is a failure, and the document stops there.
         doc = "```lackpy @write(out.txt)\nhello\n```\n\n```lackpy\nafter = 1\n```\n\nA={after}"
         result = await service.run_program(doc, profile=_RO)
         assert not result.success
-        assert "effect ceiling exceeded" in (result.error or "")
-        assert "A=1" in result.stdout
+        assert (result.error or "").startswith("cell 0 (hello): effect ceiling exceeded")
+        assert "A=1" not in result.stdout
         assert not (service._workspace / "out.txt").exists()
 
     def test_under_the_planner_the_read_only_policy_still_denies_writes(self, service):

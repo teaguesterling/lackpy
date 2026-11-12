@@ -51,15 +51,11 @@ def interpreter():
 
 class TestUnavailableSource:
     @pytest.mark.asyncio
-    async def test_unavailable_source_binds_pending(self, interpreter, tmp_path, tmp_home):
-        """A cell whose source is unavailable (over the effect ceiling) binds
-        an Unavailable value + a source_unavailable ledger entry; the round
-        continues — no abort, no document-level refusal."""
-        from lackpy.interpreters.literate.kernel.forgiveness import (
-            SOURCE_UNAVAILABLE,
-            Unavailable,
-            is_forgiving,
-        )
+    async def test_unavailable_source_is_a_ledgered_failure(self, interpreter, tmp_path, tmp_home):
+        """A cell whose source is unavailable (over the effect ceiling) is a
+        failure (spec E1): one source_unavailable ledger entry, nothing bound,
+        and the document stops there. It is not a document-level refusal."""
+        from lackpy.interpreters.literate.kernel.forgiveness import SOURCE_UNAVAILABLE
 
         ctx = _ctx(tmp_path, tmp_home)
         doc = (
@@ -68,27 +64,22 @@ class TestUnavailableSource:
         )
         result = await interpreter.execute(doc, ctx)
 
-        # Binding layer: data is reified as Unavailable and ledgered.
         ledger = result.metadata["ledger"]
-        entries = ledger.query(entry_type=SOURCE_UNAVAILABLE, name="data")
-        assert len(entries) == 1
+        entries = ledger.query(entry_type=SOURCE_UNAVAILABLE)
+        assert len(entries) == 1 and entries[0].name is None
         assert "ceiling" in entries[0].detail["reason"]
-
-        value = result.metadata["variables"]["data"]
-        assert isinstance(value, Unavailable)
-        assert is_forgiving(value)
-        assert "unavailable" in repr(value)
+        assert "data" not in result.metadata["variables"]
 
         # Refuse-before-running is kept per cell: the effect never happened.
         assert not (tmp_path / "out.txt").exists()
 
-        # Execution CONTINUED: the within-ceiling cell ran, no abort.
+        # The document stopped: the within-ceiling cell after it did not run.
         assert result.metadata["completed"] is True
-        assert result.metadata["variables"]["ok"] == 2
+        assert "ok" not in result.metadata["variables"]
 
-        # Aggregate layer: the round still reports Left.
         assert not result.success
-        assert "effect ceiling exceeded" in result.error
+        assert result.error.startswith("cell 0 (from pathlib import Path): "
+                                       "effect ceiling exceeded")
 
     @pytest.mark.asyncio
     async def test_pending_distinct_from_pause_pending(self, interpreter, tmp_path, tmp_home):
@@ -118,6 +109,7 @@ class TestUnavailableSource:
         assert ledger.query(entry_type=SOURCE_UNAVAILABLE)
         assert ledger.query(entry_type="pending") == []
 
+    @pytest.mark.skip(reason="binding layer retired: deleted in Task 2")
     @pytest.mark.asyncio
     async def test_pending_chains_and_versions(self, tmp_path, tmp_home):
         """Composition: downstream references to an Unavailable value chain as
