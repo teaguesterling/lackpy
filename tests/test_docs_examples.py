@@ -24,6 +24,12 @@ N is valid when cells 1..N, joined as ``compile_cells`` joins them, validate as 
 A document titled ``Refused...`` must really be refused: a cell fails validation, or
 the run ends in a refusal. A document that holds no code cell does not count.
 
+A document fence directly after a ``<!-- docs-run: lackpyctl render --execute [ARGS] -->``
+comment is run, and the first ```text fence after it must hold what that command prints:
+on a failure, the stderr line ``lackpyctl render --execute: <error>``, then the rendered
+document. Blank lines and trailing spaces do not count, and ``<workspace>`` stands for the
+workspace path. So a measured output on the page cannot go stale.
+
 The tutorial walks through the pre-prompt's worked examples, so it must hold
 each ``PREPROMPT_EXAMPLES`` program verbatim; a change to the pre-prompt fails
 here until the tutorial follows it.
@@ -49,6 +55,7 @@ DOC_FILES = [
     "docs/tutorial.md",
     "docs/concepts/language-spec.md",
     "docs/concepts/literate.md",
+    "docs/concepts/intent.md",
     "docs/concepts/paths.md",
     "docs/concepts/profiles.md",
     "docs/concepts/policy-layer.md",
@@ -233,3 +240,68 @@ def test_refused_literate_document_is_refused(where, src, tmp_path):
     result = asyncio.run(service.run_program(src, profile=Profile(execution="literate")))
     assert not result.success, f"{where}: marked Refused, but it ran"
     assert "is not allowed in lackpy" in (result.error or ""), f"{where}: failed, not refused: {result.error}"
+
+
+_RUN_MARKER = re.compile(r"^<!-- docs-run: lackpyctl render --execute(?P<args>[^\n]*?) -->\n", re.M)
+_TEXT_FENCE = re.compile(r"^```text\n(?P<body>.*?)^```[ \t]*$", re.M | re.S)
+# The workspace the measured outputs on the page come from: notes.md has three
+# lines, and the two profiles are the ones "Running a document" shows.
+RUN_NOTES = "# Release notes\nline two\nline three\n"
+RUN_CONFIG = ('[profiles.docs]\nexecution = "literate"\n\n'
+              '[profiles.docs-readonly]\nexecution = "literate"\npolicy = { read_only = true }\n')
+
+
+def _run_examples():
+    text = (ROOT / LITERATE_PAGE).read_text()
+    out = []
+    for marker in _RUN_MARKER.finditer(text):
+        doc = _DOC_FENCE.match(text, marker.end())
+        where = f"{LITERATE_PAGE}:{text.count(chr(10), 0, marker.start()) + 1}"
+        assert doc, f"{where}: a docs-run marker must sit directly above a ````markdown fence"
+        expected = _TEXT_FENCE.search(text, doc.end())
+        assert expected, f"{where}: no ```text fence after the document"
+        out.append((where, marker.group("args").split(), doc.group("body"), expected.group("body")))
+    return out
+
+
+RUN_EXAMPLES = _run_examples()
+
+
+def _significant(text: str) -> list[str]:
+    return [line.rstrip() for line in text.splitlines() if line.strip()]
+
+
+def test_the_literate_page_runs_its_examples():
+    # Absence of signal is not success: a broken marker regex would run nothing.
+    assert len(RUN_EXAMPLES) >= 8
+
+
+@pytest.mark.parametrize("where,args,src,expected", RUN_EXAMPLES, ids=[w for w, *_ in RUN_EXAMPLES])
+def test_literate_example_prints_what_the_page_shows(where, args, src, expected, tmp_path):
+    import argparse
+    import asyncio
+
+    from lackpy.run.paths import load_policy
+    from lackpy.service import LackpyService
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--timeout", type=float)
+    parser.add_argument("--profile")
+    opts = parser.parse_args(args)
+
+    ws = tmp_path / "ws"
+    (ws / ".lackpy").mkdir(parents=True)
+    (ws / ".lackpy" / "config.toml").write_text(RUN_CONFIG)
+    (ws / "notes.md").write_text(RUN_NOTES)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    service = LackpyService(workspace=ws,
+                            path_policy_loader=lambda w: load_policy(w, home=home, managed=None))
+    # As lackpyctl render --execute does (ctl._render): the profile, run as literate.
+    result = asyncio.run(service.run_program(src, profile=service.literate_profile(opts.profile),
+                                             timeout=opts.timeout))
+    printed = ([] if result.success else [f"lackpyctl render --execute: {result.error}"])
+    printed += (result.stdout or "").splitlines()
+    actual = [line.replace(str(ws.resolve()), "<workspace>").replace(str(ws), "<workspace>")
+              for line in _significant("\n".join(printed))]
+    assert actual == _significant(expected), where

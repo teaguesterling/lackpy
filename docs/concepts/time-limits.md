@@ -71,6 +71,10 @@ profile error.
 In a literate document, the limit applies to each cell, not to the whole
 document.
 
+`stepy --timeout SECONDS` sets the same limit: for the whole run of a program,
+and for each cell of a document. A timeout gives exit code 124, as `timeout(1)`
+does. To limit the whole run of a document, run `stepy` under `timeout(1)`.
+
 The limit is not part of the program text. Plain `python3` running the same code has
 no limit.
 
@@ -117,8 +121,8 @@ checkpoints need `fork`. The language stops a program from creating a process.
 
 ## Literate documents
 
-A timeout in a literate document stops one cell. The document goes on, and the
-names that the cell would bind become holes. See
+A timeout in a literate document is a failure. It stops the cell, and the
+document stops there: no later cell runs. The session stays open. See
 [Time limits and retries](literate.md#time-limits-and-retries) for a measured
 example, the rule that decides where a retry resumes, and the `session_id`
 rules.
@@ -130,7 +134,9 @@ A short summary of the rules:
 - A segment ends at any cell that can run code. Such a cell is a code cell, or a
   prose cell with an interpolation.
 - A retry resumes at `k`, the smaller of the first changed cell and the first
-  cell stopped in the last run. The cells before `k` do not run again.
+  cell that failed in the last run. The cells before `k` do not run again.
+- A cell with the fence option `rerun=no` never runs twice in one session. See
+  [rerun=no](literate.md#rerunno).
 - A longer `timeout` keeps the session. The session limit on CPU time comes from
   the profile cap.
 - Over MCP, `run_program` returns `session_id` for a literate profile. Pass it

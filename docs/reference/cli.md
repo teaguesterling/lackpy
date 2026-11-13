@@ -1,18 +1,21 @@
 # CLI Reference
 
-lackpy ships **two** command-line entry points:
+lackpy ships **three** command-line entry points:
 
 | Command | Purpose |
 |---------|---------|
 | `lackpy` | Run inference: delegate / generate / validate / create from intent, and run program files. |
+| `stepy` | Run a program or a literate document the way `python` runs a script. |
 | `lackpyctl` | Manage the workspace: init, status, toolbox, templates, providers, MCP server. |
 
 ```bash
 lackpy    [--workspace PATH] -c "<intent>" [flags]      # or: lackpy <file> [flags]
+stepy     SCRIPT.py|DOC.md [options]                    # or: stepy -c 'program text' [options]
 lackpyctl [--workspace PATH] <command> [args]
 ```
 
-Both accept `--workspace PATH` to set the project root (default: current directory).
+All three accept `--workspace PATH` to set the project root (default: current
+directory). `stepy` takes it after the script.
 
 > **Note:** `lackpy` is **flag-based**, not subcommand-based. The mode is selected by
 > flags on a single intent (`-c`): the default is *delegate* (generate + run);
@@ -203,6 +206,105 @@ with the same rules.
 ```bash
 lackpy count.py --param n=5 --param name=report
 ```
+
+---
+
+# `stepy` — run a script
+
+`stepy` runs a stepy program or a literate document as `python` runs a
+script. It generates nothing. stdout carries only what the script prints,
+stderr carries the error, and the exit code says what happened. A script
+states its interface in its [intent block](../concepts/intent.md).
+
+```bash
+stepy count_todos.py --root src --limit 5    # a program
+./count_todos.py --root src                  # a program with #!/usr/bin/env stepy
+stepy report.md --name notes                 # a literate document
+stepy -c 'print(2 + 3)'                      # program text, as python -c
+stepy count_todos.py --help                  # the interface, from the intent block
+stepy count_todos.py --check                 # validate only; run nothing
+```
+
+The extension chooses how a file runs: `.py` is a program and `.md` is a
+document. Any other extension exits 2.
+
+## Options
+
+Every option comes after the script. An option before the script exits 2.
+
+| Option | Meaning |
+|--------|---------|
+| `--help` | Print the intent block: the goal, each parameter, the declared writes and reads, and the checks. With no block, it says that the script may write nothing. `stepy --help` with no script prints the usage. |
+| `--check` | Validate, and run nothing. This covers the syntax, the language rules, the intent block and the `[params]` match. Exit 0 or 2. |
+| `--timeout SECONDS` | The time limit, capped by the profile's `max_timeout`. For a program, the limit is for the whole run. For a document, it is for each cell. To limit a whole document, use `timeout(1)`. |
+| `--profile NAME` | The profile to run under. A document runs the profile as literate. |
+| `--workspace DIR` | The workspace. The default is the current directory. |
+| `--<param> VALUE` | One option for each `[params]` key. |
+
+## Parameters
+
+Each key of `[params]` is one named option. `stepy` converts the value to the
+declared type.
+
+- A `str`, `int` or `float` parameter takes one value: `--limit 5`.
+- A `bool` parameter takes `--name` or `--no-name`, with no value.
+- A `list[str]` parameter takes the option once for each item:
+  `--path a.py --path b.py`.
+- There are no positional arguments and no `--param`.
+- A script with no `[params]` takes no parameter options.
+
+An unknown option, a missing value or a value that does not convert exits 2,
+and nothing runs. Measured on 2026-11-12:
+
+```text
+stepy: --limit takes a value of type int, not 'five'.
+stepy: 'src' is a positional argument, and stepy takes none. Give each parameter as --<key> VALUE.
+stepy: --colour: this script has no such option. Its options are: --help, --check, --timeout, --profile, --workspace, --root, --out, --limit.
+```
+
+## Writes
+
+`stepy` enforces the declared writes of the intent block. A script with no
+block, or with no `writes` key, may write nothing. See
+[Declared writes](../concepts/paths.md#declared-writes). `lackpy` does not
+enforce declared writes.
+
+## Output and exit codes
+
+stdout carries only what the program or the cells print. The prose of a
+document and the value of the last expression do not print. A failure prints
+what the failed program or cell printed before it failed, then `stepy: ` and
+the error on stderr. A document stops at its first failure (see
+[Failures](../concepts/literate.md#failures)).
+
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | The script succeeded. |
+| 1 | The program or a cell failed, or a write was refused. |
+| 2 | A usage or validation error. Nothing ran. |
+| 124 | A timeout, as `timeout(1)` uses. |
+
+Measured on 2026-11-12. `err.md` is the document in
+[Failures](../concepts/literate.md#failures):
+
+```text
+$ stepy -c 'print(1)
+x = [][0]'
+1
+stepy: list index out of range
+[exit 1]
+$ stepy err.md
+scores ready
+stepy: cell 0 (scores = {"ann": 3}): KeyError: 'bob'
+[exit 1]
+$ stepy -c 'for i in iter(int, 1):
+    pass' --timeout 1
+stepy: timeout: the run took longer than 1 s and was stopped
+[exit 124]
+```
+
+For a program, the error does not name the line that failed, and it does not
+name the exception type. For a document, the error names the cell.
 
 ---
 

@@ -252,6 +252,59 @@ lackpy resolves the literal start of each deny pattern, such as `~/.ssh` in
   the program fails only when it runs. Pass a path in the `params` literal
   instead.
 
+## Declared writes
+
+Under `stepy`, a script can write only the files that its
+[intent block](intent.md) declares in `writes`. This narrows the path policy.
+It never widens it: a write must pass the rules above and match a declared
+glob.
+
+- **No block, or no `writes` key:** the script may write nothing.
+- **Glob form:** the glob syntax of the rules above, relative to the
+  workspace, with one difference. A glob with no slash is a file at the
+  workspace root: `report.txt` is only `./report.txt`. Write
+  `**/report.txt` for any depth. Settings rules keep their own meaning for a
+  bare file name.
+- **Parameters:** `{name}` in a glob is filled in with the value of the
+  parameter `name` before the run. Only a `str`, `int` or `float` parameter
+  can fill a glob. A value that is empty, `.` or `..`, that has a `..`
+  segment, or that has a glob character (`*`, `?`, `[`, `]`) is refused, and
+  `stepy` exits 2 before anything runs.
+- **Operations:** every write that the path policy checks must match a glob.
+  A rename checks both ends. `mkdir` is allowed for a directory that holds a
+  path that some glob can match. So `writes = ["out/*.txt"]` allows
+  `Path("out").mkdir(parents=True)`.
+- **Documents:** the block in the first code cell covers every cell.
+- **Only `stepy`:** `lackpy`, `lackpyctl` and the MCP tools do not enforce
+  declared writes. A script that `stepy` refuses can write under those
+  commands.
+
+A write that matches no glob is a refusal. This document declares
+`out/{name}.txt`, then writes `summary.txt`. Measured on 2026-11-12, with
+`<workspace>` for the workspace path. The first cell printed `3 lines`, and
+`mkdir("out")` was allowed:
+
+```text
+3 lines
+stepy: refused: writing <workspace>/summary.txt (it matches no declared writes glob (out/notes.txt); to allow it, add a glob that matches it to writes in the intent block) is not allowed in lackpy
+```
+
+A program with no block gets this refusal for any write:
+
+```text
+stepy: writing <workspace>/x.txt (there are no declared writes; to allow it, add a glob that matches it to writes in the intent block) is not allowed in lackpy
+```
+
+A parameter value that would widen a glob exits 2:
+
+```text
+stepy: --out '../escape.txt' cannot fill the declared writes glob '{out}': it has a '..' segment. Give a plain name.
+stepy: --out 'out/*.txt' cannot fill the declared writes glob '{out}': it has the glob character '*'. Give a plain name.
+```
+
+From Python, `LackpyService.run_program(..., declared_writes=[...])` applies
+the same narrowing. The globs must already be filled in.
+
 ## Path members
 
 A program can use these `Path` members. The [style guide](../reference/style-guide.md#path-members)

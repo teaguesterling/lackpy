@@ -66,6 +66,8 @@ nav:
     - Architecture: concepts/architecture.md
     - Language Spec: concepts/language-spec.md
     - File Access: concepts/paths.md
+    - Literate Documents: concepts/literate.md
+    - Intent Block: concepts/intent.md
     - Profiles: concepts/profiles.md
     - Time Limits: concepts/time-limits.md
     - Inference Pipeline: concepts/inference.md

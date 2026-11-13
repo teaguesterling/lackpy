@@ -24,12 +24,18 @@ This page uses one term for each concept.
 | prose cell | The markdown text between code cells. |
 | session | The state of one run: the namespace, the program so far, and the trace. |
 | program | The code of all code cells that have run, joined in order. |
-| refusal | An error from the path policy. It ends the document. |
+| failure | A cell that raises an exception, times out, reads a name that is not bound, fails validation, or passes the effect ceiling. The document stops there. |
+| refusal | An error from the path policy. It ends the document and the session. |
+
+lackpy numbers the cells of a document from 0, and prose cells count. An error
+names the cell by its number and its first line, for example
+`cell 2 (for i in iter(int, 1):)`.
 
 ## Quick example
 
 This document reads `notes.md` and reports on it. The file `notes.md` has three lines.
 
+<!-- docs-run: lackpyctl render --execute -->
 ````markdown
 # Notes summary
 
@@ -82,6 +88,7 @@ session.
 
 This document is refused, because the first cell imports `os`:
 
+<!-- docs-run: lackpyctl render --execute -->
 ````markdown title="Refused: import os"
 ```lackpy
 import os
@@ -92,25 +99,26 @@ names = os.listdir(".")
 There are {len(names)} names.
 ````
 
-The error is (measured on 2026-10-18):
+`lackpyctl render --execute` prints this (measured on 2026-11-12, exit code 1).
+The first line is the error, on stderr:
 
 ```text
-Validation failed: Forbidden name: 'os' at line 3 (use pathlib.Path); Forbidden AST node: Import at line 1 (use pathlib.Path)
+lackpyctl render --execute: cell 0 (import os): Validation failed: Forbidden name: 'os' at line 3 (use pathlib.Path); Forbidden AST node: Import at line 1 (use pathlib.Path)
+[kernel] error: Validation failed: Forbidden name: 'os' at line 3 (use pathlib.Path); Forbidden AST node: Import at line 1 (use pathlib.Path) [/kernel]
 ```
 
-The cell does not run. The name `names` stays unbound, so the prose that uses it becomes a hole (see [Holes and errors](#holes-and-errors)).
+The cell does not run, and the document stops there. The prose after it does
+not print (see [Failures](#failures)).
 
 A later cell can bind a name again, as a script does (`rows = rows[1:]`).
 lackpy does not run the earlier cells again for this: each cell keeps the
-value it saw, as under `python3`. lackpy runs a cell again only when a name
-that the cell waited for heals: a hole, an error value or an unavailable value
-becomes a value (see [Forward references](#forward-references)).
+value it saw, as under `python3`.
 
 `LackpyService.validate` with a literate profile checks a document cell by
-cell in the same way, without running it. It does not resolve names. So a
-cell that a run skips for a hole still joins the program in `validate`, and
-a later import of the same name can be reported there although the run
-accepts it (inferred from the code, not measured).
+cell in the same way, without running it. It does not check that a name is
+bound before a cell reads it. Measured on 2026-11-12: `validate` and
+`stepy --check` both accept a document whose first prose cell reads a name
+that a later cell binds. The run stops at that prose cell.
 
 ## Document format
 
@@ -135,7 +143,8 @@ markdown, because `---` is a rule in CommonMark.
     lackpy parses and stores the frontmatter fields and the per-block options
     (`echo=false`, `output=all`). They do not yet change how a document runs.
     Measured on 2026-10-18: a cell with `echo=false output=all` prints the
-    same text as a cell without the options.
+    same text as a cell without the options. The one option that lackpy
+    applies is `rerun` (see [rerun=no](#rerunno)).
 
 ### Prose cells
 
@@ -151,6 +160,42 @@ conversion or a format spec, for example `{total:.2f}`.
 
 A code cell is a block fenced with `` ```lackpy ``. A block in a `<compute>` tag
 is the same cell. The model prompt uses that form.
+
+### The intent block
+
+The first code cell can start with an intent block. The block states the goal
+of the document, its parameters and the files it may write. The block in the
+first code cell covers the whole document. See [Intent block](intent.md).
+
+### rerun=no
+
+A resume can run a cell again (see [Retry by resubmitting](#retry-by-resubmitting)).
+For a cell that writes a file, a second run writes the file again. The fence
+option `rerun=no` forbids that:
+
+````markdown
+```lackpy rerun=no
+from pathlib import Path
+
+Path("log.txt").write_text("written once\n")
+```
+````
+
+The `<compute>` form takes the same option as an attribute: `<compute rerun="no">`.
+
+- `rerun=yes` is the default. A resume can run the cell again.
+- With `rerun=no`, after the cell's code has started in a session, no later
+  submission in that session can run it again. This is true if the cell
+  succeeded or failed.
+- A submission that would run the cell again is refused before anything runs.
+  The result has `error_phase="refused"`. The session stays open.
+- A new session is a new run. `rerun=no` does not reach across sessions.
+- `stepy` and `lackpyctl render --execute` have no resume, so `rerun` changes
+  nothing there.
+- A value other than `yes` or `no` is a validation error.
+
+lackpy does not say what to do after such a refusal. The prose of the document
+says it. [Retry by resubmitting](#retry-by-resubmitting) shows a measured run.
 
 ## Annotations
 
@@ -173,6 +218,7 @@ body.
 Each annotation that uses a file goes through `Path`, so the path policy
 checks it. `@write` makes missing parent directories.
 
+<!-- docs-run: lackpyctl render --execute -->
 ````markdown
 ```lackpy @write(out/report.txt)
 Status: draft
@@ -207,6 +253,7 @@ after an annotation cell, is wrong.
 
 This document is refused:
 
+<!-- docs-run: lackpyctl render --execute -->
 ````markdown title="Refused: second import of Path"
 ```lackpy @read(notes.md)
 ```
@@ -218,11 +265,17 @@ size = len(Path("notes.md").read_text())
 ```
 ````
 
-The error is (measured on 2026-10-24). An earlier cell is named by its number
-in the document (prose cells count, from 1) and the document line of its fence:
+`lackpyctl render --execute` prints this (measured on 2026-11-12, exit code 1).
+The `@read` cell runs and prints the file. The error names the earlier cell
+by its number and its first line:
 
 ```text
-Validation failed: Rebinding of imported name: 'Path' at line 1 (imported at line 1 of document cell 1 (line 1)) (annotation cells (@read, @write) import Path for the document; use Path without importing it again)
+lackpyctl render --execute: cell 1 (from pathlib import Path): Validation failed: Rebinding of imported name: 'Path' at line 1 (imported at line 1 of cell 0 (read)) (annotation cells (@read, @write) import Path for the document; use Path without importing it again)
+# Release notes
+line two
+line three
+
+[kernel] error: Validation failed: Rebinding of imported name: 'Path' at line 1 (imported at line 1 of cell 0 (read)) (annotation cells (@read, @write) import Path for the document; use Path without importing it again) [/kernel]
 ```
 
 ### @diff
@@ -258,18 +311,29 @@ next part with the values in view. In a one-shot run through `run_program`,
 a `@continue` cell does not stop the run. Measured on 2026-10-18: the prose
 after it printed.
 
-## Holes and errors
+## Failures
 
-A name that no cell binds yet is a hole. lackpy does not stop. It skips the
-cell that needs the name, and it reports the hole.
+A document is a procedure, and each cell is a step. A step can start only when
+the steps before it succeeded. So a document stops at its first failure:
 
-An ordinary error in a cell binds the names of that cell to an error value.
-A later cell that uses an error value is skipped, and the run goes on. This
-document has one error (measured on 2026-10-18):
+- The failed cell stops. What it printed before the failure stays in the output.
+- No later cell runs, and no later cell prints.
+- The result has `success=False`. The error names the cell and the cause.
+- A prose expression that raises is a failure at its place in the document.
+- A session stays open after a failure, so the caller can correct the
+  document and resume (see [Retry by resubmitting](#retry-by-resubmitting)).
+  A refusal is different: it ends the session.
 
+This applies to every route that runs a document: `stepy`, `lackpyctl render --execute`,
+`run_program`, the MCP tools and `literate_agent`.
+
+This document has one error:
+
+<!-- docs-run: lackpyctl render --execute -->
 ````markdown
 ```lackpy
 scores = {"ann": 3}
+print("scores ready")
 best = scores["bob"]
 ```
 
@@ -282,23 +346,27 @@ count = len(scores)
 Count is {count}.
 ````
 
-lackpy prints this. The run reports `success=False`.
+`lackpyctl render --execute` prints this (measured on 2026-11-12, exit code 1):
 
 ```text
-[kernel] error: KeyError: 'bob' — bound as error value: best [/kernel]
-[kernel] holes: cell skipped (blocked by best) [/kernel]
-
-Count is 1.
+lackpyctl render --execute: cell 0 (scores = {"ann": 3}): KeyError: 'bob'
+scores ready
+[kernel] error: KeyError: 'bob' [/kernel]
 ```
+
+The cell printed `scores ready` before the error, so that line stays. The cell
+`count = len(scores)` does not depend on `best`, but it does not run. lackpy does
+not decide which later cells are still valid.
 
 The `[kernel] ... [/kernel]` lines are notes from lackpy. The parser ignores
 them if a document with notes is read again.
 
-### Forward references
+### A name must be bound before a cell reads it
 
-A document can use a name before the cell that binds it. This document does that
-(measured on 2026-10-18):
+A cell that reads a name that no earlier cell binds is a failure. Put the cell
+that binds the name first. This document reads `total` too early:
 
+<!-- docs-run: lackpyctl render --execute -->
 ````markdown
 The total is {total}.
 
@@ -309,15 +377,15 @@ total = 3 + 4
 Done.
 ````
 
-This is what happens:
+`lackpyctl render --execute` prints this (measured on 2026-11-12, exit code 1):
 
-1. The first prose cell finds the hole `total`. lackpy skips the cell.
-2. The code cell binds `total`.
-3. lackpy re-runs the first prose cell, because the name exists now.
-4. The run still reports the hole. The result has `success=False`, and the error is `hole: 'total' unbound`.
+```text
+lackpyctl render --execute: cell 0 (The total is {total}.): the name 'total' is not bound. Bind it in an earlier cell
+[kernel] the name 'total' is not bound. Bind it in an earlier cell [/kernel]
+```
 
-The text of the model prompt about forward references is under review. This
-page states what the code does, and it does not say which wording is correct.
+The model prompt for documents states the same rule: a cell comes after the
+cells whose names it reads, and a failure stops the document.
 
 ## Refusal
 
@@ -365,7 +433,9 @@ cell before it.
 Measured on 2026-10-18: for a document with `x = 2` in one cell and
 `x + 1` in the next, the output is `3`. If a later cell is `y = 5`, the output is `None`.
 
-The rendered document is in the `stdout` field of the result.
+The rendered document is in the `stdout` field of the result. The `printed`
+field holds only what the cells printed, with no prose. `stepy` writes
+`printed` to its stdout.
 
 ## Differences from python3
 
@@ -401,6 +471,10 @@ The same document runs through each of these routes:
 - `lackpyctl render --execute NOTES.md`. This runs the document under the
   workspace and prints the executed result. Use `--profile NAME` to pick a
   profile and `--base-dir DIR` to pick the workspace.
+- `stepy NOTES.md`. This prints only what the cells print, and it enforces the
+  declared writes of the intent block. See [`stepy`](../reference/cli.md#stepy-run-a-script).
+  `lackpyctl render --execute` and `stepy` need no `execution = "literate"`
+  profile: they run the named profile, or the default profile, as literate.
 
 `lackpyctl render` without `--execute` runs nothing. It only converts the
 document to markdown.
@@ -424,16 +498,39 @@ is a profile error, and the run does not start.
 
 Two mechanisms apply, in two layers:
 
-1. A static check looks at each cell before it runs. If it sees a write, it
-   marks the names as unavailable and skips the cell. The document goes on.
-   Measured on 2026-10-18: a cell with `Path("c.txt").write_text("x")` was
-   skipped with `effect ceiling exceeded: world-coupling w=3 exceeds ceiling w=1`, and the
-   file was not written. The check also found `q = Path` followed by `q("c.txt").write_text("x")`.
+1. A static check looks at each cell before it runs. If it sees a write, the
+   cell does not run, and this is a failure: the document stops there.
+   The check also finds `q = Path` followed by `q("c.txt").write_text("x")`
+   (measured on 2026-10-18).
 2. The path policy refuses a write that the static check did not find. This
    is the boundary. The static check refuses earlier, and it never allows more
    than the policy allows.
 
 The static check is a planner over the policy. It is not a second policy.
+
+This document runs under the `docs-readonly` profile above:
+
+<!-- docs-run: lackpyctl render --execute --profile docs-readonly -->
+````markdown
+Before.
+
+```lackpy
+from pathlib import Path
+
+Path("c.txt").write_text("x")
+```
+
+After.
+````
+
+`lackpyctl render --execute --profile docs-readonly` prints this (measured on
+2026-11-12, exit code 1). lackpy does not write `c.txt`:
+
+```text
+lackpyctl render --execute: cell 1 (from pathlib import Path): effect ceiling exceeded: world-coupling w=3 exceeds ceiling w=1: the profile is read-only (policy.read_only = true)
+Before.
+[kernel] effect ceiling exceeded: world-coupling w=3 exceeds ceiling w=1: the profile is read-only (policy.read_only = true) [/kernel]
+```
 
 ## Time limits and retries
 
@@ -441,12 +538,14 @@ Every cell has a time limit. The page [Time limits](time-limits.md) gives the
 full rules. This section shows what a document sees.
 
 A code cell, or a prose cell with an interpolation, that runs longer than the
-limit is stopped. This is a timeout. A timeout is not a refusal: the session
-stays open, the document goes on, and the caller can retry.
+limit is stopped. This is a timeout. A timeout is a failure, so the document
+stops there. A timeout is not a refusal: the session stays open, and the
+caller can retry.
 
 This document has a cell that never ends. The first code cell writes a file.
 The second code cell loops:
 
+<!-- docs-run: lackpyctl render --execute --timeout 2 -->
 ````markdown title="A cell that never ends"
 # Stuck cell
 
@@ -465,26 +564,23 @@ for i in iter(int, 1):
 The total is {total}.
 ````
 
-`lackpyctl render --execute --profile docs --timeout 2` printed this
-(measured on 2026-10-25, run `lackpyctl:173`, exit code 1). The first line
-is the error message, and the rest is the rendered document:
+`lackpyctl render --execute --timeout 2` prints this (measured on 2026-11-12,
+exit code 1). The first line is the error, on stderr, and the rest is the
+rendered document:
 
 ```text
-lackpyctl render --execute: timeout: cell 3 took longer than 2 s and was stopped; hole: cell blocked by total
+lackpyctl render --execute: cell 2 (for i in iter(int, 1):): timeout: the cell took longer than 2 s and was stopped
 # Stuck cell
-
-[kernel] timeout: cell 3 took longer than 2 s and was stopped [/kernel]
-[kernel] holes: cell skipped (blocked by total) [/kernel]
+[kernel] timeout: the cell took longer than 2 s and was stopped [/kernel]
 ```
 
 Four points to read in this output:
 
-- The cell number counts every cell of the document, prose included. The title
-  line is cell 1. So the looping cell is cell 3.
-- The cell that was stopped binds each name it would have bound to a hole. The
-  prose `{total}` is skipped, as it is after an error (see
-  [Holes and errors](#holes-and-errors)).
-- Cell 2 is not affected. The state of the document is the state from before the
+- The cell number counts every cell of the document from 0, prose included.
+  The title line is cell 0. So the looping cell is cell 2.
+- The prose `{total}` after the stopped cell does not print. The document
+  stopped at cell 2 (see [Failures](#failures)).
+- Cell 1 is not affected. The state of the document is the state from before the
   stopped cell.
 - If the stopped cell wrote a file before the stop, the note names it:
   `; it wrote log.txt before it was stopped`. The trace has the writes that
@@ -493,7 +589,7 @@ Four points to read in this output:
 
 ### Retry by resubmitting
 
-A timeout ends no session, so the caller retries. The caller sends the full
+A failure ends no session, so the caller retries. The caller sends the full
 corrected document. lackpy does not retry for the caller.
 
 A document runs in a session worker. The worker takes one checkpoint (a fork of
@@ -504,7 +600,7 @@ interpolation runs no code, so it takes no checkpoint.
 A retry resumes at the cell `k`, where `k` is the smaller of two numbers:
 
 - the first cell whose text changed since the last submission;
-- the first cell that was stopped in the last run.
+- the first cell that failed in the last run (a timeout is a failure).
 
 The cells before `k` do not run again, so their writes do not repeat. The
 resume starts at the checkpoint of the segment that holds `k`. The comparison
@@ -522,46 +618,50 @@ The document runs fresh in these cases:
 A short script submitted a document with two code cells to one service, using
 `LackpyService.run_program`. The first code cell appends a line to `log.txt`
 and sets `total = 5`. The second code cell loops. The script made four calls
-with `profile="docs"`. Calls 2 to 4 passed the `session_id` of call 1:
+with `profile=Profile(execution="literate")`. Calls 2 to 4 passed the `session_id` of call 1:
 
 1. the document with the looping second code cell, with `timeout=2`;
 2. the same document with the second code cell rewritten as `total = total * 2`;
 3. the document with the first code cell changed (`total = 7`);
 4. the document of call 2 again, after `close_session`.
 
-The script labels the code cells "cell 1" and "cell 2" in its own text, which
-counts code cells only. The `[kernel]` note counts every cell, and the title
-is cell 1 of the document. The output below
-was measured on 2026-10-25 with the script run through `blq exec` (run
-`python:175`). It is pasted without change:
+The document has a title, so its code cells are cells 1 and 2. The script then
+ran the same four calls again, with `rerun=no` on cell 1. The output below was
+measured on 2026-11-12. It is pasted without change, except for two things: the
+session ids are `<id>`, and the lines for `printed` are left out (each was empty).
 
 ```text
---- 1. cell 2 loops, timeout 2 s: success=False error_phase=timeout session_id=set
-# Retry
-
-[kernel] timeout: cell 3 took longer than 2 s and was stopped [/kernel]
-[kernel] holes: cell skipped (blocked by total) [/kernel]
-log.txt: ['cell 1 ran']
---- 2. cell 2 rewritten, same session_id: success=True error_phase=None session_id=set
-# Retry
-
-
-The total is 10.
-log.txt: ['cell 1 ran']
---- 3. cell 1 changed, same session_id: success=True error_phase=None session_id=set
-# Retry
-
-
-The total is 14.
-log.txt: ['cell 1 ran', 'cell 1 ran']
+===== no option
+--- 1. cell 2 loops, timeout 2 s: success=False error_phase=timeout
+    error: cell 2 (for i in iter(int, 1):): timeout: the cell took longer than 2 s and was stopped
+    log.txt: ['cell 1 ran']
+--- 2. cell 2 rewritten, same session_id: success=True error_phase=None
+    log.txt: ['cell 1 ran']
+--- 3. cell 1 changed, same session_id: success=True error_phase=None
+    log.txt: ['cell 1 ran', 'cell 1 ran']
 close_session: True
-4. closed id: success=False error_phase=None error=unknown or expired session_id '1d80cceb88f849d8bf0003bb0858c9bf'
+--- 4. closed id: success=False error_phase=None
+    error: unknown or expired session_id '<id>'
+    log.txt: ['cell 1 ran', 'cell 1 ran']
+===== rerun=no on cell 1
+--- 1. cell 2 loops, timeout 2 s: success=False error_phase=timeout
+    error: cell 2 (for i in iter(int, 1):): timeout: the cell took longer than 2 s and was stopped
+    log.txt: ['cell 1 ran']
+--- 2. cell 2 rewritten, same session_id: success=True error_phase=None
+    log.txt: ['cell 1 ran']
+--- 3. cell 1 changed, same session_id: success=False error_phase=refused
+    error: cell 1 (from pathlib import Path) has rerun=no and has already run in this session; start a new session to run it again
+    log.txt: ['cell 1 ran']
+close_session: True
+--- 4. closed id: success=False error_phase=None
+    error: unknown or expired session_id '<id>'
+    log.txt: ['cell 1 ran']
 ```
 
-Call 2 resumed at the stopped cell. The first code cell did not run again:
-`log.txt` has one line. Call 3 changed the first code cell, so the document
-ran fresh, and `log.txt` has two lines. Call 4 shows the error for a closed
-session.
+Call 2 resumed at the stopped cell. Cell 1 did not run again, so `log.txt` has
+one line. Call 3 changed cell 1, so the document ran fresh, and `log.txt` has
+two lines. With `rerun=no`, call 3 is refused before anything runs, and
+`log.txt` keeps one line. Call 4 shows the error for a closed session.
 
 These cases are not resumed. They run fresh:
 
@@ -615,11 +715,13 @@ Both are gone.
 
 A session owns one namespace. Each cell goes through these steps:
 
-1. **Holes.** If the cell uses a name that no cell binds, lackpy opens a hole
-   and skips the cell.
+1. **Names.** If the cell reads a name that no earlier cell binds, the cell
+   fails.
 2. **Validation.** The program so far, followed by the cell, must validate.
 3. **Execution.** The cell runs in the session namespace. The path policy checks
    each file access. lackpy captures the output.
+
+A failure at any step stops the document.
 
 Prose is not exec'd code. lackpy splits a prose cell into text and
 expressions, validates each expression, and evaluates it in the session. A
